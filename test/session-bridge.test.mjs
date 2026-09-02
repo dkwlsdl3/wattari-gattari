@@ -1,0 +1,40 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { SessionBridge } from "../src/session-bridge.mjs";
+
+function provider(name, sessions, calls = []) {
+  return {
+    name,
+    async list(options) { calls.push(["list", options]); return sessions; },
+    async send(session, message, options) { calls.push(["send", session, message, options]); return { target: session.id, requestId: options.requestId }; },
+    async ask(session, message, options) { calls.push(["ask", session, message, options]); return { target: session.id, requestId: options.requestId, reply: "yes" }; },
+  };
+}
+
+test("discovery keeps healthy provider results and exposes warnings", async () => {
+  const claude = provider("claude", [{ id: "claude:1", provider: "claude", name: "one", updatedAt: 1 }]);
+  const codex = { name: "codex", async list() { throw Object.assign(new Error("offline"), { code: "DOWN" }); } };
+  const result = await new SessionBridge({ providers: [claude, codex] }).discover();
+  assert.deepEqual(result.sessions.map((row) => row.id), ["claude:1"]);
+  assert.deepEqual(result.warnings, [{ provider: "codex", code: "DOWN", message: "offline" }]);
+});
+
+test("provider-prefixed target limits discovery and ask is one request", async () => {
+  const calls = [];
+  const session = { id: "codex:full", nativeId: "full", sessionId: "full", provider: "codex", name: "proof" };
+  const bridge = new SessionBridge({ providers: [provider("claude", [], calls), provider("codex", [session], calls)] });
+  const result = await bridge.ask("codex:full", "hello", { timeoutMs: 1234 });
+  assert.equal(result.reply, "yes");
+  assert.equal(calls.filter(([kind]) => kind === "list").length, 1);
+  assert.equal(calls.at(-1)[0], "ask");
+  assert.equal(calls.at(-1)[3].timeoutMs, 1234);
+});
+
+test("ambiguous unprefixed name fails with exact candidates", async () => {
+  const bridge = new SessionBridge({ providers: [
+    provider("claude", [{ id: "claude:a", provider: "claude", name: "same" }]),
+    provider("codex", [{ id: "codex:b", provider: "codex", name: "same" }]),
+  ] });
+  await assert.rejects(bridge.send("same", "hello"), { code: "TARGET_AMBIGUOUS" });
+});

@@ -1,82 +1,37 @@
 import assert from "node:assert/strict";
-import { PassThrough } from "node:stream";
+import path from "node:path";
 import test from "node:test";
 
 import { runCli } from "../src/cli.mjs";
 
-function capture() {
-  const stream = new PassThrough();
-  let text = "";
-  stream.on("data", (chunk) => { text += chunk.toString("utf8"); });
-  return { stream, text: () => text };
-}
+function output() { let value = ""; return { write(chunk) { value += chunk; }, get value() { return value; } }; }
 
-test("runs version and invalid argument paths without exiting the process", async () => {
-  const stdout = capture();
-  const stderr = capture();
-  assert.equal(await runCli(["--version"], { stdout: stdout.stream, stderr: stderr.stream }), 0);
-  assert.equal(stdout.text(), "0.3.0\n");
-  assert.equal(await runCli(["unknown"], { stdout: stdout.stream, stderr: stderr.stream }), 2);
-  assert.match(stderr.text(), /Unknown argument/);
+test("list renders provider-prefixed ids", async () => {
+  const stdout = output();
+  const bridge = { async discover() { return { sessions: [{ id: "claude:1", status: "idle", name: "proof", cwd: "/tmp" }], warnings: [] }; } };
+  assert.equal(await runCli([], { stdout, stderr: output(), bridge }), 0);
+  assert.match(stdout.value, /^claude:1\tidle\tproof\t\/tmp/);
 });
 
-test("routes doctor and TUI through explicit interfaces", async () => {
-  const stdout = capture();
-  let doctorCalls = 0;
-  let consoleCalls = 0;
-  assert.equal(await runCli(["doctor"], {
-    stdout: stdout.stream,
-    doctor: async ({ output }) => {
-      doctorCalls += 1;
-      output.write("OK doctor\n");
-      return { exitCode: 0 };
-    },
-  }), 0);
-  assert.equal(await runCli([], {
-    stdout: stdout.stream,
-    runConsole: async () => {
-      consoleCalls += 1;
-      return { exitCode: 0 };
-    },
-  }), 0);
-  assert.equal(doctorCalls, 1);
-  assert.equal(consoleCalls, 1);
+test("text list keeps provider warnings off stdout", async () => {
+  const stdout = output();
+  const stderr = output();
+  const bridge = { async discover() { return { sessions: [{ id: "codex:1", status: "idle", name: "ok", cwd: "/tmp" }], warnings: [{ provider: "claude", message: "offline" }] }; } };
+  assert.equal(await runCli([], { stdout, stderr, bridge }), 0);
+  assert.doesNotMatch(stdout.value, /warning/);
+  assert.match(stderr.value, /warning\tclaude\toffline/);
 });
 
-test("peer commands use a reachable broker without touching daemon lifecycle", async () => {
-  const stdout = capture();
-  let ensureCalls = 0;
-  const request = async (method) => {
-    assert.equal(method, "list_agents");
-    return [{ id: "codex:one", status: "idle", name: "one" }];
-  };
-
-  assert.equal(await runCli(["agents"], {
-    stdout: stdout.stream,
-    request,
-    ensureDaemon: async () => { ensureCalls += 1; },
-  }), 0);
-  assert.equal(ensureCalls, 0);
-  assert.equal(stdout.text(), "codex:one\tidle\tone\n");
+test("ask prints exactly the peer reply", async () => {
+  const stdout = output();
+  const bridge = { async ask(target, message, options) { assert.equal(target, "codex:x"); assert.equal(message, "ping"); assert.equal(options.timeoutMs, 1000); return { reply: "PONG" }; } };
+  assert.equal(await runCli(["ask", "codex:x", "ping", "--timeout", "1"], { stdout, stderr: output(), bridge }), 0);
+  assert.equal(stdout.value, "PONG\n");
 });
 
-test("peer commands start the daemon once only when the broker is absent", async () => {
-  const stdout = capture();
-  let requestCalls = 0;
-  let ensureCalls = 0;
-  const request = async (method) => {
-    requestCalls += 1;
-    if (requestCalls === 1) throw Object.assign(new Error("missing"), { code: "ENOENT" });
-    assert.equal(method, "ask_agent");
-    return { reply: "answer" };
-  };
-
-  assert.equal(await runCli(["ask", "codex:one", "question"], {
-    stdout: stdout.stream,
-    request,
-    ensureDaemon: async () => { ensureCalls += 1; },
-  }), 0);
-  assert.equal(requestCalls, 2);
-  assert.equal(ensureCalls, 1);
-  assert.equal(stdout.text(), "answer\n");
+test("open delegates to the native Agents command", async () => {
+  let seen;
+  const code = await runCli(["open", "codex"], { stdout: output(), stderr: output(), bridge: {}, launcher: async (provider, options) => { seen = [provider, options.cwd]; return { code: 7 }; } });
+  assert.equal(code, 7);
+  assert.deepEqual(seen, ["codex", path.resolve(process.cwd())]);
 });

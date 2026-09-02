@@ -8,17 +8,7 @@ Set Width 1200
 Set Height 720
 Set TypingSpeed 35ms
 
-Type "npm run demo:tui"
+Type "npm run demo"
 Enter
-Wait+Screen /session wrapper/
-Sleep 2s
-
-Down
-Sleep 1s
-Enter
-Wait+Screen /Native codex TUI/
-Sleep 2s
-
-Wait+Screen /session wrapper/
-Sleep 1s
-Ctrl+C
+Wait+Screen /DEMO_OK/
+Sleep 3s

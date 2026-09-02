@@ -4,87 +4,80 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ensureWagaDaemon, stopWagaDaemon } from "./waga-background.mjs";
 import { parseCliArgs } from "./cli-options.mjs";
-import { CLI_NAME, VERSION } from "./product.mjs";
-import { request as brokerRequest } from "./client.mjs";
 import { runDoctor } from "./doctor.mjs";
+import { openNativeAgents } from "./native-launcher.mjs";
+import { CLI_NAME, VERSION } from "./product.mjs";
+import { ClaudeProvider } from "./providers/claude.mjs";
+import { CodexProvider } from "./providers/codex.mjs";
+import { SessionBridge } from "./session-bridge.mjs";
 
 function usage() {
-  return `${CLI_NAME} [tui] [--cwd PATH]\n${CLI_NAME} agents\n${CLI_NAME} ask <session-id-or-name> <task>\n${CLI_NAME} doctor\n${CLI_NAME} stop\n${CLI_NAME} --version`;
+  return [
+    `${CLI_NAME} [list] [--provider claude|codex] [--cwd PATH] [--json]`,
+    `${CLI_NAME} send <session-id-or-name> <message> [--cwd PATH]`,
+    `${CLI_NAME} ask <session-id-or-name> <message> [--timeout SEC] [--cwd PATH]`,
+    `${CLI_NAME} open <claude|codex> [--cwd PATH]`,
+    `${CLI_NAME} doctor`,
+    `${CLI_NAME} --version`,
+  ].join("\n");
+}
+
+function defaultBridge() {
+  return new SessionBridge({ providers: [new ClaudeProvider(), new CodexProvider()] });
+}
+
+function writeList(output, errorOutput, { sessions, warnings }, json) {
+  if (json) {
+    output.write(`${JSON.stringify({ sessions, warnings }, null, 2)}\n`);
+    return;
+  }
+  for (const session of sessions) output.write(`${session.id}\t${session.status}\t${session.name}\t${session.cwd}\n`);
+  for (const warning of warnings) errorOutput.write(`warning\t${warning.provider}\t${warning.message}\n`);
 }
 
 export async function runCli(args = process.argv.slice(2), {
   stdout = process.stdout,
   stderr = process.stderr,
-  env = process.env,
-  changeDirectory = process.chdir,
-  ensureDaemon = ensureWagaDaemon,
-  stopDaemon = stopWagaDaemon,
-  request = brokerRequest,
+  bridge = defaultBridge(),
   doctor = runDoctor,
-  runConsole = async () => {
-    const { runSessionConsole } = await import("./global-session-console.mjs");
-    return runSessionConsole();
-  },
+  launcher = openNativeAgents,
 } = {}) {
-  async function requestWithDaemon(method, params) {
-    try {
-      return await request(method, params);
-    } catch (error) {
-      if (error?.code !== "ENOENT" && error?.code !== "ECONNREFUSED") throw error;
-      await ensureDaemon();
-      return request(method, params);
-    }
-  }
-
   let options;
-  try {
-    options = parseCliArgs(args);
-  } catch (error) {
-    stderr.write(`${error.message}\n${usage()}\n`);
+  try { options = parseCliArgs(args); }
+  catch (error) { stderr.write(`${error.message}\n${usage()}\n`); return 2; }
+
+  const cwd = path.resolve(options.cwd ?? process.cwd());
+  if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
+    stderr.write(`Workspace is not a directory: ${cwd}\n`);
     return 2;
   }
 
-  if (options.cwd) {
-    const workspacePath = path.resolve(options.cwd);
-    if (!fs.existsSync(workspacePath) || !fs.statSync(workspacePath).isDirectory()) {
-      stderr.write(`Workspace is not a directory: ${workspacePath}\n`);
-      return 2;
+  try {
+    if (options.command === "version") stdout.write(`${VERSION}\n`);
+    else if (options.command === "help") stdout.write(`${usage()}\n`);
+    else if (options.command === "doctor") return (await doctor({ output: stdout, cwd })).exitCode;
+    else if (options.command === "list") writeList(stdout, stderr, await bridge.discover({ provider: options.provider, cwd: options.cwd ? cwd : undefined }), options.json);
+    else if (options.command === "send") {
+      const result = await bridge.send(options.target, options.message, { cwd: options.cwd ? cwd : undefined });
+      stdout.write(options.json ? `${JSON.stringify(result)}\n` : `sent\t${result.target}\t${result.requestId}\n`);
+    } else if (options.command === "ask") {
+      const result = await bridge.ask(options.target, options.message, { cwd: options.cwd ? cwd : undefined, timeoutMs: options.timeoutMs });
+      stdout.write(options.json ? `${JSON.stringify(result)}\n` : `${result.reply}\n`);
+    } else if (options.command === "open") {
+      const result = await launcher(options.provider, { cwd });
+      return result.code;
     }
-    changeDirectory(workspacePath);
+    return 0;
+  } catch (error) {
+    stderr.write(`${error.code ? `${error.code}: ` : ""}${error.message}\n`);
+    return 1;
   }
-
-  if (options.command === "version") stdout.write(`${VERSION}\n`);
-  else if (options.command === "help") stdout.write(`${usage()}\n`);
-  else if (options.command === "doctor") return (await doctor({ output: stdout })).exitCode;
-  else if (options.command === "stop") {
-    const result = await stopDaemon();
-    stdout.write(result.stopped ? `Stopped daemon ${result.pid}\n` : "Daemon is not running\n");
-  } else if (options.command === "agents") {
-    const agents = await requestWithDaemon("list_agents");
-    for (const agent of agents) stdout.write(`${agent.id}\t${agent.status}\t${agent.name}\n`);
-  } else if (options.command === "ask") {
-    if (env.WAGA_PEER_HOP) {
-      throw Object.assign(new Error("peer shadow 안에서는 다른 waga 요청을 시작할 수 없습니다"), { code: "PEER_HOP_LIMIT" });
-    }
-    const result = await requestWithDaemon("ask_agent", { target: options.target, task: options.task });
-    stdout.write(`${result.reply}\n`);
-  } else {
-    return (await runConsole()).exitCode;
-  }
-  return 0;
 }
 
 function isDirectExecution() {
   if (!process.argv[1]) return false;
-  try {
-    return fileURLToPath(import.meta.url) === fs.realpathSync(process.argv[1]);
-  } catch {
-    return false;
-  }
+  try { return fileURLToPath(import.meta.url) === fs.realpathSync(process.argv[1]); } catch { return false; }
 }
 
-if (isDirectExecution()) {
-  process.exitCode = await runCli();
-}
+if (isDirectExecution()) process.exitCode = await runCli();

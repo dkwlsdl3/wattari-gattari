@@ -3,16 +3,18 @@ import test from "node:test";
 
 import { parseCliArgs } from "../src/cli-options.mjs";
 
-test("parses the global TUI, diagnostics, stop, version, and cwd forms", () => {
-  assert.deepEqual(parseCliArgs([]), { command: "tui", cwd: null });
-  assert.deepEqual(parseCliArgs(["--cwd", "/workspace"]), { command: "tui", cwd: "/workspace" });
-  assert.deepEqual(parseCliArgs(["doctor"]), { command: "doctor", cwd: null });
-  assert.deepEqual(parseCliArgs(["stop"]), { command: "stop", cwd: null });
-  assert.deepEqual(parseCliArgs(["agents"]), { command: "agents", cwd: null });
-  assert.deepEqual(parseCliArgs(["ask", "claude:abc", "check", "this"]), {
-    command: "ask", cwd: null, target: "claude:abc", task: "check this",
+test("bare CLI lists sessions and agents remains an alias", () => {
+  assert.equal(parseCliArgs([]).command, "list");
+  assert.equal(parseCliArgs(["agents"]).command, "list");
+});
+
+test("ask parses target, message, timeout, and cwd", () => {
+  assert.deepEqual(parseCliArgs(["ask", "codex:x", "hello", "there", "--timeout", "1.5", "--cwd", "/tmp"]), {
+    command: "ask", cwd: "/tmp", provider: null, timeoutMs: 1500, json: false, target: "codex:x", message: "hello there",
   });
-  assert.throws(() => parseCliArgs(["ask", "missing-task"]), { code: "INVALID_ARGUMENT" });
-  assert.deepEqual(parseCliArgs(["--version"]), { command: "version", cwd: null });
-  assert.throws(() => parseCliArgs(["unknown"]), { code: "INVALID_ARGUMENT" });
+});
+
+test("open accepts only native providers", () => {
+  assert.equal(parseCliArgs(["open", "claude"]).provider, "claude");
+  assert.throws(() => parseCliArgs(["open", "other"]), { code: "INVALID_ARGUMENT" });
 });
