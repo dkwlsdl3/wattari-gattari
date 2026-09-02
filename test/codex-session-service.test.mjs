@@ -44,6 +44,14 @@ class FakeBackend {
       async request(method, params) {
         backend.requests.push({ method, params });
         if (method === "mcpServerStatus/list") return { data: backend.mcpStatuses, nextCursor: null };
+        if (method === "account/rateLimits/read") {
+          return {
+            rateLimits: {
+              primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 1_800_000_000 },
+              secondary: { usedPercent: 40, windowDurationMins: 10_080, resetsAt: 1_800_000_000 },
+            },
+          };
+        }
         if (method === "hooks/list") {
           return {
             data: [{
@@ -90,8 +98,15 @@ class FakeBackend {
         }
         if (method === "thread/resume") {
           const thread = backend.active.find((item) => item.id === params.threadId);
-          thread.status = { type: "idle" };
-          return { thread, sandbox: backend.sandbox };
+          if (thread.status.type !== "active") thread.status = { type: "idle" };
+          return {
+            thread,
+            sandbox: backend.sandbox,
+            model: "gpt-test",
+            modelProvider: "openai",
+            reasoningEffort: "high",
+            serviceTier: "priority",
+          };
         }
         if (method === "turn/start") {
           const thread = backend.active.find((item) => item.id === params.threadId);
@@ -104,6 +119,15 @@ class FakeBackend {
             item: { id: "user-1", type: "userMessage", content: params.input },
           });
           return { turn };
+        }
+        if (method === "turn/steer") {
+          const turn = backend.turns.get(params.threadId).find((item) => item.id === params.expectedTurnId);
+          assert.equal(turn.status, "inProgress");
+          backend.items.get(params.threadId).push({
+            turnId: turn.id,
+            item: { id: `user-${backend.items.get(params.threadId).length + 1}`, type: "userMessage", content: params.input },
+          });
+          return { turnId: turn.id };
         }
         if (method === "thread/items/list") {
           if (backend.itemListHandler) return backend.itemListHandler(params);
@@ -204,6 +228,71 @@ test("keeps a managed thread visible after the screen client detaches and reconn
     { role: "user", text: "READY라고 답하세요" },
     { role: "agent", text: "READY" },
   ]);
+});
+
+test("steers and interrupts the active Codex turn instead of rejecting mid-turn input", async (t) => {
+  const backend = new FakeBackend();
+  const service = new CodexSessionService({
+    cwd: "/workspace",
+    catalogPath: testCatalogPath(t),
+    clientFactory: (options) => backend.client(options),
+  });
+  await service.connect();
+  const created = await service.createSession({ prompt: "처음 지시" });
+
+  const steered = await service.sendMessage(created.threadId, "테스트부터 보세요");
+  assert.deepEqual(steered, { id: TURN_ID, status: "inProgress" });
+  const steer = backend.requests.find((entry) => entry.method === "turn/steer");
+  assert.equal(steer.params.expectedTurnId, TURN_ID);
+  assert.equal(steer.params.input[0].text, "테스트부터 보세요");
+
+  const interrupted = await service.interruptSession(created.threadId);
+  assert.deepEqual(interrupted, { interrupted: true, threadId: THREAD_ID, turnId: TURN_ID });
+  assert.equal(backend.turns.get(THREAD_ID)[0].status, "interrupted");
+  assert.equal((await service.listSessions())[0].status, "Awaiting input");
+});
+
+test("publishes real model, context, git, rate-limit, and working-time metadata", async (t) => {
+  const backend = new FakeBackend();
+  const service = new CodexSessionService({
+    cwd: "/workspace",
+    catalogPath: testCatalogPath(t),
+    clientFactory: (options) => backend.client(options),
+  });
+  await service.connect();
+  const created = await service.createSession({ prompt: "상태 확인" });
+  backend.active[0].gitInfo = { branch: "main", sha: "abc123", originUrl: null };
+  await service.openSession(created.threadId, created);
+  for (const listener of backend.notifications) {
+    listener({
+      method: "thread/tokenUsage/updated",
+      params: {
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        tokenUsage: {
+          last: { totalTokens: 10_000 },
+          total: { totalTokens: 12_000 },
+          modelContextWindow: 200_000,
+        },
+      },
+    });
+    listener({
+      method: "account/rateLimits/updated",
+      params: { rateLimits: { primary: { usedPercent: 25 } } },
+    });
+  }
+
+  const [session] = await service.listSessions();
+  assert.equal(session.model, "gpt-test");
+  assert.equal(session.reasoningEffort, "high");
+  assert.equal(session.serviceTier, "priority");
+  assert.equal(session.gitBranch, "main");
+  assert.equal(session.tokenUsage.last.totalTokens, 10_000);
+  assert.equal(session.rateLimits.secondary.usedPercent, 40);
+  assert.equal(session.rateLimits.primary.usedPercent, 25);
+  assert.equal(session.rateLimits.primary.windowDurationMins, 300);
+  assert.equal(typeof session.workingSince, "number");
+  assert.equal(session.activeTurnId, TURN_ID);
 });
 
 test("opens a selected session without relisting all threads", async (t) => {

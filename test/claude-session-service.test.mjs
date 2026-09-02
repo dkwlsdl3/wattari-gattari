@@ -107,6 +107,49 @@ test("refuses a message while Claude is working to prevent implicit session copi
   await assert.rejects(service.sendMessage(session.threadId, "do not fork", session), { code: "TURN_IN_PROGRESS" });
 });
 
+test("interrupts a working Claude turn without hiding the resumable session", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "waga-claude-service-"));
+  t.after(() => fs.rmSync(directory, { recursive: true }));
+  const workspace = path.join(directory, "workspace");
+  fs.mkdirSync(workspace, { recursive: true });
+  const row = {
+    id: "abcdef12",
+    sessionId: "abcdef12-0000-4000-8000-000000000000",
+    cwd: workspace,
+    kind: "background",
+    status: "busy",
+    state: "working",
+    name: "busy",
+    pid: process.pid,
+    startedAt: "2026-09-02T00:00:00.000Z",
+  };
+  const calls = [];
+  const service = new ClaudeSessionService({
+    cwd: workspace,
+    claudeHome: path.join(directory, ".claude"),
+    aliasCatalogPath: path.join(directory, "aliases.json"),
+    run: async (args) => {
+      calls.push(args);
+      if (args[0] === "agents") return { stdout: JSON.stringify([row]) };
+      if (args[0] === "stop") {
+        row.status = "idle";
+        row.state = "done";
+        return { stdout: "stopped\n" };
+      }
+      throw new Error(`unexpected args: ${args.join(" ")}`);
+    },
+  });
+  await service.connect();
+  const [session] = await service.listSessions();
+  assert.equal(typeof session.workingSince, "number");
+  assert.deepEqual(await service.interruptSession(session.threadId, session), {
+    interrupted: true,
+    threadId: "abcdef12",
+  });
+  assert.deepEqual(calls.at(-1), ["stop", "abcdef12"]);
+  assert.equal((await service.listSessions())[0].status, "Awaiting input");
+});
+
 test("stops an idle live worker before resuming so Claude keeps the same session id", async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "waga-claude-service-"));
   t.after(() => fs.rmSync(directory, { recursive: true }));

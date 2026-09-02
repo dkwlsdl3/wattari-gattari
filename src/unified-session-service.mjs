@@ -79,6 +79,10 @@ export class UnifiedSessionService extends EventEmitter {
     return this.#forSession(threadId, selectedSession).sendMessage(threadId, text, selectedSession);
   }
 
+  async interruptSession(threadId, selectedSession = null) {
+    return this.#forSession(threadId, selectedSession).interruptSession(threadId, selectedSession);
+  }
+
   async renameSession(threadId, name, selectedSession = null) {
     return this.#forSession(threadId, selectedSession).renameSession(threadId, name, selectedSession);
   }

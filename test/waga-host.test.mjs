@@ -38,6 +38,11 @@ class FakeSessionService extends EventEmitter {
   async stopSession(threadId) {
     this.sessions = this.sessions.filter((session) => session.threadId !== threadId);
   }
+  async interruptSession(threadId) {
+    const session = this.sessions.find((candidate) => candidate.threadId === threadId);
+    if (session) session.status = "Awaiting input";
+    return { interrupted: true, threadId };
+  }
 }
 
 class FakeApprovalServer extends EventEmitter {
@@ -192,4 +197,32 @@ test("refuses to mark a working session completed", async (t) => {
     sessionId: session.id,
     completed: true,
   }), { code: "SESSION_NOT_IDLE" });
+});
+
+test("interrupts one turn without removing its session", async (t) => {
+  const { host } = fixture(t);
+  await host.start();
+  const workspacePath = "/workspace/sample-app";
+  await host.dispatch("workspace/register", { path: workspacePath });
+  const session = await host.dispatch("session/create", { workspacePath, prompt: "first" });
+
+  assert.deepEqual(await host.dispatch("session/interrupt", {
+    workspacePath,
+    threadId: session.threadId,
+  }), { interrupted: true, threadId: session.threadId });
+  assert.equal(host.snapshot().workspaces[0].sessions.length, 1);
+  assert.equal(host.snapshot().workspaces[0].sessions[0].status, "Awaiting input");
+});
+
+test("publishes unchanged session summaries when a transcript event arrives", async (t) => {
+  const { host, services } = fixture(t);
+  await host.start();
+  const workspacePath = "/workspace/sample-app";
+  await host.dispatch("workspace/register", { path: workspacePath });
+  await host.dispatch("session/create", { workspacePath, prompt: "first" });
+  const state = new Promise((resolve) => host.once("state", resolve));
+
+  services.get(workspacePath).emit("changed", { method: "item/completed" });
+
+  assert.equal((await state).workspaces[0].sessions.length, 1);
 });

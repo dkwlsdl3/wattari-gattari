@@ -15,12 +15,19 @@ import { shutdownDialogDecision, stopDialogDecision } from "./session-console-ke
 
 const ESC = "\x1b[";
 const reset = `${ESC}0m`;
+const rgb = (red, green, blue) => (text) => `${ESC}38;2;${red};${green};${blue}m${text}${reset}`;
 const bold = (text) => `${ESC}1m${text}${reset}`;
-const dim = (text) => `${ESC}2m${text}${reset}`;
-const blue = (text) => `${ESC}94m${text}${reset}`;
-const green = (text) => `${ESC}92m${text}${reset}`;
-const yellow = (text) => `${ESC}93m${text}${reset}`;
-const red = (text) => `${ESC}91m${text}${reset}`;
+// Muted true-colour palette tuned for a dark terminal. WezTerm renders the font;
+// waga only supplies semantic foreground/background colours.
+const dim = rgb(139, 148, 176);
+const blue = rgb(130, 170, 255);
+const cyan = rgb(137, 221, 255);
+const green = rgb(195, 232, 141);
+const magenta = rgb(199, 146, 234);
+const yellow = rgb(255, 203, 107);
+const red = rgb(255, 83, 112);
+const orange = rgb(247, 140, 108);
+const userBackground = (text) => `${ESC}38;2;238;240;246m${ESC}48;2;44;48;64m${text}${reset}`;
 const cursorAnchor = "\u0000WAGA_CURSOR\u0000";
 const cursorSave = `${ESC}s`;
 const cursorRestore = `${ESC}u`;
@@ -28,6 +35,14 @@ const cursorShow = `${ESC}?25h`;
 const cursorHide = `${ESC}?25l`;
 const cursorBlinkingBar = `${ESC}5 q`;
 const cursorDefaultShape = `${ESC}0 q`;
+const slashCommands = [
+  { name: "/status", description: "현재 세션과 상태선 정보 보기" },
+  { name: "/statusline", description: "상태선에서 제공하는 정보 보기" },
+  { name: "/interrupt", description: "현재 작업 중단" },
+  { name: "/rename", description: "세션 이름 변경: /rename 새 이름" },
+  { name: "/back", description: "세션 목록으로 돌아가기" },
+  { name: "/help", description: "지원하는 슬래시 명령 보기" },
+];
 
 export async function runSessionConsole({
   paths = appPaths(),
@@ -58,9 +73,11 @@ let lastFrame = null;
 let closing = false;
 let loadingDetail = false;
 let detailRefreshTimer = null;
+let workingTimer = null;
 let resolveRun;
 let newSessionProvider = "codex";
 let detailScroll = 0;
+let slashCursor = 0;
 const submittedHistory = [];
 const inputHistory = new InputHistory();
 
@@ -76,6 +93,82 @@ function safeDisplay(text, limit = 600) {
   return String(text ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").slice(0, limit);
 }
 
+function safeText(text, limit = 20_000) {
+  return String(text ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/\t/g, "  ")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "")
+    .slice(0, limit);
+}
+
+function cellWidth(character) {
+  const code = character.codePointAt(0);
+  if (code >= 0x300 && code <= 0x36f) return 0;
+  if (
+    code >= 0x1100 && (
+      code <= 0x115f || code === 0x2329 || code === 0x232a
+      || (code >= 0x2e80 && code <= 0xa4cf && code !== 0x303f)
+      || (code >= 0xac00 && code <= 0xd7a3)
+      || (code >= 0xf900 && code <= 0xfaff)
+      || (code >= 0xfe10 && code <= 0xfe19)
+      || (code >= 0xfe30 && code <= 0xfe6f)
+      || (code >= 0xff00 && code <= 0xff60)
+      || (code >= 0xffe0 && code <= 0xffe6)
+      || (code >= 0x1f300 && code <= 0x1faff)
+    )
+  ) return 2;
+  return 1;
+}
+
+function displayWidth(text) {
+  return [...String(text)].reduce((width, character) => width + cellWidth(character), 0);
+}
+
+function padCells(text, width) {
+  return `${text}${" ".repeat(Math.max(0, width - displayWidth(text)))}`;
+}
+
+function truncateCells(text, width) {
+  if (displayWidth(text) <= width) return text;
+  let value = "";
+  let used = 0;
+  for (const character of String(text)) {
+    const size = cellWidth(character);
+    if (used + size > Math.max(0, width - 1)) break;
+    value += character;
+    used += size;
+  }
+  return `${value}…`;
+}
+
+function fitCells(text, width) {
+  return padCells(truncateCells(safeDisplay(text, width * 4), width), width);
+}
+
+function wrapCells(text, width) {
+  const lines = [];
+  for (const paragraph of safeText(text).split("\n")) {
+    if (!paragraph) {
+      lines.push("");
+      continue;
+    }
+    let line = "";
+    let used = 0;
+    for (const character of paragraph) {
+      const size = cellWidth(character);
+      if (line && used + size > width) {
+        lines.push(line);
+        line = "";
+        used = 0;
+      }
+      line += character;
+      used += size;
+    }
+    lines.push(line);
+  }
+  return lines.length ? lines : [""];
+}
+
 function fit(text, width) {
   const value = safeDisplay(text, width * 4);
   if (value.length <= width) return value.padEnd(width);
@@ -83,7 +176,7 @@ function fit(text, width) {
 }
 
 function statusText(status) {
-  if (status === "Working") return blue(status);
+  if (status === "Working" || status.startsWith("Working ")) return blue(status);
   if (status === "Awaiting input") return green(status);
   if (status === "Completed") return green(status);
   if (status === "Sleeping") return dim(status);
@@ -97,14 +190,183 @@ function displayedStatus(session) {
   return state.approval?.payload?.session_id === session.threadId ? "Approval" : session.status;
 }
 
-function inputPanel(width) {
+function workingLabel(session) {
+  const status = displayedStatus(session);
+  if (status !== "Working") return status;
+  if (!Number.isFinite(session.workingSince)) return "Working · Esc interrupt";
+  const seconds = Math.max(0, Math.floor((Date.now() - session.workingSince) / 1_000));
+  const elapsed = seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  return `Working ${elapsed} · Esc interrupt`;
+}
+
+function shortPath(value) {
+  const home = process.env.HOME;
+  return home && (value === home || value.startsWith(`${home}/`)) ? `~${value.slice(home.length)}` : value;
+}
+
+function rateLimitText(window) {
+  if (!window || !Number.isFinite(window.usedPercent)) return null;
+  const remaining = Math.max(0, 100 - window.usedPercent);
+  const duration = window.windowDurationMins;
+  const label = duration >= 10_000 ? "weekly" : duration >= 60 ? `${Math.round(duration / 60)}h` : `${duration ?? "?"}m`;
+  return `${label} ${remaining}% left`;
+}
+
+function formatTokenCount(value) {
+  if (value < 1_000) return String(Math.round(value));
+  if (value < 10_000) return `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}k`;
+  if (value < 1_000_000) return `${Math.round(value / 1_000)}k`;
+  return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}m`;
+}
+
+function estimateVisibleTokens(messages) {
+  let ascii = 0;
+  let nonAscii = 0;
+  for (const message of messages ?? []) {
+    for (const character of String(message.text ?? "")) {
+      if (/\s/u.test(character)) continue;
+      if (character.codePointAt(0) <= 0x7f) ascii += 1;
+      else nonAscii += 1;
+    }
+  }
+  const estimate = Math.ceil(ascii / 4 + nonAscii);
+  return estimate > 0 ? estimate : null;
+}
+
+function statusLine(session, width) {
+  const parts = [{ text: shortPath(session.cwd), style: green }];
+  if (session.gitBranch) parts.push({ text: `git:${session.gitBranch}`, style: blue });
+  if (session.model) parts.push({
+    text: `${session.model}${session.reasoningEffort ? ` ${session.reasoningEffort}` : ""}`,
+    style: cyan,
+  });
+  else parts.push({ text: session.provider === "claude" ? "Claude" : "Codex", style: cyan });
+  const contextTokens = session.tokenUsage?.last?.totalTokens;
+  const contextWindow = session.tokenUsage?.modelContextWindow;
+  if (Number.isFinite(contextTokens)) {
+    const context = Number.isFinite(contextWindow) && contextWindow > 0
+      ? `/${formatTokenCount(contextWindow)} (${Math.min(100, Math.round((contextTokens / contextWindow) * 100))}%)`
+      : "";
+    parts.push({
+      text: `tokens ${formatTokenCount(contextTokens)}${context}`,
+      style: yellow,
+    });
+  } else {
+    const estimate = estimateVisibleTokens(session.messages);
+    if (estimate) parts.push({ text: `tokens ~${formatTokenCount(estimate)} visible`, style: yellow });
+  }
+  for (const window of [session.rateLimits?.primary, session.rateLimits?.secondary]) {
+    const text = rateLimitText(window);
+    if (text) parts.push({ text, style: magenta });
+  }
+  if (session.serviceTier) parts.push({ text: `tier:${session.serviceTier}`, style: dim });
+
+  const lineWidth = Math.max(1, width - 1);
+  const rendered = [];
+  let used = 0;
+  for (const part of parts) {
+    const separator = used ? " · " : "";
+    const separatorWidth = displayWidth(separator);
+    const available = lineWidth - used - separatorWidth;
+    if (available <= 0) break;
+    const value = truncateCells(safeDisplay(part.text, available * 4), available);
+    if (!value) break;
+    if (separator) rendered.push(dim(separator));
+    rendered.push(part.style(value));
+    used += separatorWidth + displayWidth(value);
+    if (displayWidth(value) < displayWidth(part.text)) break;
+  }
+  return `${rendered.join("")}${" ".repeat(Math.max(0, lineWidth - used))}`;
+}
+
+function namedDivider(width, title = null) {
+  const lineWidth = Math.max(1, width - 1);
+  if (!title) return dim("─".repeat(lineWidth));
+  const name = truncateCells(safeDisplay(title), Math.max(1, Math.floor(width / 2) - 4));
+  const label = `[ ${name} ]`;
+  const left = Math.max(1, lineWidth - displayWidth(label) - 1);
+  const accent = detail?.provider === "claude" ? orange : blue;
+  return `${dim("─".repeat(left))} ${accent(label)}`;
+}
+
+function inputPanel(width, { title = null } = {}) {
   const divider = dim("─".repeat(Math.max(1, width - 1)));
   const anchor = dialog ? "" : cursorAnchor;
   let placeholder = `describe a task for a new ${newSessionProvider === "codex" ? "Codex" : "Claude"} session`;
   if (view !== "overview") placeholder = `message this ${detail?.provider === "claude" ? "Claude" : "Codex"} session`;
   if (quickReply) placeholder = `reply to ${quickReply.name}`;
-  const value = input ? `${input}${anchor}` : `${anchor}${dim(placeholder)}`;
-  return [divider, `${bold(">")} ${value}`, divider];
+  const provider = view === "overview" ? newSessionProvider : detail?.provider;
+  const accent = provider === "claude" ? orange : blue;
+  const contentWidth = Math.max(1, width - 3);
+  const values = wrapCells(input || placeholder, contentWidth);
+  const inputLines = values.map((line, index) => {
+    const marker = index === 0 ? accent("›") : " ";
+    if (input) return `${marker} ${line}${index === values.length - 1 ? anchor : ""}`;
+    return `${marker} ${index === 0 ? anchor : ""}${dim(line)}`;
+  });
+  return [namedDivider(width, title), ...inputLines, divider];
+}
+
+function slashMatches() {
+  if (view === "overview" || !input.startsWith("/") || input.includes(" ")) return [];
+  return slashCommands.filter((command) => command.name.startsWith(input));
+}
+
+function slashMenuLines(width) {
+  const matches = slashMatches();
+  if (!matches.length) return [];
+  slashCursor = Math.min(slashCursor, matches.length - 1);
+  return matches.slice(0, 6).map((command, index) => {
+    const marker = index === slashCursor ? "›" : " ";
+    return fitCells(`${marker} ${command.name.padEnd(13)} ${command.description}`, Math.max(1, width - 1));
+  });
+}
+
+function messageLines(message, width) {
+  const contentWidth = Math.max(8, width - 4);
+  const wrapped = wrapCells(message.text, contentWidth);
+  if (message.role === "user") {
+    return wrapped.map((line, index) => {
+      const plain = `${index === 0 ? "›" : " "} ${line}`;
+      return userBackground(padCells(plain, Math.max(1, width - 1)));
+    });
+  }
+  const accent = detail?.provider === "claude" ? orange : blue;
+  return wrapped.map((line, index) => `${index === 0 ? accent("•") : " "} ${line}`);
+}
+
+function allTranscriptLines(width) {
+  const messages = detail?.messages ?? [];
+  return messages.flatMap((message, index) => {
+    const lines = messageLines(message, width);
+    const nextMessage = messages[index + 1];
+    return message.role === "user" && nextMessage && nextMessage.role !== "user"
+      ? [...lines, ""]
+      : lines;
+  });
+}
+
+function noticeLines(width) {
+  if (!notice) return [];
+  return wrapCells(notice, Math.max(8, width - 3)).map((line) => yellow(line));
+}
+
+function detailFooter(width) {
+  const activity = displayedStatus(detail) === "Working"
+    ? `${blue("•")} ${statusText(workingLabel(detail))}`
+    : null;
+  return [
+    ...slashMenuLines(width),
+    ...noticeLines(width),
+    ...(activity ? [activity] : []),
+    ...inputPanel(width, { title: detail?.name }),
+    statusLine(detail, width),
+  ];
+}
+
+function transcriptCapacity(width) {
+  const rows = outputStream.rows ?? 30;
+  return Math.max(1, rows - 3 - detailFooter(width).length);
 }
 
 function overviewHelp() {
@@ -155,26 +417,20 @@ function renderOverview(width) {
   return lines;
 }
 
-function renderDetail(width) {
+function renderDetail(width, height) {
   if (!detail) return [red("세션을 찾을 수 없습니다."), dim("←: 목록으로")];
-  const lines = [
-    `${bold(detail.name)}  ${detail.provider === "claude" ? yellow("Claude") : blue("Codex")}  ${statusText(displayedStatus(detail))}`,
-    dim(`${detail.sessionId ?? detail.threadId} · ${detail.cwd}`),
-    "",
-  ];
-  const messages = detail.messages ?? [];
-  const capacity = Math.max(3, (outputStream.rows ?? 30) - 10);
-  const end = Math.max(0, messages.length - detailScroll);
+  const transcript = allTranscriptLines(width);
+  const footer = detailFooter(width);
+  const capacity = Math.max(1, height - footer.length);
+  const end = Math.max(0, transcript.length - detailScroll);
   const start = Math.max(0, end - capacity);
-  if (start > 0 || detail.hasOlderMessages) lines.push(dim(`↑ ${start}${detail.hasOlderMessages ? "+" : ""} older messages · PgUp`), "");
-  for (const message of messages.slice(start, end)) {
-    const agentName = detail.provider === "claude" ? "Claude" : "Codex";
-    lines.push(`${message.role === "user" ? blue("You") : yellow(agentName)}: ${safeDisplay(message.text, 2_000)}`);
+  const visible = transcript.slice(start, end);
+  if ((start > 0 || detail.hasOlderMessages) && visible.length) {
+    visible[0] = dim(`↑ ${start}${detail.hasOlderMessages ? "+" : ""} older lines · PgUp`);
   }
-  if (end < messages.length) lines.push(dim(`↓ ${messages.length - end} newer messages · PgDn`));
-  lines.push("", ...inputPanel(width), dim("↑/↓ input history · PgUp/PgDn transcript · empty ← back · type+Enter send · Ctrl+C detach · Ctrl+Q stop service"));
-  if (notice) lines.push("", yellow(notice));
-  return lines;
+  if (end < transcript.length && visible.length) visible[visible.length - 1] = dim(`↓ ${transcript.length - end} newer lines · PgDn`);
+  const padding = Array(Math.max(0, height - visible.length - footer.length)).fill("");
+  return [...visible, ...padding, ...footer].slice(0, height);
 }
 
 function renderDialog(lines) {
@@ -202,15 +458,42 @@ function renderDialog(lines) {
 
 function render() {
   const width = outputStream.columns ?? 120;
-  const lines = view === "overview" ? renderOverview(width) : renderDetail(width);
-  const frame = renderDialog(lines).join("\n");
+  const height = outputStream.rows ?? 30;
+  const lines = view === "overview" ? renderOverview(width) : renderDetail(width, height);
+  const dialogLines = dialog && view !== "overview" ? renderDialog([]) : null;
+  const renderedLines = dialogLines
+    ? [...lines.slice(0, Math.max(0, height - dialogLines.length)), ...dialogLines]
+    : renderDialog(lines);
+  const frame = renderedLines.join("\n");
   const hasCursor = frame.includes(cursorAnchor);
   const content = hasCursor ? frame.replace(cursorAnchor, cursorSave).replaceAll(cursorAnchor, "") : frame;
   const cursorState = hasCursor ? `${cursorRestore}${cursorBlinkingBar}${cursorShow}` : cursorHide;
-  const nextFrame = `${ESC}2J${ESC}H${content}\n${cursorState}`;
+  const nextFrame = `${ESC}2J${ESC}H${content}${cursorState}`;
   if (nextFrame === lastFrame) return;
   lastFrame = nextFrame;
   outputStream.write(nextFrame);
+  syncWorkingTimer();
+}
+
+function onResize() {
+  if (closing) return;
+  lastFrame = null;
+  if (detail) {
+    const lineCount = allTranscriptLines(outputStream.columns ?? 120).length;
+    detailScroll = Math.min(detailScroll, Math.max(0, lineCount - 1));
+  }
+  render();
+}
+
+function syncWorkingTimer() {
+  const shouldTick = view !== "overview" && detail && displayedStatus(detail) === "Working";
+  if (shouldTick && !workingTimer) {
+    workingTimer = setInterval(render, 1_000);
+    workingTimer.unref?.();
+  } else if (!shouldTick && workingTimer) {
+    clearInterval(workingTimer);
+    workingTimer = null;
+  }
 }
 
 function applyState(nextState) {
@@ -286,6 +569,18 @@ async function openFocusedSession() {
 async function submitInput() {
   const text = input.trim();
   if (!text) return;
+  const slashCommand = text.split(/\s+/, 1)[0];
+  if (view !== "overview" && slashCommands.some(({ name }) => name === slashCommand)) {
+    input = "";
+    inputHistory.reset();
+    try {
+      await runSlashCommand(text);
+    } catch (error) {
+      notice = `${error.code ?? "ERROR"}: ${error.message}`;
+    }
+    render();
+    return;
+  }
   input = "";
   inputHistory.reset();
   submittedHistory.push(text);
@@ -315,11 +610,52 @@ async function submitInput() {
   render();
 }
 
+async function interruptCurrent() {
+  if (!detail || displayedStatus(detail) !== "Working") {
+    notice = "현재 중단할 작업이 없습니다";
+    return;
+  }
+  notice = `${detail.provider === "claude" ? "Claude" : "Codex"} 작업 중단 요청 중`;
+  render();
+  try {
+    await client.request("session/interrupt", { workspacePath: detail.cwd, threadId: detail.threadId });
+    notice = "현재 작업을 중단했습니다. 세션과 대화 기록은 유지됩니다";
+  } catch (error) {
+    notice = `${error.code ?? "ERROR"}: ${error.message}`;
+  }
+}
+
+async function runSlashCommand(text) {
+  const [command, ...arguments_] = text.split(/\s+/);
+  const argument = arguments_.join(" ").trim();
+  if (command === "/status" || command === "/statusline") {
+    notice = statusLine(detail, Math.max(40, outputStream.columns ?? 120)).replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").trim();
+  } else if (command === "/interrupt") {
+    await interruptCurrent();
+  } else if (command === "/rename") {
+    if (!argument) {
+      notice = "사용법: /rename 새 세션 이름";
+      return;
+    }
+    await client.request("session/rename", { workspacePath: detail.cwd, threadId: detail.threadId, name: argument });
+    detail.name = argument;
+    notice = `세션 이름을 '${argument}'(으)로 변경했습니다`;
+  } else if (command === "/back") {
+    view = "overview";
+    detail = null;
+    notice = "";
+  } else if (command === "/help") {
+    notice = slashCommands.map(({ name, description }) => `${name} ${description}`).join(" · ");
+  }
+}
+
 async function loadOlder() {
   if (!detail || loadingDetail) return;
-  const capacity = Math.max(3, (outputStream.rows ?? 30) - 10);
-  if (detailScroll + capacity < (detail.messages?.length ?? 0)) {
-    detailScroll = Math.min((detail.messages?.length ?? 0) - 1, detailScroll + capacity);
+  const width = outputStream.columns ?? 120;
+  const capacity = transcriptCapacity(width);
+  const lineCount = allTranscriptLines(width).length;
+  if (detailScroll + capacity < lineCount) {
+    detailScroll = Math.min(Math.max(0, lineCount - 1), detailScroll + capacity);
     render();
     return;
   }
@@ -328,9 +664,9 @@ async function loadOlder() {
   notice = "이전 기록 불러오는 중";
   render();
   try {
-    const previousLength = detail.messages?.length ?? 0;
+    const previousLength = allTranscriptLines(width).length;
     detail = await client.request("session/older", { workspacePath: detail.cwd, threadId: detail.threadId });
-    detailScroll += Math.max(0, (detail.messages?.length ?? 0) - previousLength);
+    detailScroll += Math.max(0, allTranscriptLines(width).length - previousLength);
     notice = detail.hasOlderMessages ? "PgUp으로 이전 기록을 한 페이지 더 불러올 수 있습니다" : "가장 오래된 대화까지 불러왔습니다";
   } catch (error) {
     notice = `${error.code ?? "ERROR"}: ${error.message}`;
@@ -341,7 +677,7 @@ async function loadOlder() {
 }
 
 function loadNewer() {
-  const capacity = Math.max(3, (outputStream.rows ?? 30) - 10);
+  const capacity = transcriptCapacity(outputStream.columns ?? 120);
   detailScroll = Math.max(0, detailScroll - capacity);
   render();
 }
@@ -396,7 +732,9 @@ function cleanup(exitCode = 0) {
   if (closing) return;
   closing = true;
   if (detailRefreshTimer) clearTimeout(detailRefreshTimer);
+  if (workingTimer) clearInterval(workingTimer);
   inputStream.off("keypress", onKeypress);
+  outputStream.off?.("resize", onResize);
   inputStream.setRawMode?.(false);
   inputStream.pause?.();
   outputStream.write(`${cursorShow}${cursorDefaultShape}${reset}\n`);
@@ -462,14 +800,26 @@ const onKeypress = (text, key) => {
     return;
   }
   if (view !== "overview") {
-    if (key.name === "left" && !input) { view = "overview"; detail = null; render(); }
+    const matches = slashMatches();
+    if (key.name === "escape" && input) { input = ""; slashCursor = 0; render(); }
+    else if (key.name === "escape" && displayedStatus(detail) === "Working") {
+      void interruptCurrent().finally(render);
+    }
+    else if (key.name === "left" && !input) { view = "overview"; detail = null; render(); }
     else if (key.name === "pageup") void loadOlder();
     else if (key.name === "pagedown") loadNewer();
+    else if (key.name === "up" && matches.length) { slashCursor = Math.max(0, slashCursor - 1); render(); }
+    else if (key.name === "down" && matches.length) { slashCursor = Math.min(matches.length - 1, slashCursor + 1); render(); }
+    else if (key.name === "tab" && matches.length) { input = matches[slashCursor].name; render(); }
     else if (key.name === "up") { input = inputHistory.previous(input); render(); }
     else if (key.name === "down") { input = inputHistory.next(input); render(); }
+    else if (key.name === "return" && matches.length && !matches.some(({ name }) => name === input)) {
+      input = matches[slashCursor].name;
+      void submitInput();
+    }
     else if (key.name === "return") void submitInput();
-    else if (key.name === "backspace") { input = input.slice(0, -1); render(); }
-    else if (!key.ctrl && !key.meta && text) { input += text; render(); }
+    else if (key.name === "backspace") { input = input.slice(0, -1); slashCursor = 0; render(); }
+    else if (!key.ctrl && !key.meta && text) { input += text; slashCursor = 0; render(); }
     return;
   }
 
@@ -554,6 +904,7 @@ const onKeypress = (text, key) => {
   }
 };
 inputStream.on("keypress", onKeypress);
+outputStream.on?.("resize", onResize);
 
 const onSigterm = () => cleanup(143);
 if (listenForSignals) process.on("SIGTERM", onSigterm);

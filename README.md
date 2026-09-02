@@ -47,7 +47,9 @@ up human control over their lifetime or sensitive approvals.
 - **Two providers, one screen** — Codex App Server threads and Claude background sessions share one tree.
 - **Screen-independent lifetime** — the daemon keeps sessions and active turns alive after the TUI closes.
 - **Shared across projects** — TUIs opened from different directories receive the same global state immediately.
-- **Direct conversation control** — create, message, rename, reorder, complete, reopen, and explicitly stop sessions.
+- **Direct conversation control** — create, message, steer an active Codex turn, interrupt, rename, reorder, complete, reopen, and explicitly stop sessions.
+- **Agent-native conversation view** — a bottom composer, compact agent bullets, highlighted user prompts, a live activity line above the composer, and provider metadata below it.
+- **Dark-terminal palette** — muted true-colour accents distinguish Codex, Claude, prompts, and status metadata while the terminal keeps control of the font.
 - **Bounded transcripts** — refresh only the latest 100 items and load older history explicitly with `PageUp`.
 - **Direct approval gate** — sensitive Codex actions require a one-time decision from the foreground TUI.
 - **Safe peer questions** — ask once through an isolated, read-only shadow fork without writing into the original conversation.
@@ -131,6 +133,7 @@ initializes Codex App Server and validates the output of Claude
 | `F2` | Rename the selected session |
 | `F3` | Mark an idle session `Completed`, or reopen it |
 | `PageUp` / `PageDown` | Navigate a long transcript and load older pages |
+| `Esc` | Interrupt the active turn while its conversation composer is empty |
 | `Ctrl+X`, `Ctrl+X` | Stop the selected session or all sessions in a project |
 | `Ctrl+C` | Detach only the TUI |
 | `Ctrl+Q`, `Ctrl+Q` | Stop the shared daemon |
@@ -138,6 +141,13 @@ initializes Codex App Server and validates the output of Claude
 Wattari Gattari never treats the end of a provider turn as automatic completion.
 The user marks a reviewed result with `F3`; sending another message clears the
 completion marker.
+
+Inside a conversation, type `/` to open Wattari Gattari's local command menu.
+The initial commands are `/status`, `/statusline`, `/interrupt`, `/rename`,
+`/back`, and `/help`. Unknown slash-prefixed text is sent to the provider as a
+normal prompt, so provider or project-specific commands remain usable. Codex
+messages entered while a turn is active use App Server steering; Claude keeps its
+single-session safeguard and accepts the next message after the active turn ends.
 
 ## Safety model
 

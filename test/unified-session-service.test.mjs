@@ -15,6 +15,7 @@ class FakeProvider extends EventEmitter {
   async listSessions() { return this.sessions; }
   async createSession(options) { return { provider: this.provider, options }; }
   async sendMessage(threadId, text) { return { provider: this.provider, threadId, text }; }
+  async interruptSession(threadId) { return { provider: this.provider, threadId, interrupted: true }; }
   async stopSession(threadId) { return { provider: this.provider, threadId }; }
 }
 
@@ -27,6 +28,7 @@ test("combines providers and routes by selected session without id ambiguity", a
   assert.equal((await service.createSession({ provider: "claude", prompt: "hi" })).provider, "claude");
   assert.equal((await service.sendMessage("uuid", "hello", codex.sessions[0])).provider, "codex");
   assert.equal((await service.sendMessage("abcdef12", "hello", claude.sessions[0])).provider, "claude");
+  assert.equal((await service.interruptSession("uuid", codex.sessions[0])).interrupted, true);
 });
 
 test("keeps Codex available when Claude cannot connect", async () => {

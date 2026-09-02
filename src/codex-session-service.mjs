@@ -35,8 +35,10 @@ function displayStatus(thread, archived) {
   }
 }
 
-function publicSession(thread, archived = false) {
-  const status = displayStatus(thread, archived);
+function publicSession(thread, archived = false, runtime = null, rateLimits = null) {
+  const effectiveThread = runtime?.status ? { ...thread, status: runtime.status } : thread;
+  const status = displayStatus(effectiveThread, archived);
+  const tokenUsage = runtime?.tokenUsage ?? null;
   return {
     id: `codex:${thread.id}`,
     threadId: thread.id,
@@ -47,6 +49,15 @@ function publicSession(thread, archived = false) {
     lastActivity: thread.preview || "아직 대화가 없습니다",
     updatedAt: thread.updatedAt,
     routable: status === "Working" || status === "Awaiting input",
+    workingSince: status === "Working" ? runtime?.workingSince ?? null : null,
+    activeTurnId: status === "Working" ? runtime?.activeTurnId ?? null : null,
+    model: runtime?.model ?? null,
+    reasoningEffort: runtime?.reasoningEffort ?? null,
+    serviceTier: runtime?.serviceTier ?? null,
+    gitBranch: thread.gitInfo?.branch ?? runtime?.gitInfo?.branch ?? null,
+    gitSha: thread.gitInfo?.sha ?? runtime?.gitInfo?.sha ?? null,
+    tokenUsage,
+    rateLimits,
   };
 }
 
@@ -99,6 +110,8 @@ export class CodexSessionService extends EventEmitter {
   #transcriptOperations = new Map();
   #connected = false;
   #workspaceWriteEnabled = false;
+  #runtime = new Map();
+  #rateLimits = null;
 
   constructor({
     cwd = process.cwd(),
@@ -121,13 +134,14 @@ export class CodexSessionService extends EventEmitter {
       cwd: this.#cwd,
       socketPath: this.socketPath,
       onServerRequest: this.#onServerRequest,
-      onNotification: (notification) => this.emit("changed", notification),
+      onNotification: (notification) => this.#handleNotification(notification),
     });
     try {
       await this.#client.initialize();
       await this.#assertNoExternalMcp();
       this.#workspaceWriteEnabled = await this.#hasManagedApprovalHook();
       this.#connected = true;
+      await this.#readRateLimits();
     } catch (error) {
       await this.#client.close().catch(() => {});
       this.#client = null;
@@ -150,7 +164,9 @@ export class CodexSessionService extends EventEmitter {
         if (archivedIds.has(threadId)) this.catalog.remove(threadId);
       }
     }
-    return active.map((thread) => publicSession(thread, false)).sort((a, b) => b.updatedAt - a.updatedAt);
+    return active
+      .map((thread) => publicSession(thread, false, this.#runtime.get(thread.id), this.#rateLimits))
+      .sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
   async createSession({ prompt, name = null, cwd = this.#cwd } = {}) {
@@ -168,6 +184,7 @@ export class CodexSessionService extends EventEmitter {
       dynamicTools: [],
       threadSource: THREAD_SOURCE,
     });
+    this.#rememberMetadata(response.thread?.id, response);
     this.#assertSessionIsolation(response);
     const threadId = response.thread?.id;
     if (!threadId) throw new CodexSessionError("THREAD_ID_MISSING", "Codex가 thread id를 반환하지 않았습니다");
@@ -180,7 +197,12 @@ export class CodexSessionService extends EventEmitter {
     const sessionName = (name || prompt.trim()).slice(0, 80);
     await this.#client.request("thread/name/set", { threadId, name: sessionName });
     await this.#startTurn(threadId, prompt.trim());
-    return publicSession({ ...response.thread, name: sessionName, status: { type: "active", activeFlags: [] } });
+    return publicSession(
+      { ...response.thread, name: sessionName, status: { type: "active", activeFlags: [] } },
+      false,
+      this.#runtime.get(threadId),
+      this.#rateLimits,
+    );
   }
 
   async openSession(threadId, selectedSession = null) {
@@ -189,20 +211,19 @@ export class CodexSessionService extends EventEmitter {
       ? selectedSession
       : await this.#findSession(threadId);
     if (!session) throw new CodexSessionError("SESSION_NOT_FOUND", `관리 세션을 찾을 수 없습니다: ${threadId}`);
-    if (session.status === "Sleeping") {
-      const response = await this.#client.request("thread/resume", {
-        threadId,
-        cwd: session.cwd,
-        approvalPolicy: this.#workspaceWriteEnabled ? "on-request" : "never",
-        approvalsReviewer: "user",
-        sandbox: this.#workspaceWriteEnabled ? "workspace-write" : "read-only",
-        config: this.#workspaceWriteEnabled ? { bypass_hook_trust: true } : undefined,
-        excludeTurns: true,
-      });
-      this.#assertSessionIsolation(response);
-      await this.#assertNoExternalMcp(threadId);
-      session = publicSession(response.thread, false);
-    }
+    const response = await this.#client.request("thread/resume", {
+      threadId,
+      cwd: session.cwd,
+      approvalPolicy: this.#workspaceWriteEnabled ? "on-request" : "never",
+      approvalsReviewer: "user",
+      sandbox: this.#workspaceWriteEnabled ? "workspace-write" : "read-only",
+      config: this.#workspaceWriteEnabled ? { bypass_hook_trust: true } : undefined,
+      excludeTurns: true,
+    });
+    this.#assertSessionIsolation(response);
+    this.#rememberMetadata(threadId, response);
+    await this.#assertNoExternalMcp(threadId);
+    session = publicSession(response.thread, false, this.#runtime.get(threadId), this.#rateLimits);
     return { ...session, ...await this.#readRecentTranscript(threadId) };
   }
 
@@ -256,7 +277,15 @@ export class CodexSessionService extends EventEmitter {
       session = await this.#findSession(threadId);
     }
     if (session.status === "Working") {
-      throw new CodexSessionError("TURN_IN_PROGRESS", "현재 턴이 끝난 뒤 다음 메시지를 보내십시오");
+      const turn = await this.#activeTurn(threadId);
+      if (!turn) throw new CodexSessionError("ACTIVE_TURN_MISSING", "진행 중인 Codex 턴 ID를 찾을 수 없습니다");
+      const response = await this.#client.request("turn/steer", {
+        threadId,
+        input: [{ type: "text", text: text.trim(), text_elements: [] }],
+        expectedTurnId: turn.id,
+      });
+      this.emit("changed", { method: "waga/turn-steered", params: { threadId, turnId: response.turnId } });
+      return { id: response.turnId, status: "inProgress" };
     }
     return this.#startTurn(threadId, text.trim());
   }
@@ -279,8 +308,21 @@ export class CodexSessionService extends EventEmitter {
           }
         : { type: "readOnly", networkAccess: false },
     });
+    this.#rememberTurnStarted(threadId, response.turn);
     this.emit("changed", { method: "waga/turn-started", params: { threadId, turn: response.turn } });
     return response.turn;
+  }
+
+  async interruptSession(threadId) {
+    this.#assertConnected();
+    const session = await this.#findSession(threadId);
+    if (!session) throw new CodexSessionError("SESSION_NOT_FOUND", `관리 세션을 찾을 수 없습니다: ${threadId}`);
+    const turn = await this.#activeTurn(threadId);
+    if (!turn) throw new CodexSessionError("NO_ACTIVE_TURN", "중단할 진행 중인 Codex 턴이 없습니다");
+    await this.#client.request("turn/interrupt", { threadId, turnId: turn.id });
+    this.#rememberTurnCompleted(threadId, { ...turn, status: "interrupted" });
+    this.emit("changed", { method: "waga/turn-interrupted", params: { threadId, turnId: turn.id } });
+    return { interrupted: true, threadId, turnId: turn.id };
   }
 
   async renameSession(threadId, name) {
@@ -309,9 +351,11 @@ export class CodexSessionService extends EventEmitter {
     const activeTurn = turns.data.find((turn) => turn.status === "inProgress");
     if (activeTurn) {
       await this.#client.request("turn/interrupt", { threadId, turnId: activeTurn.id });
+      this.#rememberTurnCompleted(threadId, { ...activeTurn, status: "interrupted" });
     }
     await this.#client.request("thread/archive", { threadId });
     this.#transcripts.delete(threadId);
+    this.#runtime.delete(threadId);
     this.catalog.remove(threadId);
     this.emit("changed", { method: "waga/session-stopped", params: { threadId } });
   }
@@ -398,6 +442,94 @@ export class CodexSessionService extends EventEmitter {
 
   async #findSession(threadId) {
     return (await this.listSessions()).find((session) => session.threadId === threadId) ?? null;
+  }
+
+  async #activeTurn(threadId) {
+    const cached = this.#runtime.get(threadId)?.activeTurnId;
+    if (cached) return { id: cached, status: "inProgress" };
+    const turns = await this.#client.request("thread/turns/list", {
+      threadId,
+      limit: 20,
+      sortDirection: "desc",
+      itemsView: "summary",
+    });
+    const turn = turns.data.find((candidate) => candidate.status === "inProgress") ?? null;
+    if (turn) this.#rememberTurnStarted(threadId, turn);
+    return turn;
+  }
+
+  #runtimeFor(threadId) {
+    const current = this.#runtime.get(threadId) ?? {};
+    this.#runtime.set(threadId, current);
+    return current;
+  }
+
+  #rememberMetadata(threadId, response) {
+    if (!threadId) return;
+    const runtime = this.#runtimeFor(threadId);
+    if (response.thread?.status) runtime.status = response.thread.status;
+    if (response.thread?.gitInfo) runtime.gitInfo = response.thread.gitInfo;
+    if (typeof response.model === "string") runtime.model = response.model;
+    if (response.reasoningEffort != null) runtime.reasoningEffort = response.reasoningEffort;
+    if (response.serviceTier != null) runtime.serviceTier = response.serviceTier;
+  }
+
+  #rememberTurnStarted(threadId, turn) {
+    if (!threadId || !turn?.id) return;
+    const runtime = this.#runtimeFor(threadId);
+    runtime.status = { type: "active", activeFlags: [] };
+    runtime.activeTurnId = turn.id;
+    runtime.workingSince = Number.isFinite(turn.startedAt) ? turn.startedAt * 1_000 : Date.now();
+  }
+
+  #rememberTurnCompleted(threadId, turn) {
+    if (!threadId) return;
+    const runtime = this.#runtimeFor(threadId);
+    if (!turn?.id || runtime.activeTurnId === turn.id) {
+      runtime.activeTurnId = null;
+      runtime.workingSince = null;
+    }
+    runtime.status = { type: "idle" };
+  }
+
+  #handleNotification(notification) {
+    const { method, params = {} } = notification ?? {};
+    if (method === "thread/status/changed" && params.threadId && params.status) {
+      this.#runtimeFor(params.threadId).status = params.status;
+    } else if (method === "turn/started") {
+      this.#rememberTurnStarted(params.threadId, params.turn);
+    } else if (method === "turn/completed") {
+      this.#rememberTurnCompleted(params.threadId, params.turn);
+    } else if (method === "thread/tokenUsage/updated" && params.threadId) {
+      this.#runtimeFor(params.threadId).tokenUsage = params.tokenUsage;
+    } else if (method === "account/rateLimits/updated" && params.rateLimits) {
+      this.#mergeRateLimits(params.rateLimits);
+    }
+    this.emit("changed", notification);
+  }
+
+  async #readRateLimits() {
+    try {
+      const result = await this.#client.request("account/rateLimits/read", {}, { signal: AbortSignal.timeout(2_000) });
+      this.#rateLimits = result.rateLimits ?? null;
+    } catch {
+      // API-key and non-OpenAI providers may not expose ChatGPT rate limits.
+    }
+  }
+
+  #mergeRateLimits(update) {
+    const current = this.#rateLimits ?? {};
+    const mergeWindow = (name) => {
+      if (!(name in update)) return current[name];
+      if (update[name] === null) return null;
+      return { ...(current[name] ?? {}), ...update[name] };
+    };
+    this.#rateLimits = {
+      ...current,
+      ...update,
+      primary: mergeWindow("primary"),
+      secondary: mergeWindow("secondary"),
+    };
   }
 
   async #assertNoExternalMcp(threadId = null) {

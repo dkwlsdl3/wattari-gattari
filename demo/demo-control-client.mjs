@@ -23,9 +23,22 @@ export class DemoControlClient extends EventEmitter {
       name: "#130 상태 확인 중복 조사",
       cwd: workspacePath,
       status: "Working",
+      workingSince: Date.now() - 12_000,
       lastActivity: "테스트 실행 중",
       updatedAt: 3,
       routable: false,
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
+      serviceTier: "priority",
+      gitBranch: "main",
+      tokenUsage: {
+        last: { totalTokens: 10_000 },
+        modelContextWindow: 200_000,
+      },
+      rateLimits: {
+        primary: { usedPercent: 42, windowDurationMins: 300 },
+        secondary: { usedPercent: 58, windowDurationMins: 10_080 },
+      },
     },
     {
       id: "claude:session-40",
@@ -95,11 +108,23 @@ export class DemoControlClient extends EventEmitter {
       const session = this.#sessions.find((candidate) => candidate.threadId === params.threadId);
       if (session) {
         session.status = "Working";
+        session.workingSince = Date.now();
         session.lastActivity = "응답 작성 중";
         session.routable = false;
       }
       this.#publish();
       return { delivered: true };
+    }
+    if (method === "session/interrupt") {
+      const session = this.#sessions.find((candidate) => candidate.threadId === params.threadId);
+      if (session?.status === "Working") {
+        session.status = "Awaiting input";
+        session.workingSince = null;
+        session.lastActivity = "사용자가 중단";
+        session.routable = true;
+      }
+      this.#publish();
+      return { interrupted: true };
     }
     if (method === "session/setCompleted") {
       const session = this.#sessions.find((candidate) => candidate.id === params.sessionId);

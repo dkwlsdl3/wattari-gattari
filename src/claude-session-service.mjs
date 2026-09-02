@@ -222,6 +222,9 @@ export class ClaudeSessionService extends EventEmitter {
         updatedAt: Date.parse(jobState?.updatedAt ?? row.startedAt ?? "") || 0,
         routable: row.kind === "background" && status === "Awaiting input",
         controllable: row.kind === "background",
+        workingSince: status === "Working"
+          ? Date.parse(jobState?.createdAt ?? row.startedAt ?? "") || null
+          : null,
       });
     }
     return sessions.sort((left, right) => right.updatedAt - left.updatedAt);
@@ -298,6 +301,17 @@ export class ClaudeSessionService extends EventEmitter {
     this.#aliases.unhide(session.id);
     this.emit("changed", { method: "waga/claude-turn-started", params: { threadId } });
     return { threadId, started: true };
+  }
+
+  async interruptSession(threadId, selectedSession = null) {
+    const session = await this.#findSession(threadId, selectedSession, { fresh: true });
+    if (!session.controllable) throw new ClaudeSessionError("SESSION_NOT_CONTROLLABLE", "background Claude 세션만 제어할 수 있습니다");
+    if (session.status !== "Working") {
+      throw new ClaudeSessionError("NO_ACTIVE_TURN", "중단할 진행 중인 Claude 턴이 없습니다");
+    }
+    await this.#run(["stop", threadId], { cwd: session.cwd });
+    this.emit("changed", { method: "waga/claude-turn-interrupted", params: { threadId } });
+    return { interrupted: true, threadId };
   }
 
   async renameSession(threadId, name, selectedSession = null) {

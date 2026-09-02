@@ -20,6 +20,7 @@ export class WagaHost extends EventEmitter {
   #serviceStarts = new Map();
   #sessions = new Map();
   #refreshTimers = new Map();
+  #forcePublishWorkspaces = new Set();
   #refreshOperations = new Map();
   #revision = 0;
   #closed = false;
@@ -53,6 +54,7 @@ export class WagaHost extends EventEmitter {
     this.#closed = true;
     for (const timer of this.#refreshTimers.values()) clearTimeout(timer);
     this.#refreshTimers.clear();
+    this.#forcePublishWorkspaces.clear();
     await Promise.allSettled([...this.#refreshOperations.values()]);
     await Promise.all([...this.#services.values()].map((service) => Promise.resolve(service.detach?.()).catch(() => {})));
     this.#services.clear();
@@ -109,6 +111,11 @@ export class WagaHost extends EventEmitter {
           ? this.#registry.setSessionCompleted(params.workspacePath, selected.id, false)
           : false;
         await this.#refreshWorkspace(params.workspacePath, { forcePublish: reopened });
+        return result;
+      }
+      case "session/interrupt": {
+        const result = await this.#sessionCall(params, "interruptSession", params.threadId);
+        await this.#refreshWorkspace(params.workspacePath);
         return result;
       }
       case "session/rename": {
@@ -220,7 +227,7 @@ export class WagaHost extends EventEmitter {
       const service = this.#sessionFactory(workspacePath, {
         onServerRequest: (request) => this.handleServerRequest(request),
       });
-      service.on?.("changed", () => this.#scheduleRefresh(workspacePath));
+      service.on?.("changed", () => this.#scheduleRefresh(workspacePath, { forcePublish: true }));
       await service.connect();
       this.#services.set(workspacePath, service);
       return service;
@@ -262,11 +269,14 @@ export class WagaHost extends EventEmitter {
     else if (publish && !this.#revision) this.#publish();
   }
 
-  #scheduleRefresh(workspacePath) {
-    if (this.#closed || this.#refreshTimers.has(workspacePath)) return;
+  #scheduleRefresh(workspacePath, { forcePublish = false } = {}) {
+    if (this.#closed) return;
+    if (forcePublish) this.#forcePublishWorkspaces.add(workspacePath);
+    if (this.#refreshTimers.has(workspacePath)) return;
     const timer = setTimeout(() => {
       this.#refreshTimers.delete(workspacePath);
-      void this.#refreshWorkspace(workspacePath).catch((error) => this.emit("error", error));
+      const shouldForcePublish = this.#forcePublishWorkspaces.delete(workspacePath);
+      void this.#refreshWorkspace(workspacePath, { forcePublish: shouldForcePublish }).catch((error) => this.emit("error", error));
     }, 25);
     this.#refreshTimers.set(workspacePath, timer);
   }
