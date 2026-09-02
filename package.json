@@ -1,0 +1,34 @@
+{
+  "name": "wattari-gattari",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Human-controlled TUI for local Codex and Claude Code sessions",
+  "type": "module",
+  "bin": {
+    "waga": "src/cli.mjs"
+  },
+  "files": [
+    "src",
+    "demo",
+    "docs",
+    "README.md",
+    "README.ko.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
+  ],
+  "scripts": {
+    "demo": "node src/demo.mjs",
+    "demo:tui": "node demo/tui.mjs",
+    "demo:record": "vhs demo/wattari-gattari.tape",
+    "tui": "node src/global-session-console.mjs",
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage",
+    "check": "for file in src/*.mjs src/adapters/*.mjs demo/*.mjs; do node --check \"$file\" || exit 1; done && node --test && node src/demo.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "ws": "^8.18.3"
+  }
+}

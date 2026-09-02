@@ -1,0 +1,4 @@
+node_modules/
+waga.config.json
+*.sock
+*.log
