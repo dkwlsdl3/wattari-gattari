@@ -3,6 +3,7 @@
 - 상태: 채택
 - 결정일: 2026-09-02
 - 대체: ADR 0001, ADR 0002
+- 확장: 세션 탐색과 네이티브 TUI 진입 경로는 ADR 0004
 
 ## 맥락
 
@@ -20,8 +21,10 @@ Waga는 provider가 소유한 실제 세션 사이의 얇은 메시지 브리지
   사용합니다. 송신 중에만 임시 peer endpoint를 등록하고 반드시 정리합니다.
 - `CodexProvider`는 설치된 Codex의 기존 native App Server daemon에 직접 WebSocket으로
   연결합니다. 별도 App Server를 띄우거나 native daemon을 교체하지 않습니다.
-- `NativeLauncher`는 `claude agents`와 `codex agents` 실행만 위임합니다.
-- bare `waga`는 세션 목록을 출력하며 Waga 자체 TUI는 없습니다.
+- `NativeLauncher`는 provider의 Agents 화면과 정확한 native session attach 명령만
+  위임합니다.
+- bare `waga`의 작은 session dock은 ADR 0004가 정의합니다. transcript와 입력기는
+  계속 provider TUI만 소유하고, text 목록은 `waga list`가 제공합니다.
 - `send`는 제출까지만 확인하고, `ask`는 실제 대상 transcript의 한 turn에서 답변 한 건만
   기다립니다. 답변을 다른 세션으로 자동 전달하지 않습니다.
 - provider가 하나 고장 나도 다른 provider 목록은 경고와 함께 사용할 수 있습니다.
@@ -49,7 +52,8 @@ peer 메시지는 실제 대상 transcript를 깨우므로 read-only shadow가 �
 
 ## 결과
 
-세션 목록 UI, 입력 편집, 스크롤, 테마, slash command와 provider 업데이트는 Claude와
-Codex가 계속 소유합니다. Waga의 유지보수 표면은 두 provider adapter와 작은 CLI로
-줄어듭니다. 대신 provider의 비공개 또는 실험적 로컬 프로토콜이 바뀔 수 있으므로
-업데이트 뒤 `waga doctor`와 실제 smoke test가 필요합니다.
+입력 편집, transcript 스크롤, 대화 테마, slash command와 provider 업데이트는 Claude와
+Codex가 계속 소유합니다. Waga는 ADR 0004의 작은 session picker만 소유합니다. 유지보수
+표면은 두 provider adapter, attach 명령과 작은 CLI로 제한됩니다. 대신 provider의 비공개
+또는 실험적 로컬 프로토콜이 바뀔 수 있으므로 업데이트 뒤 `waga doctor`와 실제 smoke
+test가 필요합니다.

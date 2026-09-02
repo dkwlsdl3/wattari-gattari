@@ -5,17 +5,18 @@
 [![CI](https://github.com/dkwlsdl3/wattari-gattari/actions/workflows/ci.yml/badge.svg)](https://github.com/dkwlsdl3/wattari-gattari/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[English](README.md) · [아키텍처](docs/adr/0003-native-session-bridge.md) · [라이선스](LICENSE)
+[English](README.md) · [아키텍처](docs/adr/0004-tmux-native-session-dock.md) · [라이선스](LICENSE)
 
 Wattari Gattari(`waga`)는 Claude Code와 Codex가 각자의 세션, 터미널 UI, 도구,
 승인 체계와 업데이트를 그대로 소유하면서 서로를 찾고 메시지를 주고받게 합니다.
 
-Waga 전용 daemon도, 세 번째 채팅 UI도 없습니다. 평소처럼 `claude agents`와
-`codex agents`를 사용하고 두 제공자 사이의 핸드셰이크에만 Waga를 사용합니다.
+Waga 전용 daemon도, 네이티브 대화를 대체하는 채팅 UI도 없습니다. Waga는 작은 통합
+session dock만 제공하고, 세션을 열면 terminal을 각 provider의 네이티브 TUI에 넘깁니다.
 
 ## 제공 기능
 
 - 두 제공자의 살아 있는 네이티브 세션 발견
+- bare `waga` 통합 dock에서 정확한 네이티브 세션으로 바로 진입
 - `waga send`로 단방향 메시지 전송
 - `waga ask`로 정확히 한 번 질문하고 답변 한 건 수신
 - `waga open`으로 각 제공자의 기본 Agents UI 실행
@@ -33,8 +34,9 @@ flowchart LR
 - Node.js 22 이상
 - `agents`, `app-server daemon`을 지원하는 Codex CLI
 - `agents`, cross-session messaging을 지원하는 Claude Code
+- 대화형 dock에 사용할 tmux(`waga list`에는 필요 없음)
 
-이번 실제 호환성 검증은 Codex CLI 0.152.1과 Claude Code 2.1.258에서 수행했습니다.
+이번 실제 호환성 검증은 Codex CLI 0.152.1과 Claude Code 2.1.259에서 수행했습니다.
 제공자를 업데이트한 뒤에는 `waga doctor`를 실행해 주십시오.
 
 ## 설치
@@ -52,7 +54,7 @@ waga doctor
 ## 사용법
 
 ```bash
-waga
+waga                            # Claude + Codex 통합 dock
 waga list --provider claude
 waga list --cwd ~/work/my-app --json
 
@@ -67,6 +69,15 @@ waga doctor
 
 `waga agents`는 `waga list`의 별칭입니다. 제공자 접두사가 붙은 ID가 가장 안전하며,
 유일하게 일치하는 네이티브 ID나 세션 이름도 사용할 수 있습니다.
+
+dock에서는 `↑`/`↓`로 세션을 고르고 `Enter`로 네이티브 TUI를 엽니다. `/`는 검색,
+`Tab`은 provider 필터, `q`는 이전 화면 복귀입니다. 네이티브 TUI에서는 사용하는 tmux
+prefix 뒤 `0`을 눌러 dock으로 돌아옵니다. Waga 격리 tmux에서는 `Alt+G`도 동작합니다.
+
+tmux 밖에서 시작하면 Waga 전용 격리 server를 사용합니다. 이미 tmux 안이라면 현재
+server에 Waga session을 만들고 전환하므로 tmux 안에 tmux를 중첩하지 않습니다. Waga는
+mouse mode를 강제하지 않아 기존 tmux와 terminal의 드래그 선택 정책을 존중합니다.
+WezTerm 전용 구현도 아닙니다.
 
 네이티브 세션 안에서는 각 제공자의 일반 셸 도구나 셸 모드로 같은 명령을 실행합니다.
 Waga가 별도 슬래시 명령이나 시스템 프롬프트를 주입하지는 않습니다.
@@ -110,7 +121,9 @@ npm pack --dry-run
 npm run demo
 ```
 
-제공자 경계와 검증 계약은 [ADR 0003](docs/adr/0003-native-session-bridge.md)과
+네이티브 브리지, terminal dock과 검증 계약은
+[ADR 0003](docs/adr/0003-native-session-bridge.md),
+[ADR 0004](docs/adr/0004-tmux-native-session-dock.md),
 [루프 엔지니어링 프로토콜](docs/adr/2026-09-02-loop-engineering-protocol.md)에 있습니다.
 
 ## 라이선스

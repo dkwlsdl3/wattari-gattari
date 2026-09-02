@@ -5,18 +5,19 @@
 [![CI](https://github.com/dkwlsdl3/wattari-gattari/actions/workflows/ci.yml/badge.svg)](https://github.com/dkwlsdl3/wattari-gattari/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[한국어](README.ko.md) · [Architecture](docs/adr/0003-native-session-bridge.md) · [License](LICENSE)
+[한국어](README.ko.md) · [Architecture](docs/adr/0004-tmux-native-session-dock.md) · [License](LICENSE)
 
 Wattari Gattari (`waga`) lets Claude Code and Codex sessions find and message
 each other while both providers keep ownership of their sessions, terminal UI,
 tools, approvals, and updates.
 
-There is no Waga daemon and no third chat UI. Use `claude agents` and
-`codex agents` as usual; use Waga only for the handshake between them.
+There is no Waga daemon and no replacement chat UI. Waga adds a small session
+dock, then hands the terminal to each provider's native TUI.
 
 ## What it does
 
 - discovers live native sessions from both providers;
+- opens a unified dock with bare `waga` and jumps directly into an exact native session;
 - sends a one-way peer message with `waga send`;
 - asks for exactly one reply with `waga ask`;
 - opens either provider's native Agents UI with `waga open`;
@@ -34,9 +35,10 @@ flowchart LR
 - Node.js 22+
 - Codex CLI with `agents` and `app-server daemon`
 - Claude Code with `agents` and cross-session messaging
+- tmux for the interactive dock (`waga list` does not require it)
 
 The current live compatibility pass used Codex CLI 0.152.1 and Claude Code
-2.1.258. Run `waga doctor` after provider upgrades.
+2.1.259. Run `waga doctor` after provider upgrades.
 
 ## Install
 
@@ -53,7 +55,7 @@ waga doctor
 ## Usage
 
 ```bash
-waga
+waga                            # interactive Claude + Codex dock
 waga list --provider claude
 waga list --cwd ~/work/my-app --json
 
@@ -68,6 +70,16 @@ waga doctor
 
 `waga agents` is an alias for `waga list`. Provider-prefixed IDs are the safest
 targets; an exact unique native ID or session name also works.
+
+In the dock, use `↑`/`↓` to select a session, `Enter` to open its native TUI,
+`/` to search, `Tab` to filter providers, and `q` to return. From a native TUI,
+use your tmux prefix followed by `0` to return to the dock. Waga's isolated tmux
+server also provides `Alt+G`.
+
+When started outside tmux, Waga uses its own isolated tmux server. When started
+inside tmux, it creates a Waga session in the current server and switches to it;
+it does not nest tmux. Waga does not force mouse mode, so the current tmux and
+terminal selection policy remains in control. It does not depend on WezTerm.
 
 From a native session, run the same command through that provider's normal shell
 tool or shell mode. Waga does not inject custom slash commands or system prompts.
@@ -112,8 +124,10 @@ npm pack --dry-run
 npm run demo
 ```
 
-The provider boundary and loop contract live in [ADR 0003](docs/adr/0003-native-session-bridge.md)
-and [the loop engineering protocol](docs/adr/2026-09-02-loop-engineering-protocol.md).
+The native bridge, terminal dock, and verification contract live in
+[ADR 0003](docs/adr/0003-native-session-bridge.md),
+[ADR 0004](docs/adr/0004-tmux-native-session-dock.md), and
+[the loop engineering protocol](docs/adr/2026-09-02-loop-engineering-protocol.md).
 
 ## License
 
