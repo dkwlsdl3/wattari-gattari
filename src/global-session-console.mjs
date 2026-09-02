@@ -15,6 +15,7 @@ import { DISPLAY_NAME } from "./product.mjs";
 import { sessionTree, preserveCursor } from "./session-tree.mjs";
 import { shutdownDialogDecision, stopDialogDecision } from "./session-console-keys.mjs";
 import { matchSlashCommands, slashCommand, slashCommandsFor } from "./slash-commands.mjs";
+import { TerminalInputDecoder } from "./terminal-input-decoder.mjs";
 
 const ESC = "\x1b[";
 const reset = `${ESC}0m`;
@@ -30,7 +31,7 @@ const magenta = rgb(199, 146, 234);
 const yellow = rgb(255, 203, 107);
 const red = rgb(255, 83, 112);
 const orange = rgb(247, 140, 108);
-const userBackground = (text) => `${ESC}38;2;238;240;246m${ESC}48;2;44;48;64m${text}${reset}`;
+const userBackground = (text) => `${ESC}38;2;248;250;255m${ESC}48;2;52;64;96m${text}${reset}`;
 const cursorAnchor = "\u0000WAGA_CURSOR\u0000";
 const cursorSave = `${ESC}s`;
 const cursorRestore = `${ESC}u`;
@@ -38,7 +39,10 @@ const cursorShow = `${ESC}?25h`;
 const cursorHide = `${ESC}?25l`;
 const cursorBlinkingBar = `${ESC}5 q`;
 const cursorDefaultShape = `${ESC}0 q`;
+const mouseTrackingEnable = `${ESC}?1000h${ESC}?1006h`;
+const mouseTrackingDisable = `${ESC}?1006l${ESC}?1000l`;
 const execFileAsync = promisify(execFile);
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
 export async function runSessionConsole({
   paths = appPaths(),
@@ -62,6 +66,7 @@ let cursor = 0;
 let view = "overview";
 let detail = null;
 let input = "";
+let inputCursor = 0;
 let quickReply = null;
 let dialog = null;
 let notice = "전역 세션 허브에 연결 중";
@@ -76,6 +81,7 @@ let detailScroll = 0;
 let slashCursor = 0;
 const submittedHistory = [];
 const inputHistory = new InputHistory();
+const terminalInput = new TerminalInputDecoder();
 
 function nodes() {
   return sessionTree(state, collapsed);
@@ -116,8 +122,21 @@ function cellWidth(character) {
   return 1;
 }
 
+function graphemes(text) {
+  return [...graphemeSegmenter.segment(String(text))].map(({ segment }) => segment);
+}
+
+function graphemeEntries(text) {
+  return [...graphemeSegmenter.segment(String(text))];
+}
+
+function graphemeWidth(grapheme) {
+  if (/\p{Extended_Pictographic}/u.test(grapheme) || /^\p{Regional_Indicator}{2}$/u.test(grapheme)) return 2;
+  return [...grapheme].reduce((width, character) => width + cellWidth(character), 0);
+}
+
 function displayWidth(text) {
-  return [...String(text)].reduce((width, character) => width + cellWidth(character), 0);
+  return graphemes(text).reduce((width, grapheme) => width + graphemeWidth(grapheme), 0);
 }
 
 function padCells(text, width) {
@@ -128,8 +147,8 @@ function truncateCells(text, width) {
   if (displayWidth(text) <= width) return text;
   let value = "";
   let used = 0;
-  for (const character of String(text)) {
-    const size = cellWidth(character);
+  for (const character of graphemes(text)) {
+    const size = graphemeWidth(character);
     if (used + size > Math.max(0, width - 1)) break;
     value += character;
     used += size;
@@ -150,8 +169,8 @@ function wrapCells(text, width) {
     }
     let line = "";
     let used = 0;
-    for (const character of paragraph) {
-      const size = cellWidth(character);
+    for (const character of graphemes(paragraph)) {
+      const size = graphemeWidth(character);
       if (line && used + size > width) {
         lines.push(line);
         line = "";
@@ -163,6 +182,70 @@ function wrapCells(text, width) {
     lines.push(line);
   }
   return lines.length ? lines : [""];
+}
+
+function wrapInputCells(text, width, cursorPosition) {
+  const value = safeText(text);
+  const characters = graphemeEntries(value);
+  const position = Math.max(0, Math.min(value.length, cursorPosition));
+  const lines = [];
+  let line = "";
+  let used = 0;
+  for (const { segment: character, index } of characters) {
+    const size = character === "\n" ? 0 : graphemeWidth(character);
+    if (character !== "\n" && used > 0 && used + size > width) {
+      lines.push(line);
+      line = "";
+      used = 0;
+    }
+    if (index === position) line += cursorAnchor;
+    if (character === "\n") {
+      lines.push(line);
+      line = "";
+      used = 0;
+    } else {
+      line += character;
+      used += size;
+    }
+  }
+  if (position === value.length) line += cursorAnchor;
+  lines.push(line);
+  return lines;
+}
+
+function setInput(value) {
+  input = safeText(value);
+  inputCursor = input.length;
+}
+
+function insertInput(value) {
+  const insertion = safeText(value);
+  input = `${input.slice(0, inputCursor)}${insertion}${input.slice(inputCursor)}`;
+  inputCursor += insertion.length;
+}
+
+function moveInputCursor(direction) {
+  const boundaries = [...graphemeEntries(input).map(({ index }) => index), input.length];
+  if (direction < 0) inputCursor = [...boundaries].reverse().find((boundary) => boundary < inputCursor) ?? 0;
+  else inputCursor = boundaries.find((boundary) => boundary > inputCursor) ?? input.length;
+}
+
+function setInputCursor(position) {
+  inputCursor = Math.max(0, Math.min(input.length, position));
+}
+
+function deleteInputBeforeCursor() {
+  if (inputCursor === 0) return;
+  const previous = [...graphemeEntries(input)].reverse().find(({ index }) => index < inputCursor);
+  if (!previous) return;
+  input = `${input.slice(0, previous.index)}${input.slice(previous.index + previous.segment.length)}`;
+  inputCursor = previous.index;
+}
+
+function deleteInputAtCursor() {
+  const current = graphemeEntries(input).find(({ index }) => index >= inputCursor);
+  if (!current) return;
+  input = `${input.slice(0, current.index)}${input.slice(current.index + current.segment.length)}`;
 }
 
 function fit(text, width) {
@@ -294,10 +377,12 @@ function inputPanel(width, { title = null } = {}) {
   const provider = view === "overview" ? newSessionProvider : detail?.provider;
   const accent = provider === "claude" ? orange : blue;
   const contentWidth = Math.max(1, width - 3);
-  const values = wrapCells(input || placeholder, contentWidth);
+  const values = input
+    ? (dialog ? wrapCells(input, contentWidth) : wrapInputCells(input, contentWidth, inputCursor))
+    : wrapCells(placeholder, contentWidth);
   const inputLines = values.map((line, index) => {
     const marker = index === 0 ? accent("›") : " ";
-    if (input) return `${marker} ${line}${index === values.length - 1 ? anchor : ""}`;
+    if (input) return `${marker} ${line}`;
     return `${marker} ${index === 0 ? anchor : ""}${dim(line)}`;
   });
   return [namedDivider(width, title), ...inputLines, divider];
@@ -336,12 +421,9 @@ function messageLines(message, width) {
 
 function allTranscriptLines(width) {
   const messages = detail?.messages ?? [];
-  return messages.flatMap((message, index) => {
+  return messages.flatMap((message) => {
     const lines = messageLines(message, width);
-    const nextMessage = messages[index + 1];
-    return message.role === "user" && nextMessage && nextMessage.role !== "user"
-      ? [...lines, ""]
-      : lines;
+    return message.role === "user" ? ["", ...lines, ""] : lines;
   });
 }
 
@@ -370,7 +452,8 @@ function transcriptCapacity(width) {
 
 function overviewHelp() {
   const focused = focusedNode();
-  if (quickReply) return "Enter send · Esc cancel · ↑/↓ input history";
+  if (quickReply) return "Enter send · Esc cancel · ←/→ cursor · ↑/↓ input history";
+  if (input) return "Enter create · Esc clear · ←/→ cursor · ↑/↓ input history";
   if (focused?.type === "workspace") return "↑/↓ select · Enter collapse/expand · Tab Codex/Claude · type+Enter new · Ctrl+X stop all · Ctrl+C detach · Ctrl+Q stop service";
   if (focused?.type === "session") return "↑/↓ select · Enter/→ open · Space reply · Shift+↑/↓ reorder · F2 rename · F3 complete/reopen · Ctrl+X stop";
   return "type+Enter new · Ctrl+C detach · Ctrl+Q stop service";
@@ -548,7 +631,7 @@ async function openFocusedSession() {
   view = focused.session.threadId;
   detail = { ...focused.session, messages: [] };
   detailScroll = 0;
-  input = "";
+  setInput("");
   inputHistory.reset();
   notice = focused.session.status === "Sleeping" ? "저장된 대화 불러오는 중" : "대화 불러오는 중";
   render();
@@ -570,7 +653,7 @@ async function submitInput() {
   if (!text) return;
   const commandName = text.split(/\s+/, 1)[0];
   if (view !== "overview" && slashCommand(detail?.provider, commandName)) {
-    input = "";
+    setInput("");
     inputHistory.reset();
     try {
       await runSlashCommand(text);
@@ -580,7 +663,7 @@ async function submitInput() {
     render();
     return;
   }
-  input = "";
+  setInput("");
   inputHistory.reset();
   submittedHistory.push(text);
   if (submittedHistory.length > 100) submittedHistory.shift();
@@ -685,13 +768,14 @@ async function runSlashCommand(text) {
   }
 }
 
-async function loadOlder() {
+async function loadOlder(lines = null) {
   if (!detail || loadingDetail) return;
   const width = outputStream.columns ?? 120;
   const capacity = transcriptCapacity(width);
   const lineCount = allTranscriptLines(width).length;
   if (detailScroll + capacity < lineCount) {
-    detailScroll = Math.min(Math.max(0, lineCount - 1), detailScroll + capacity);
+    const step = lines ?? capacity;
+    detailScroll = Math.min(Math.max(0, lineCount - capacity), detailScroll + step);
     render();
     return;
   }
@@ -712,9 +796,9 @@ async function loadOlder() {
   }
 }
 
-function loadNewer() {
+function loadNewer(lines = null) {
   const capacity = transcriptCapacity(outputStream.columns ?? 120);
-  detailScroll = Math.max(0, detailScroll - capacity);
+  detailScroll = Math.max(0, detailScroll - (lines ?? capacity));
   render();
 }
 
@@ -770,10 +854,14 @@ function cleanup(exitCode = 0) {
   if (detailRefreshTimer) clearTimeout(detailRefreshTimer);
   if (workingTimer) clearInterval(workingTimer);
   inputStream.off("keypress", onKeypress);
+  terminalInput.off("keypress", onKeypress);
+  terminalInput.off("wheel", onMouseWheel);
+  inputStream.unpipe?.(terminalInput);
+  terminalInput.destroy();
   outputStream.off?.("resize", onResize);
   inputStream.setRawMode?.(false);
   inputStream.pause?.();
-  outputStream.write(`${cursorShow}${cursorDefaultShape}${reset}\n`);
+  outputStream.write(`${mouseTrackingDisable}${cursorShow}${cursorDefaultShape}${reset}\n`);
   client.close();
   if (listenForSignals) process.off("SIGTERM", onSigterm);
   resolveRun?.({ exitCode });
@@ -797,10 +885,11 @@ state = await client.request("workspace/register", { path: defaultWorkspace });
 notice = "";
 render();
 
-readline.emitKeypressEvents(inputStream);
+inputStream.pipe(terminalInput);
+readline.emitKeypressEvents(terminalInput);
 inputStream.setRawMode?.(true);
 inputStream.resume();
-outputStream.write(cursorHide);
+outputStream.write(`${mouseTrackingEnable}${cursorHide}`);
 const onKeypress = (text, key) => {
   if (dialog?.kind === "approval") {
     if (key.name === "y" || key.name === "n") void resolveApproval(key.name === "y" ? "approve" : "deny");
@@ -831,41 +920,64 @@ const onKeypress = (text, key) => {
   }
   if (key.name === "escape" && quickReply) {
     quickReply = null;
-    input = "";
+    setInput("");
+    render();
+    return;
+  }
+  if (key.name === "escape" && view === "overview" && input) {
+    setInput("");
+    slashCursor = 0;
     render();
     return;
   }
   if (view !== "overview") {
     const matches = slashMatches();
-    if (key.name === "escape" && input) { input = ""; slashCursor = 0; render(); }
+    if (key.name === "escape" && input) { setInput(""); slashCursor = 0; render(); }
     else if (key.name === "escape" && displayedStatus(detail) === "Working") {
       void interruptCurrent().finally(render);
     }
+    else if (key.name === "left" && inputCursor > 0) { moveInputCursor(-1); render(); }
+    else if (key.name === "right" && inputCursor < input.length) { moveInputCursor(1); render(); }
+    else if (key.name === "home") { setInputCursor(0); render(); }
+    else if (key.name === "end") { setInputCursor(input.length); render(); }
     else if (key.name === "left" && !input) { view = "overview"; detail = null; render(); }
     else if (key.name === "pageup") void loadOlder();
     else if (key.name === "pagedown") loadNewer();
     else if (key.name === "up" && matches.length) { slashCursor = Math.max(0, slashCursor - 1); render(); }
     else if (key.name === "down" && matches.length) { slashCursor = Math.min(matches.length - 1, slashCursor + 1); render(); }
-    else if (key.name === "tab" && matches.length) { input = matches[slashCursor].name; render(); }
-    else if (key.name === "up") { input = inputHistory.previous(input); render(); }
-    else if (key.name === "down") { input = inputHistory.next(input); render(); }
+    else if (key.name === "tab" && matches.length) { setInput(matches[slashCursor].name); render(); }
+    else if (key.name === "up") { setInput(inputHistory.previous(input)); render(); }
+    else if (key.name === "down") { setInput(inputHistory.next(input)); render(); }
     else if (key.name === "return" && matches.length && !matches.some(({ name }) => name === input)) {
-      input = matches[slashCursor].name;
+      setInput(matches[slashCursor].name);
       void submitInput();
     }
     else if (key.name === "return") void submitInput();
-    else if (key.name === "backspace") { input = input.slice(0, -1); slashCursor = 0; render(); }
-    else if (!key.ctrl && !key.meta && text) { input += text; slashCursor = 0; render(); }
+    else if (key.name === "backspace") { deleteInputBeforeCursor(); slashCursor = 0; render(); }
+    else if (key.name === "delete") { deleteInputAtCursor(); slashCursor = 0; render(); }
+    else if (!key.ctrl && !key.meta && text) { insertInput(text); slashCursor = 0; render(); }
     return;
   }
 
   const currentNodes = nodes();
   const focused = focusedNode();
   if ((input || quickReply) && key.name === "up") {
-    input = inputHistory.previous(input);
+    setInput(inputHistory.previous(input));
     render();
   } else if ((input || quickReply) && key.name === "down") {
-    input = inputHistory.next(input);
+    setInput(inputHistory.next(input));
+    render();
+  } else if ((input || quickReply) && key.name === "left") {
+    moveInputCursor(-1);
+    render();
+  } else if ((input || quickReply) && key.name === "right") {
+    moveInputCursor(1);
+    render();
+  } else if ((input || quickReply) && key.name === "home") {
+    setInputCursor(0);
+    render();
+  } else if ((input || quickReply) && key.name === "end") {
+    setInputCursor(input.length);
     render();
   } else if (key.name === "tab" && !input && !quickReply) {
     newSessionProvider = newSessionProvider === "codex" ? "claude" : "codex";
@@ -893,12 +1005,16 @@ const onKeypress = (text, key) => {
     void openFocusedSession();
   } else if (key.name === "space" && !input && focused?.type === "session") {
     quickReply = focused.session;
+    setInput("");
     inputHistory.setEntries(submittedHistory);
     render();
   } else if (key.name === "return") {
     void submitInput();
   } else if (key.name === "backspace") {
-    input = input.slice(0, -1);
+    deleteInputBeforeCursor();
+    render();
+  } else if (key.name === "delete") {
+    deleteInputAtCursor();
     render();
   } else if (key.name === "f2" && focused?.type === "session") {
     dialog = {
@@ -935,11 +1051,25 @@ const onKeypress = (text, key) => {
     };
     render();
   } else if (!key.ctrl && !key.meta && text) {
-    input += text;
+    insertInput(text);
     render();
   }
 };
 inputStream.on("keypress", onKeypress);
+terminalInput.on("keypress", onKeypress);
+const onMouseWheel = ({ direction }) => {
+  if (dialog) return;
+  if (view === "overview") {
+    cursor = direction === "up"
+      ? Math.max(0, cursor - 1)
+      : Math.min(Math.max(0, nodes().length - 1), cursor + 1);
+    render();
+    return;
+  }
+  if (direction === "up") void loadOlder(3);
+  else loadNewer(3);
+};
+terminalInput.on("wheel", onMouseWheel);
 outputStream.on?.("resize", onResize);
 
 const onSigterm = () => cleanup(143);

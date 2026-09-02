@@ -61,6 +61,38 @@ class FakeControlClient extends EventEmitter {
   close() { this.closed = true; }
 }
 
+class LongTranscriptClient extends FakeControlClient {
+  async request(method, params) {
+    if (method !== "session/open" && method !== "session/read") return super.request(method, params);
+    this.requests.push({ method, params });
+    return {
+      ...this.session(),
+      messages: Array.from({ length: 40 }, (_, index) => ({
+        id: `agent-${index}`,
+        role: "agent",
+        text: `message-${index}`,
+      })),
+      hasOlderMessages: false,
+    };
+  }
+}
+
+class AlternatingTranscriptClient extends FakeControlClient {
+  async request(method, params) {
+    if (method !== "session/open" && method !== "session/read") return super.request(method, params);
+    this.requests.push({ method, params });
+    return {
+      ...this.session(),
+      messages: [
+        { id: "agent-1", role: "agent", text: "첫 답변" },
+        { id: "user-1", role: "user", text: "추가 질문" },
+        { id: "agent-2", role: "agent", text: "둘째 답변" },
+      ],
+      hasOlderMessages: false,
+    };
+  }
+}
+
 test("runs the real console interface with fake terminal and control adapters", async () => {
   const input = new PassThrough();
   const output = new PassThrough();
@@ -123,7 +155,7 @@ test("renders a bottom composer, compact transcript, status line, slash menu, an
   await new Promise((resolve) => setImmediate(resolve));
   const frame = rendered.slice(rendered.lastIndexOf("\x1b[2J"));
   assert.match(frame, /\[ first \]/);
-  assert.match(frame, /48;2;44;48;64m/);
+  assert.match(frame, /48;2;52;64;96m/);
   assert.match(frame, /•\x1b\[0m 확인했습니다/);
   const plainLines = frame.replaceAll(/\x1b\[[0-9;? ]*[A-Za-z]/g, "").split("\n");
   const userLine = plainLines.findIndex((line) => line.trimEnd() === "› 세션을 확인해 주세요");
@@ -144,7 +176,7 @@ test("renders a bottom composer, compact transcript, status line, slash menu, an
   const resizedFrame = rendered.slice(rendered.lastIndexOf("\x1b[2J"));
   assert.equal(resizedFrame.split("\n").length, 18);
   assert.ok(
-    resizedFrame.split("48;2;44;48;64m").length - 1 >= 2,
+    resizedFrame.split("48;2;52;64;96m").length - 1 >= 2,
     "좁아진 열 너비에 맞춰 사용자 메시지를 다시 줄바꿈해야 한다",
   );
   const plainResizedFrame = resizedFrame.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
@@ -204,6 +236,143 @@ test("renders a bottom composer, compact transcript, status line, slash menu, an
     method: "session/interrupt",
     params: { workspacePath: "/workspace", threadId: "thread-1" },
   });
+
+  input.emit("keypress", "", { name: "c", ctrl: true, meta: false, shift: false });
+  assert.deepEqual(await running, { exitCode: 0 });
+});
+
+test("mouse wheel scrolls the visible transcript without typing escape bytes into the composer", async () => {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  output.columns = 80;
+  output.rows = 16;
+  let rendered = "";
+  output.on("data", (chunk) => { rendered += chunk.toString("utf8"); });
+  const client = new LongTranscriptClient();
+  const running = runSessionConsole({
+    paths: { controlSocketPath: "/tmp/not-used.sock" },
+    ensureDaemon: async () => {},
+    createClient: () => client,
+    inputStream: input,
+    outputStream: output,
+    workspacePath: "/workspace",
+    listenForSignals: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  input.emit("keypress", "", { name: "down", ctrl: false, meta: false, shift: false });
+  input.emit("keypress", "", { name: "return", ctrl: false, meta: false, shift: false });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  input.write("\x1b[<64;10;10M");
+  await new Promise((resolve) => setImmediate(resolve));
+  const frame = rendered.slice(rendered.lastIndexOf("\x1b[2J"));
+  const plain = frame.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
+  assert.match(rendered, /\x1b\[\?1000h\x1b\[\?1006h/);
+  assert.match(plain, /↓ 3 newer lines/);
+  assert.doesNotMatch(plain, /64;10;10M/);
+
+  input.emit("keypress", "", { name: "c", ctrl: true, meta: false, shift: false });
+  assert.deepEqual(await running, { exitCode: 0 });
+  assert.match(rendered, /\x1b\[\?1006l\x1b\[\?1000l/);
+});
+
+test("raw Escape cancels quick reply without readline's half-second ambiguity delay", async () => {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  output.columns = 80;
+  output.rows = 20;
+  let rendered = "";
+  output.on("data", (chunk) => { rendered += chunk.toString("utf8"); });
+  const client = new FakeControlClient();
+  const running = runSessionConsole({
+    paths: { controlSocketPath: "/tmp/not-used.sock" },
+    ensureDaemon: async () => {},
+    createClient: () => client,
+    inputStream: input,
+    outputStream: output,
+    workspacePath: "/workspace",
+    listenForSignals: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  input.emit("keypress", "", { name: "down", ctrl: false, meta: false, shift: false });
+  input.emit("keypress", " ", { name: "space", ctrl: false, meta: false, shift: false });
+  assert.match(rendered.slice(rendered.lastIndexOf("\x1b[2J")), /reply to first/);
+
+  input.write("\x1b");
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.doesNotMatch(rendered.slice(rendered.lastIndexOf("\x1b[2J")), /reply to first/);
+
+  input.emit("keypress", "", { name: "c", ctrl: true, meta: false, shift: false });
+  assert.deepEqual(await running, { exitCode: 0 });
+});
+
+test("composer edits Unicode text at the visible arrow-key cursor", async () => {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  output.columns = 80;
+  output.rows = 20;
+  const client = new FakeControlClient();
+  const running = runSessionConsole({
+    paths: { controlSocketPath: "/tmp/not-used.sock" },
+    ensureDaemon: async () => {},
+    createClient: () => client,
+    inputStream: input,
+    outputStream: output,
+    workspacePath: "/workspace",
+    listenForSignals: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  input.write("가👨‍👩‍👧‍👦나");
+  input.write("\x1b[D");
+  input.write("\x7f");
+  input.write("X");
+  input.write("\x1b[3~");
+  input.write("\x1b[H");
+  input.write("새");
+  input.write("\x1b[F");
+  input.write(" 세션");
+  input.write("\r");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(client.requests.findLast(({ method }) => method === "session/create"), {
+    method: "session/create",
+    params: { workspacePath: "/workspace", prompt: "새가X 세션", provider: "codex" },
+  });
+
+  input.emit("keypress", "", { name: "c", ctrl: true, meta: false, shift: false });
+  assert.deepEqual(await running, { exitCode: 0 });
+});
+
+test("user transcript blocks have distinct contrast and blank lines on both sides", async () => {
+  const input = new PassThrough();
+  const output = new PassThrough();
+  output.columns = 80;
+  output.rows = 20;
+  let rendered = "";
+  output.on("data", (chunk) => { rendered += chunk.toString("utf8"); });
+  const running = runSessionConsole({
+    paths: { controlSocketPath: "/tmp/not-used.sock" },
+    ensureDaemon: async () => {},
+    createClient: () => new AlternatingTranscriptClient(),
+    inputStream: input,
+    outputStream: output,
+    workspacePath: "/workspace",
+    listenForSignals: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  input.emit("keypress", "", { name: "down", ctrl: false, meta: false, shift: false });
+  input.emit("keypress", "", { name: "return", ctrl: false, meta: false, shift: false });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const frame = rendered.slice(rendered.lastIndexOf("\x1b[2J"));
+  const plainLines = frame.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").split("\n");
+  const firstAgent = plainLines.findIndex((line) => line === "• 첫 답변");
+  const user = plainLines.findIndex((line) => line.trimEnd() === "› 추가 질문");
+  const secondAgent = plainLines.findIndex((line) => line === "• 둘째 답변");
+  assert.equal(user, firstAgent + 2);
+  assert.equal(secondAgent, user + 2);
+  assert.match(frame, /48;2;52;64;96m/);
 
   input.emit("keypress", "", { name: "c", ctrl: true, meta: false, shift: false });
   assert.deepEqual(await running, { exitCode: 0 });

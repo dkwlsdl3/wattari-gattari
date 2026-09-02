@@ -48,7 +48,7 @@ up human control over their lifetime or sensitive approvals.
 - **Screen-independent lifetime** — the daemon keeps sessions and active turns alive after the TUI closes.
 - **Shared across projects** — TUIs opened from different directories receive the same global state immediately.
 - **Direct conversation control** — create, message, steer an active Codex turn, interrupt, rename, reorder, complete, reopen, and explicitly stop sessions.
-- **Agent-native conversation view** — a bottom composer, compact agent bullets, highlighted user prompts, a live activity line above the composer, and provider metadata below it.
+- **Agent-native conversation view** — a bottom composer, compact agent bullets, clearly separated high-contrast user prompt blocks, a live activity line above the composer, and provider metadata below it.
 - **Dark-terminal palette** — muted true-colour accents distinguish Codex, Claude, prompts, and status metadata while the terminal keeps control of the font.
 - **Bounded transcripts** — refresh only the latest 100 items and load older history explicitly with `PageUp`.
 - **Direct approval gate** — sensitive Codex actions require a one-time decision from the foreground TUI.
@@ -125,6 +125,8 @@ initializes Codex App Server and validates the output of Claude
 | Key | Action |
 |---|---|
 | `↑` / `↓` | Select a project or session, or browse input history |
+| `←` / `→`, `Home` / `End` | Move within composer text (`←` returns to the list only when the conversation composer is empty) |
+| `Backspace` / `Delete` | Delete the character before or under the composer cursor |
 | `Enter` / `→` | Collapse or expand a project, or open a session |
 | `←` | Return from a conversation to the session list |
 | `Space` | Quickly reply to the selected session |
@@ -133,7 +135,8 @@ initializes Codex App Server and validates the output of Claude
 | `F2` | Rename the selected session |
 | `F3` | Mark an idle session `Completed`, or reopen it |
 | `PageUp` / `PageDown` | Navigate a long transcript and load older pages |
-| `Esc` | Interrupt the active turn while its conversation composer is empty |
+| Mouse wheel | Move through the session list or scroll a conversation by three lines |
+| `Esc` | Cancel a quick reply, clear composer text, or interrupt an active turn when the conversation composer is empty |
 | `Ctrl+X`, `Ctrl+X` | Stop the selected session or all sessions in a project |
 | `Ctrl+C` | Detach only the TUI |
 | `Ctrl+Q`, `Ctrl+Q` | Stop the shared daemon |
