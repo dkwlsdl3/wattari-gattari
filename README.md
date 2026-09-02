@@ -1,52 +1,42 @@
 # Wattari Gattari
 
-> A lightweight terminal switchboard for native Codex and Claude Code sessions.
+> A thin message bridge between native Claude Code and Codex sessions.
 
-[한국어](README.ko.md) · [Architecture decision](docs/adr/0002-native-provider-tui-wrapper.md) · [License](LICENSE)
+[![CI](https://github.com/dkwlsdl3/wattari-gattari/actions/workflows/ci.yml/badge.svg)](https://github.com/dkwlsdl3/wattari-gattari/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Wattari Gattari gives you one project-oriented overview, then gets out of the
-way. Select a session and continue in the provider's own terminal UI—with its
-real composer, slash commands, approvals, diffs, status line, scrolling, and
-input behavior.
+[한국어](README.ko.md) · [Architecture](docs/adr/0003-native-session-bridge.md) · [License](LICENSE)
 
-It is intentionally a wrapper, not another agent chat client.
+Wattari Gattari (`waga`) lets Claude Code and Codex sessions find and message
+each other while both providers keep ownership of their sessions, terminal UI,
+tools, approvals, and updates.
 
-## Why
+There is no Waga daemon and no third chat UI. Use `claude agents` and
+`codex agents` as usual; use Waga only for the handshake between them.
 
-Codex and Claude Code already ship capable terminal interfaces. Reimplementing
-those interfaces creates lag, terminal bugs, and a permanent compatibility
-burden. Wattari Gattari keeps only the small layer that is useful across both:
+## What it does
 
-- one overview for multiple workspaces and providers;
-- quick handoff to an existing native session;
-- session names, ordering, completion markers, and explicit stop controls;
-- one-shot, read-only peer questions through `waga ask`;
-- a background control service so the overview can detach and reconnect.
-
-## How it works
+- discovers live native sessions from both providers;
+- sends a one-way peer message with `waga send`;
+- asks for exactly one reply with `waga ask`;
+- opens either provider's native Agents UI with `waga open`;
+- labels peer input as untrusted and never grants permissions or approvals.
 
 ```mermaid
 flowchart LR
-  Human[You] --> Waga[Waga overview]
-  Waga -->|resume over App Server socket| Codex[Native Codex TUI]
-  Waga -->|attach| Claude[Native Claude TUI]
-  Waga --> Host[Local control daemon]
-  Host --> Shadow[Read-only peer shadow]
+  C[Claude Code session] <-->|native peer Unix socket| W[Waga ask / send]
+  W <-->|native daemon tool output| X[Codex session]
 ```
-
-Waga suspends its own raw input while a provider TUI is active and restores the
-overview after that process exits. It never enables terminal mouse reporting,
-so selection and scrollback remain terminal-native.
 
 ## Requirements
 
-- Linux or macOS terminal
+- Linux (Claude peer transport currently uses Unix sockets)
 - Node.js 22+
-- Codex CLI with App Server and `--remote` support
-- Claude Code CLI with `agents` and `attach` support
+- Codex CLI with `agents` and `app-server daemon`
+- Claude Code with `agents` and cross-session messaging
 
-The live versions used for the current compatibility pass were Codex CLI
-0.152.1 and Claude Code 2.1.258.
+The current live compatibility pass used Codex CLI 0.152.1 and Claude Code
+2.1.258. Run `waga doctor` after provider upgrades.
 
 ## Install
 
@@ -58,73 +48,59 @@ npm link
 waga doctor
 ```
 
+`npm link` installs the local `waga` command. The project is not published to npm.
+
 ## Usage
 
 ```bash
-waga                         # register this directory and open the overview
-waga --cwd ~/work/my-app     # open from another workspace
-waga agents                  # list sessions visible to peer questions
-waga ask <session> <task>    # one read-only shadow question
-waga doctor                  # check local CLI/runtime compatibility
-waga stop                    # stop the Waga control service
+waga
+waga list --provider claude
+waga list --cwd ~/work/my-app --json
+
+waga ask claude:<session-id> "Review the current API contract"
+waga ask codex:<thread-id> "What is blocking the test?" --timeout 60
+waga send codex:<thread-id> "The migration plan changed; inspect the ADR"
+
+waga open claude
+waga open codex --cwd ~/work/my-app
+waga doctor
 ```
 
-Overview keys:
+`waga agents` is an alias for `waga list`. Provider-prefixed IDs are the safest
+targets; an exact unique native ID or session name also works.
 
-| Key | Action |
-|---|---|
-| `↑` / `↓` | Move selection |
-| `Enter` / `→` | Expand a workspace or open the selected native TUI |
-| `N` | Create/open a native session |
-| `Tab` | Switch the new-session provider |
-| `F2` | Rename Waga session metadata |
-| `F3` | Mark complete/reopen |
-| `Shift+↑` / `Shift+↓` | Reorder a session |
-| `Ctrl+X` | Stop the selected session or workspace sessions, after confirmation |
-| `Ctrl+C` | Detach the overview |
-| `Ctrl+Q` | Stop the Waga service, after confirmation |
+From a native session, run the same command through that provider's normal shell
+tool or shell mode. Waga does not inject custom slash commands or system prompts.
 
-Inside a session, use the provider's normal keys and slash commands. Waga does
-not emulate them.
+## Trust and delivery
 
-## Native handoff contract
+Every message says that it came from another session, not the user. It is never
+permission to edit files, change settings, use credentials, or touch external
+systems. The receiving agent still decides what to do under its existing native
+sandbox and approval policy.
 
-- Existing Codex session:
-  `codex --remote unix://<waga-socket> -C <workspace> resume <thread-id>`
-- New Codex session: the same native TUI creates the persistent thread directly;
-  Waga observes `thread/started` and adds it to the overview
-- Existing Claude background session: `claude attach <short-id>`
-- New Claude session: `claude agents --cwd <workspace>` with Waga's bundled,
-  prompt-only peer-protocol agent loaded as the default
+`waga ask` writes one peer turn into the real target transcript and waits for one
+answer. It does not fork a shadow conversation and never auto-forwards an answer.
 
-The managed Codex service inherits the user's normal Codex configuration. Waga
-does not disable plugins, MCP servers, skills, or native approval behavior.
-Peer-shadow execution is separate and remains ephemeral, read-only, and stripped
-of external mutation surfaces.
+For unattended Claude replies, the target must allow inbound messages, for example:
 
-New sessions opened by Waga learn `waga agents` and `waga ask` automatically.
-`waga ask` is not just inventory: it asks an isolated shadow fork carrying the
-target session's context and returns one answer to the calling session. Either
-session can initiate; the request does not mutate the target transcript or start
-an automatic relay.
-Claude sessions that already existed before Waga keep their recorded system
-prompt; Waga does not rewrite that history.
+```bash
+claude agents --settings '{"crossSessionInbound":"accept"}'
+```
+
+With `hold`, Claude visibly holds the message for user review and does not run it.
+Current Claude builds may not return that hold status to Waga, so `waga ask` can
+end as `TIMEOUT`; the held message remains visible in the native Claude UI.
+
+Codex messages use a standalone App Server tool-output turn on the existing native
+daemon. Waga declines any approval request addressed to its short-lived connection
+and never stops or replaces the native daemon.
 
 ## Demo
 
-Run the real overview against fake local data:
-
-```bash
-npm run demo:tui
-```
-
-Record the terminal demo with [VHS](https://github.com/charmbracelet/vhs):
-
-```bash
-npm run demo:record
-```
-
-The demo never starts a real model session.
+`npm run demo` exercises the bridge contract with fake local providers and no
+model calls. A [VHS](https://github.com/charmbracelet/vhs) tape is included; after
+installing VHS, record it with `npm run demo:record`.
 
 ## Development
 
@@ -133,19 +109,11 @@ npm test
 npm run test:coverage
 npm run check
 npm pack --dry-run
+npm run demo
 ```
 
-The architecture contract lives in
-[ADR 0002](docs/adr/0002-native-provider-tui-wrapper.md). The old custom
-conversation-screen specification is preserved only as historical context in
-[the superseded TUI note](docs/tui-v0.md).
-
-## Status
-
-Wattari Gattari is an early local-first project. The provider command seams and
-control-plane behavior are covered by tests, but compatibility can change when
-Codex or Claude change their CLI contracts. Run `waga doctor` after upgrading a
-provider.
+The provider boundary and loop contract live in [ADR 0003](docs/adr/0003-native-session-bridge.md)
+and [the loop engineering protocol](docs/adr/2026-09-02-loop-engineering-protocol.md).
 
 ## License
 
