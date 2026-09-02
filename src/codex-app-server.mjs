@@ -4,7 +4,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough, Writable } from "node:stream";
-import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
 import { VERSION } from "./product.mjs";
 
@@ -19,8 +18,6 @@ const SHADOW_DISABLED_FEATURES = [
   "multi_agent",
   "plugins",
 ];
-export const APPROVAL_GATE_PATH = fileURLToPath(new URL("./approval-gate.mjs", import.meta.url));
-export const APPROVAL_HOOK_MATCHER = "^(Bash|apply_patch|write_stdin|request_permissions)$";
 
 function safeAppServerArgs({ mcpServerNames, disabledFeatures }) {
   const args = [
@@ -39,11 +36,6 @@ function safeAppServerArgs({ mcpServerNames, disabledFeatures }) {
   }
   for (const feature of disabledFeatures) args.push("--disable", feature);
   return args;
-}
-
-export function managedApprovalHookOverride() {
-  const command = `node ${JSON.stringify(APPROVAL_GATE_PATH)}`;
-  return `hooks.PreToolUse=[{matcher=${JSON.stringify(APPROVAL_HOOK_MATCHER)},hooks=[{type="command",command=${JSON.stringify(command)},timeout=130,statusMessage="waga 직접 승인 확인"}]}]`;
 }
 
 export function configuredMcpServerNames(configText) {
@@ -70,21 +62,14 @@ export function shadowAppServerArgs({ mcpServerNames = [] } = {}) {
   ];
 }
 
-export function managedAppServerArgs(socketPath, { mcpServerNames = [] } = {}) {
+export function managedAppServerArgs(socketPath) {
   if (typeof socketPath !== "string" || !path.isAbsolute(socketPath)) {
     throw new AppServerError("CODEX_SOCKET_PATH_INVALID", "Managed App Server socket path must be absolute");
   }
-  const disabledFeatures = SHADOW_DISABLED_FEATURES.filter((feature) => feature !== "hooks");
   return [
-    "--dangerously-bypass-hook-trust",
     "app-server",
     "--listen",
     `unix://${socketPath}`,
-    ...safeAppServerArgs({ mcpServerNames, disabledFeatures }),
-    "--enable",
-    "hooks",
-    "-c",
-    managedApprovalHookOverride(),
   ];
 }
 

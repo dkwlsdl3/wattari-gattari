@@ -10,7 +10,7 @@ import {
   migrateLegacyState,
   stopWagaDaemon,
 } from "../src/waga-background.mjs";
-import { VERSION } from "../src/product.mjs";
+import { DAEMON_PROTOCOL_VERSION, VERSION } from "../src/product.mjs";
 
 function testPaths(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-daemon-test-"));
@@ -43,7 +43,7 @@ test("starts one detached daemon and reuses its reachable control socket", async
   const first = await ensureWagaDaemon({
     paths,
     probe: async () => reachable,
-    inspect: async () => ({ version: VERSION }),
+    inspect: async () => ({ version: VERSION, protocolVersion: DAEMON_PROTOCOL_VERSION }),
     alive: () => true,
     startDaemon: () => {
       starts += 1;
@@ -51,7 +51,12 @@ test("starts one detached daemon and reuses its reachable control socket", async
       return 4242;
     },
   });
-  const second = await ensureWagaDaemon({ paths, probe: async () => true, inspect: async () => ({ version: VERSION }), alive: () => true });
+  const second = await ensureWagaDaemon({
+    paths,
+    probe: async () => true,
+    inspect: async () => ({ version: VERSION, protocolVersion: DAEMON_PROTOCOL_VERSION }),
+    alive: () => true,
+  });
   assert.equal(first.started, true);
   assert.equal(second.started, false);
   assert.equal(starts, 1);
@@ -87,8 +92,36 @@ test("refuses to reuse a daemon from a different installed version", async (t) =
   await assert.rejects(ensureWagaDaemon({
     paths,
     probe: async () => true,
-    inspect: async () => ({ version: "0.1.0" }),
+    inspect: async () => ({ version: "0.1.0", protocolVersion: DAEMON_PROTOCOL_VERSION }),
   }), { code: "DAEMON_VERSION_MISMATCH" });
+});
+
+test("refuses to reuse stale code under the same package version", async (t) => {
+  const paths = testPaths(t);
+  await assert.rejects(ensureWagaDaemon({
+    paths,
+    probe: async () => true,
+    inspect: async () => ({ version: VERSION, protocolVersion: DAEMON_PROTOCOL_VERSION - 1 }),
+  }), { code: "DAEMON_VERSION_MISMATCH" });
+});
+
+test("never replaces an unreachable socket when a sandbox cannot see the host pid", async (t) => {
+  const paths = testPaths(t);
+  fs.mkdirSync(paths.runtimeDirectory, { recursive: true });
+  fs.writeFileSync(paths.daemonPidPath, "4242\n", { mode: 0o600 });
+  fs.writeFileSync(paths.controlSocketPath, "host socket placeholder", { mode: 0o600 });
+  let starts = 0;
+
+  await assert.rejects(ensureWagaDaemon({
+    paths,
+    probe: async () => false,
+    alive: () => false,
+    startDaemon: () => { starts += 1; return 9999; },
+  }), /Refusing to replace an unreachable control socket/);
+
+  assert.equal(starts, 0);
+  assert.equal(fs.readFileSync(paths.daemonPidPath, "utf8"), "4242\n");
+  assert.equal(fs.readFileSync(paths.controlSocketPath, "utf8"), "host socket placeholder");
 });
 
 test("stops only a verified daemon through its control interface", async (t) => {

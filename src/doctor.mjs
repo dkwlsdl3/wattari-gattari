@@ -7,7 +7,7 @@ import { appPaths } from "./app-paths.mjs";
 import { parseClaudeAgents } from "./claude-session-service.mjs";
 import { CodexAppServerClient } from "./codex-app-server.mjs";
 import { ControlClient } from "./control-client.mjs";
-import { VERSION } from "./product.mjs";
+import { DAEMON_PROTOCOL_VERSION, VERSION } from "./product.mjs";
 
 function command(args) {
   const result = spawnSync(args[0], args.slice(1), {
@@ -35,10 +35,12 @@ async function daemonProbe(paths) {
   const client = new ControlClient(paths.controlSocketPath);
   try {
     await client.connect();
-    const version = (await client.request("state/get")).version ?? "unknown";
+    const state = await client.request("state/get");
+    const version = state.version ?? "unknown";
+    const protocolVersion = state.protocolVersion ?? "unknown";
     return {
-      ok: version === VERSION,
-      detail: `${version} at ${paths.controlSocketPath}`,
+      ok: version === VERSION && protocolVersion === DAEMON_PROTOCOL_VERSION,
+      detail: `${version}, protocol ${protocolVersion} at ${paths.controlSocketPath}`,
     };
   } catch (error) {
     return { ok: false, detail: `unreadable: ${error.message}` };

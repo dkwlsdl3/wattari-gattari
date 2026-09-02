@@ -13,8 +13,7 @@ try {
   await broker.start();
   const agents = await request("list_agents", {}, { socketPath });
   const answer = await request("ask_agent", { target: "claude3", task: "ping", timeoutMs: 1_000 }, { socketPath });
-  const notice = await request("notify_agent", { target: "codex2", message: "hello" }, { socketPath });
-  console.log(JSON.stringify({ agents, answer, notice, notifications: fake.notifications }, null, 2));
+  console.log(JSON.stringify({ agents, answer }, null, 2));
 } finally {
   await broker.close();
 }

@@ -8,8 +8,6 @@ import { promisify } from "node:util";
 import { SessionAliasCatalog } from "./session-alias-catalog.mjs";
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_PAGE_SIZE = 100;
-const INITIAL_SCAN_BYTES = 256 * 1024;
 const SHORT_ID = /^[0-9a-f]{8}$/i;
 
 class ClaudeSessionError extends Error {
@@ -33,16 +31,13 @@ function canonical(input) {
   try { return fs.realpathSync(resolved); } catch { return resolved; }
 }
 
-function safeJson(text, code) {
-  try {
-    return JSON.parse(text);
-  } catch (cause) {
-    throw new ClaudeSessionError(code, "Claude CLI가 올바른 JSON을 반환하지 않았습니다", { cause });
-  }
-}
-
 export function parseClaudeAgents(stdout) {
-  const rows = safeJson(stdout, "CLAUDE_AGENTS_OUTPUT_INVALID");
+  let rows;
+  try {
+    rows = JSON.parse(stdout);
+  } catch (cause) {
+    throw new ClaudeSessionError("CLAUDE_AGENTS_OUTPUT_INVALID", "Claude CLI가 올바른 JSON을 반환하지 않았습니다", { cause });
+  }
   if (!Array.isArray(rows)) {
     throw new ClaudeSessionError("CLAUDE_AGENTS_OUTPUT_INVALID", "Claude agents 출력은 배열이어야 합니다");
   }
@@ -52,15 +47,6 @@ export function parseClaudeAgents(stdout) {
     }
   }
   return rows;
-}
-
-export function parseBackgroundSessionId(stdout) {
-  const lines = String(stdout).split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const exact = lines.findLast((line) => SHORT_ID.test(line));
-  if (exact) return exact.toLowerCase();
-  const labelled = lines.join("\n").match(/(?:backgrounded|session|agent|id)[^\n]*?\b([0-9a-f]{8})\b/i);
-  if (labelled) return labelled[1].toLowerCase();
-  throw new ClaudeSessionError("CLAUDE_BACKGROUND_ID_MISSING", "Claude가 background session id를 반환하지 않았습니다");
 }
 
 function processAlive(pid) {
@@ -75,86 +61,9 @@ function processAlive(pid) {
 
 function publicStatus(row, jobState) {
   if (jobState?.needs) return "Needs input";
-  if (row.status === "busy") return "Working";
+  if (row.status === "busy" || row.state === "working") return "Working";
   if (row.status === "idle" && processAlive(row.pid)) return "Awaiting input";
-  if (row.state === "working") return "Working";
   return "Sleeping";
-}
-
-function messageText(content) {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter((part) => part?.type === "text" && typeof part.text === "string")
-    .map((part) => part.text)
-    .join("\n");
-}
-
-function publicTranscriptMessage(record) {
-  if (record?.type !== "user" && record?.type !== "assistant") return null;
-  if (record.message?.role !== record.type) return null;
-  const text = messageText(record.message.content);
-  if (!text) return null;
-  return {
-    id: record.uuid ?? `${record.type}:${record.timestamp ?? "unknown"}`,
-    role: record.type === "user" ? "user" : "agent",
-    text,
-  };
-}
-
-export async function readClaudeTranscriptPage(filePath, endOffset, limit = DEFAULT_PAGE_SIZE) {
-  const handle = await fs.promises.open(filePath, "r");
-  try {
-    const stat = await handle.stat();
-    const end = Math.max(0, Math.min(endOffset ?? stat.size, stat.size));
-    let windowSize = Math.min(INITIAL_SCAN_BYTES, Math.max(1, end));
-    while (true) {
-      const start = Math.max(0, end - windowSize);
-      const buffer = Buffer.alloc(end - start);
-      if (buffer.length) await handle.read(buffer, 0, buffer.length, start);
-      let first = 0;
-      if (start > 0) {
-        const newline = buffer.indexOf(0x0a);
-        first = newline < 0 ? buffer.length : newline + 1;
-      }
-      const entries = [];
-      let lineStart = first;
-      for (let index = first; index <= buffer.length; index += 1) {
-        if (index !== buffer.length && buffer[index] !== 0x0a) continue;
-        if (index > lineStart) {
-          try {
-            const record = JSON.parse(buffer.subarray(lineStart, index).toString("utf8"));
-            const message = publicTranscriptMessage(record);
-            if (message) entries.push({ offset: start + lineStart, message });
-          } catch {
-            // A concurrently appended final line or an unrelated malformed record is ignored.
-          }
-        }
-        lineStart = index + 1;
-      }
-      if (entries.length >= limit || start === 0) {
-        const selected = entries.slice(-limit);
-        return {
-          messages: selected.map((entry) => entry.message),
-          olderOffset: selected.length ? selected[0].offset : 0,
-          fileSize: stat.size,
-        };
-      }
-      windowSize = Math.min(end, windowSize * 2);
-    }
-  } finally {
-    await handle.close();
-  }
-}
-
-function mergeMessages(existing, incoming, prepend = false) {
-  const all = prepend ? [...incoming, ...existing] : [...existing, ...incoming];
-  const seen = new Set();
-  return all.filter((message) => {
-    if (seen.has(message.id)) return false;
-    seen.add(message.id);
-    return true;
-  });
 }
 
 export class ClaudeSessionService extends EventEmitter {
@@ -164,8 +73,6 @@ export class ClaudeSessionService extends EventEmitter {
   #run;
   #aliases;
   #watchers = new Map();
-  #transcripts = new Map();
-  #resumeSettings = new Map();
   #connected = false;
 
   constructor({
@@ -198,10 +105,12 @@ export class ClaudeSessionService extends EventEmitter {
 
   async listSessions() {
     const { stdout } = await this.#run(["agents", "--json", "--all"], { cwd: this.#cwd });
-    const rows = parseClaudeAgents(stdout);
     const sessions = [];
-    for (const row of rows) {
+    for (const row of parseClaudeAgents(stdout)) {
       if (canonical(row.cwd) !== this.#cwd) continue;
+      // `claude attach` and `claude stop` are background-session contracts.
+      // Other future surfaces must not be advertised as native handoff targets.
+      if (row.kind !== "background") continue;
       const jobState = this.#readJobState(row.id, row.sessionId);
       this.#watch(path.join(this.#claudeHome, "jobs", row.id));
       const status = publicStatus(row, jobState);
@@ -210,174 +119,42 @@ export class ClaudeSessionService extends EventEmitter {
         if (row.status) this.#aliases.unhide(id);
         else continue;
       }
-      const settings = this.#resumeSettings.get(row.id) ?? {};
       sessions.push({
         id,
         threadId: row.id,
         sessionId: row.sessionId,
         provider: "claude",
-        kind: row.kind ?? "background",
+        kind: row.kind,
         name: this.#aliases.get(id) ?? row.name ?? row.id,
         cwd: this.#cwd,
         status,
-        lastActivity: jobState?.detail || row.name || "Claude background session",
+        lastActivity: jobState?.detail || row.name || "Claude session",
         updatedAt: Date.parse(jobState?.updatedAt ?? row.startedAt ?? "") || 0,
-        routable: row.kind === "background" && status === "Awaiting input",
-        controllable: row.kind === "background",
+        routable: true,
+        controllable: true,
         workingSince: status === "Working"
           ? Date.parse(jobState?.createdAt ?? row.startedAt ?? "") || null
           : null,
-        model: settings.model ?? row.model ?? null,
-        reasoningEffort: settings.effort ?? row.effort ?? null,
+        model: row.model ?? null,
+        reasoningEffort: row.effort ?? null,
       });
     }
     return sessions.sort((left, right) => right.updatedAt - left.updatedAt);
   }
 
-  async createSession({ prompt, name = null, cwd = this.#cwd } = {}) {
-    if (typeof prompt !== "string" || !prompt.trim()) {
-      throw new ClaudeSessionError("INVALID_PROMPT", "새 Claude 세션의 최초 프롬프트가 필요합니다");
-    }
-    const args = ["--background", "--permission-mode", "manual"];
-    const resolvedName = (name || prompt.trim()).slice(0, 80);
-    if (resolvedName) args.push("--name", resolvedName);
-    args.push(prompt.trim());
-    const { stdout } = await this.#run(args, { cwd });
-    const shortId = parseBackgroundSessionId(stdout);
-    this.#aliases.unhide(`claude:${shortId}`);
-    const session = await this.#waitForSession(shortId);
-    this.emit("changed", { method: "waga/claude-created", params: { threadId: shortId } });
-    return session;
-  }
-
-  async openSession(threadId, selectedSession = null) {
-    let session = await this.#findSession(threadId, selectedSession);
-    if (session.status === "Sleeping" && session.controllable) {
-      const { stdout } = await this.#run(this.#resumeArguments(session), { cwd: session.cwd });
-      const returnedId = parseBackgroundSessionId(stdout);
-      if (returnedId !== threadId) {
-        throw new ClaudeSessionError("CLAUDE_RESUME_FORKED", `Claude가 ${threadId} 대신 ${returnedId} 세션을 만들었습니다`);
-      }
-      this.#aliases.unhide(session.id);
-      session = await this.#waitForSession(threadId);
-      this.emit("changed", { method: "waga/claude-woke", params: { threadId } });
-    }
-    return { ...session, ...await this.#readRecentTranscript(session) };
-  }
-
-  async readSession(threadId, selectedSession = null) {
-    const session = await this.#findSession(threadId, selectedSession);
-    return { ...session, ...await this.#readRecentTranscript(session) };
-  }
-
-  async loadOlderMessages(threadId, selectedSession = null) {
-    const session = await this.#findSession(threadId, selectedSession);
-    const current = this.#transcripts.get(threadId) ?? await this.#fetchRecentTranscript(session);
-    if (!current.olderOffset) return { ...session, messages: current.messages, hasOlderMessages: false };
-    const page = await readClaudeTranscriptPage(current.filePath, current.olderOffset);
-    const next = {
-      ...current,
-      messages: mergeMessages(current.messages, page.messages, true),
-      olderOffset: page.olderOffset,
-      expanded: true,
-    };
-    this.#transcripts.set(threadId, next);
-    return { ...session, messages: next.messages, hasOlderMessages: next.olderOffset > 0 };
-  }
-
-  async sendMessage(threadId, text, selectedSession = null) {
-    if (typeof text !== "string" || !text.trim()) {
-      throw new ClaudeSessionError("INVALID_MESSAGE", "보낼 메시지가 필요합니다");
-    }
-    const session = await this.#findSession(threadId, selectedSession, { fresh: true });
-    if (!session.controllable) throw new ClaudeSessionError("SESSION_NOT_CONTROLLABLE", "background Claude 세션만 제어할 수 있습니다");
-    if (session.status === "Working" || session.status === "Needs input") {
-      throw new ClaudeSessionError("TURN_IN_PROGRESS", "실행 중인 Claude 세션은 복제 방지를 위해 현재 턴이 끝난 뒤 메시지를 보낼 수 있습니다");
-    }
-    if (session.status === "Awaiting input") {
-      await this.#run(["stop", threadId], { cwd: session.cwd });
-    }
-    const { stdout } = await this.#run(this.#resumeArguments(session, text.trim()), { cwd: session.cwd });
-    const returnedId = parseBackgroundSessionId(stdout);
-    if (returnedId !== threadId) {
-      throw new ClaudeSessionError("CLAUDE_RESUME_FORKED", `Claude가 ${threadId} 대신 ${returnedId} 세션을 만들었습니다`);
-    }
-    this.#aliases.unhide(session.id);
-    this.emit("changed", { method: "waga/claude-turn-started", params: { threadId } });
-    return { threadId, started: true };
-  }
-
-  async executeCommand(threadId, command, argument = "", selectedSession = null) {
-    const session = await this.#findSession(threadId, selectedSession, { fresh: true });
-    const value = argument.trim();
-    if (command === "/compact") {
-      await this.sendMessage(threadId, value ? `/compact ${value}` : "/compact", session);
-      return { message: "Claude Code 컨텍스트 압축을 시작했습니다" };
-    }
-    if (command === "/model") {
-      if (!value) return { message: `현재 모델: ${this.#resumeSettings.get(threadId)?.model ?? session.model ?? "Claude 기본값"} · /model sonnet|opus|fable|<전체 모델 ID>` };
-      this.#setResumeSetting(threadId, "model", value);
-      return { message: `다음 턴부터 Claude 모델을 ${value}(으)로 사용합니다` };
-    }
-    if (command === "/effort") {
-      if (!value) return { message: `현재 추론 강도: ${this.#resumeSettings.get(threadId)?.effort ?? session.reasoningEffort ?? "default"} · /effort low|medium|high|xhigh|max` };
-      if (!new Set(["low", "medium", "high", "xhigh", "max"]).has(value)) {
-        throw new ClaudeSessionError("INVALID_EFFORT", "사용법: /effort low|medium|high|xhigh|max");
-      }
-      this.#setResumeSetting(threadId, "effort", value);
-      return { message: `다음 턴부터 Claude 추론 강도를 ${value}(으)로 사용합니다` };
-    }
-    if (command === "/fork" || command === "/branch") {
-      if (session.status === "Working" || session.status === "Needs input") {
-        throw new ClaudeSessionError("TURN_IN_PROGRESS", `${command} 명령은 현재 턴이 끝난 뒤 실행할 수 있습니다`);
-      }
-      if (session.status === "Awaiting input") await this.#run(["stop", threadId], { cwd: session.cwd });
-      const args = this.#resumeArguments(session);
-      args.splice(1, 0, "--fork-session");
-      const { stdout } = await this.#run(args, { cwd: session.cwd });
-      const forkId = parseBackgroundSessionId(stdout);
-      if (forkId === threadId) throw new ClaudeSessionError("CLAUDE_FORK_REUSED_ID", "Claude가 fork에 새 background id를 반환하지 않았습니다");
-      this.#aliases.unhide(`claude:${forkId}`);
-      const forked = await this.#waitForSession(forkId);
-      if (value) this.#aliases.set(forked.id, value);
-      this.emit("changed", { method: "waga/claude-forked", params: { threadId, forkId } });
-      return { message: `Claude 세션을 ${forkId}(으)로 분기했습니다`, session: { ...forked, name: value || forked.name } };
-    }
-    if (new Set([
-      "/batch", "/claude-api", "/code-review", "/dataviz", "/deep-research",
-      "/design", "/init", "/loop", "/review", "/security-review", "/simplify",
-      "/verify", "/workflow-authoring",
-    ]).has(command)) {
-      await this.sendMessage(threadId, value ? `${command} ${value}` : command, session);
-      return { message: `${command} 명령을 Claude Code background 세션에 전달했습니다` };
-    }
-    throw new ClaudeSessionError("COMMAND_UNSUPPORTED", `Waga background 세션에서 실행할 수 없는 Claude 명령입니다: ${command}`);
-  }
-
-  async interruptSession(threadId, selectedSession = null) {
-    const session = await this.#findSession(threadId, selectedSession, { fresh: true });
-    if (!session.controllable) throw new ClaudeSessionError("SESSION_NOT_CONTROLLABLE", "background Claude 세션만 제어할 수 있습니다");
-    if (session.status !== "Working") {
-      throw new ClaudeSessionError("NO_ACTIVE_TURN", "중단할 진행 중인 Claude 턴이 없습니다");
-    }
-    await this.#run(["stop", threadId], { cwd: session.cwd });
-    this.emit("changed", { method: "waga/claude-turn-interrupted", params: { threadId } });
-    return { interrupted: true, threadId };
-  }
-
   async renameSession(threadId, name, selectedSession = null) {
     if (typeof name !== "string" || !name.trim()) throw new ClaudeSessionError("INVALID_NAME", "세션 이름이 필요합니다");
     const session = await this.#findSession(threadId, selectedSession);
-    this.#aliases.set(session.id, name);
+    this.#aliases.set(session.id, name.trim());
     this.emit("changed", { method: "waga/claude-renamed", params: { threadId } });
   }
 
   async stopSession(threadId, selectedSession = null) {
     const session = await this.#findSession(threadId, selectedSession, { fresh: true });
-    if (!session.controllable) throw new ClaudeSessionError("SESSION_NOT_CONTROLLABLE", "background Claude 세션만 제어할 수 있습니다");
+    if (!session.controllable) {
+      throw new ClaudeSessionError("SESSION_NOT_CONTROLLABLE", "background Claude 세션만 종료할 수 있습니다");
+    }
     await this.#run(["stop", threadId], { cwd: session.cwd });
-    this.#transcripts.delete(threadId);
-    this.#resumeSettings.delete(threadId);
     this.#aliases.remove(session.id);
     this.#aliases.hide(session.id);
     this.emit("changed", { method: "waga/claude-stopped", params: { threadId } });
@@ -388,31 +165,6 @@ export class ClaudeSessionService extends EventEmitter {
     const session = (await this.listSessions()).find((candidate) => candidate.threadId === threadId);
     if (!session) throw new ClaudeSessionError("SESSION_NOT_FOUND", `Claude 세션을 찾을 수 없습니다: ${threadId}`);
     return session;
-  }
-
-  #resumeArguments(session, prompt = null) {
-    const settings = this.#resumeSettings.get(session.threadId) ?? {};
-    const args = ["--background"];
-    if (settings.model) args.push("--model", settings.model);
-    if (settings.effort) args.push("--effort", settings.effort);
-    args.push("--resume", session.sessionId);
-    if (prompt) args.push(prompt);
-    return args;
-  }
-
-  #setResumeSetting(threadId, key, value) {
-    const current = this.#resumeSettings.get(threadId) ?? {};
-    this.#resumeSettings.set(threadId, { ...current, [key]: value });
-  }
-
-  async #waitForSession(threadId) {
-    const deadline = Date.now() + 5_000;
-    do {
-      const session = (await this.listSessions()).find((candidate) => candidate.threadId === threadId);
-      if (session) return session;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    } while (Date.now() < deadline);
-    throw new ClaudeSessionError("CLAUDE_SESSION_NOT_VISIBLE", `생성한 Claude 세션이 목록에 나타나지 않았습니다: ${threadId}`);
   }
 
   #readJobState(shortId, expectedSessionId) {
@@ -426,36 +178,6 @@ export class ClaudeSessionService extends EventEmitter {
     }
   }
 
-  #transcriptPath(session) {
-    const state = this.#readJobState(session.threadId, session.sessionId);
-    const candidate = state?.linkScanPath;
-    const projectRoot = path.resolve(this.#claudeHome, "projects");
-    if (typeof candidate !== "string" || !path.isAbsolute(candidate)) {
-      throw new ClaudeSessionError("CLAUDE_TRANSCRIPT_NOT_FOUND", `Claude transcript 경로가 없습니다: ${session.threadId}`);
-    }
-    const resolved = path.resolve(candidate);
-    if (resolved !== projectRoot && !resolved.startsWith(`${projectRoot}${path.sep}`)) {
-      throw new ClaudeSessionError("CLAUDE_TRANSCRIPT_OUTSIDE_HOME", "Claude transcript가 예상한 projects 디렉터리 밖에 있습니다");
-    }
-    return resolved;
-  }
-
-  async #fetchRecentTranscript(session) {
-    const filePath = this.#transcriptPath(session);
-    const page = await readClaudeTranscriptPage(filePath);
-    return { ...page, filePath, expanded: false };
-  }
-
-  async #readRecentTranscript(session) {
-    const recent = await this.#fetchRecentTranscript(session);
-    const cached = this.#transcripts.get(session.threadId);
-    const next = cached?.expanded
-      ? { ...cached, messages: mergeMessages(cached.messages, recent.messages), fileSize: recent.fileSize }
-      : recent;
-    this.#transcripts.set(session.threadId, next);
-    return { messages: next.messages, hasOlderMessages: next.olderOffset > 0 };
-  }
-
   #watch(directory) {
     if (!fs.existsSync(directory) || this.#watchers.has(directory)) return;
     try {
@@ -466,7 +188,7 @@ export class ClaudeSessionService extends EventEmitter {
       });
       this.#watchers.set(directory, watcher);
     } catch {
-      // The CLI remains usable; explicit actions still trigger refreshes.
+      // Explicit refreshes still work when a directory cannot be watched.
     }
   }
 }

@@ -10,21 +10,15 @@ Set TypingSpeed 35ms
 
 Type "npm run demo:tui"
 Enter
-Wait+Screen /direct approval/
+Wait+Screen /session wrapper/
 Sleep 2s
 
 Down
 Sleep 1s
 Enter
-Wait+Screen /message this Codex session/
+Wait+Screen /Native codex TUI/
 Sleep 2s
 
-Type "검증 결과를 요약해줘"
-Sleep 500ms
-Enter
-Wait+Screen /결과와 검증 근거/
-Sleep 2s
-
-Left
-Sleep 2s
+Wait+Screen /session wrapper/
+Sleep 1s
 Ctrl+C

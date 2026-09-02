@@ -119,15 +119,6 @@ export class Broker {
         );
         return agent.serialRequests ? this.#serialize(agent.id, run) : run();
       }
-      case "notify_agent": {
-        const agent = await this.#resolveTarget(request.params?.target);
-        const message = request.params?.message;
-        if (typeof message !== "string" || message.trim() === "") {
-          throw new BrokerError("INVALID_MESSAGE", "message must be a non-empty string");
-        }
-        await agent.adapter.notify(agent, message);
-        return { delivered: true, target: agent.id };
-      }
       default:
         throw new BrokerError("METHOD_NOT_FOUND", `Unknown method: ${request?.method ?? "<missing>"}`);
     }

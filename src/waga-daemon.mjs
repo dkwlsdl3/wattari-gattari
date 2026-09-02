@@ -8,29 +8,23 @@ import { fileURLToPath } from "node:url";
 import { WagaHost } from "./waga-host.mjs";
 import { HostPeerAdapter } from "./adapters/host-peer.mjs";
 import { appPaths } from "./app-paths.mjs";
-import { ApprovalServer } from "./approval-server.mjs";
 import { Broker } from "./broker.mjs";
 import { ensureManagedCodexService, stopManagedCodexService } from "./codex-background-service.mjs";
 import { CodexSessionService } from "./codex-session-service.mjs";
 import { ClaudeSessionService } from "./claude-session-service.mjs";
 import { ControlServer } from "./control-server.mjs";
-import { DirectApprovalLedger } from "./direct-approval-ledger.mjs";
 import { WorkspaceRegistry } from "./workspace-registry.mjs";
 import { UnifiedSessionService } from "./unified-session-service.mjs";
 
 async function createDaemonRuntime(paths) {
   const codex = await ensureManagedCodexService({ cwd: os.homedir(), paths });
-  const approvalLedger = new DirectApprovalLedger();
   const host = new WagaHost({
     registry: new WorkspaceRegistry(paths.workspaceRegistryPath),
-    approvalServer: new ApprovalServer(paths.approvalSocketPath),
-    approvalLedger,
-    sessionFactory: (workspacePath, { onServerRequest }) => new UnifiedSessionService({
+    sessionFactory: (workspacePath) => new UnifiedSessionService({
       codex: new CodexSessionService({
         cwd: workspacePath,
         socketPath: codex.socketPath,
         catalogPath: codex.catalogPath,
-        onServerRequest,
       }),
       claude: new ClaudeSessionService({
         cwd: workspacePath,

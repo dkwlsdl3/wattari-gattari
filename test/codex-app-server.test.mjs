@@ -6,7 +6,6 @@ import test from "node:test";
 import {
   CodexAppServerClient,
   configuredMcpServerNames,
-  managedApprovalHookOverride,
   managedAppServerArgs,
   shadowAppServerArgs,
 } from "../src/codex-app-server.mjs";
@@ -31,21 +30,13 @@ test("keeps live web research while disabling external mutation surfaces", () =>
   assert.ok(args.includes("mcp_servers.playwright.enabled=false"));
 });
 
-test("starts the managed socket service with a direct-approval hook and external surfaces disabled", () => {
-  const args = managedAppServerArgs("/run/user/1001/waga/codex.sock", { mcpServerNames: ["context7"] });
-  assert.deepEqual(args.slice(0, 4), [
-    "--dangerously-bypass-hook-trust",
+test("starts the managed socket without overriding native Codex configuration", () => {
+  const args = managedAppServerArgs("/run/user/1001/waga/codex.sock");
+  assert.deepEqual(args, [
     "app-server",
     "--listen",
     "unix:///run/user/1001/waga/codex.sock",
   ]);
-  assert.ok(args.includes("mcp_servers.context7.enabled=false"));
-  assert.equal(args.includes("--stdio"), false);
-  assert.equal(args[args.indexOf("hooks") - 1], "--enable");
-  assert.ok(args.includes(managedApprovalHookOverride()));
-  for (const feature of ["apps", "plugins", "browser_use", "computer_use", "multi_agent"]) {
-    assert.equal(args[args.indexOf(feature) - 1], "--disable");
-  }
 });
 
 test("discovers configured MCP names and rejects config shapes it cannot disable", () => {

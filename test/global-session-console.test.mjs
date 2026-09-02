@@ -11,369 +11,181 @@ class FakeControlClient extends EventEmitter {
 
   async connect() {}
 
-  session(status = "Awaiting input") {
+  session(provider = "codex") {
     return {
-      id: "codex:thread-1",
-      threadId: "thread-1",
-      provider: "codex",
-      name: "first",
+      id: `${provider}:thread-1`,
+      threadId: provider === "codex" ? "thread-1" : "a1b2c3d4",
+      provider,
+      name: provider === "codex" ? "Codex 작업" : "Claude 작업",
       cwd: "/workspace",
-      status,
+      status: "Awaiting input",
       lastActivity: "ready",
       updatedAt: 1,
       routable: true,
-      gitBranch: "main",
-      model: "gpt-test",
-      reasoningEffort: "high",
-      tokenUsage: {
-        last: { totalTokens: 10_000 },
-        total: { totalTokens: 12_000 },
-        modelContextWindow: 200_000,
-      },
-      rateLimits: { secondary: { usedPercent: 40, windowDurationMins: 10_080 } },
     };
   }
 
-  state(status = "Awaiting input") {
+  state() {
     return {
-      revision: status === "Working" ? 2 : 1,
-      approval: null,
-      workspaces: [{ path: "/workspace", name: "workspace", sessions: [this.session(status)] }],
+      revision: 1,
+      workspaces: [{ path: "/workspace", name: "workspace", sessions: [this.session()] }],
     };
   }
 
   async request(method, params) {
     this.requests.push({ method, params });
     if (method === "workspace/register") return this.state();
-    if (method === "session/open" || method === "session/read") {
-      return {
-        ...this.session(),
-        messages: [
-          { id: "user-1", role: "user", text: "세션을 확인해 주세요" },
-          { id: "agent-1", role: "agent", text: "확인했습니다" },
-        ],
-        hasOlderMessages: false,
-      };
-    }
     return { changed: true };
   }
 
   close() { this.closed = true; }
 }
 
-class LongTranscriptClient extends FakeControlClient {
-  async request(method, params) {
-    if (method !== "session/open" && method !== "session/read") return super.request(method, params);
-    this.requests.push({ method, params });
-    return {
-      ...this.session(),
-      messages: Array.from({ length: 40 }, (_, index) => ({
-        id: `agent-${index}`,
-        role: "agent",
-        text: `message-${index}`,
-      })),
-      hasOlderMessages: false,
-    };
-  }
-}
-
-class AlternatingTranscriptClient extends FakeControlClient {
-  async request(method, params) {
-    if (method !== "session/open" && method !== "session/read") return super.request(method, params);
-    this.requests.push({ method, params });
-    return {
-      ...this.session(),
-      messages: [
-        { id: "agent-1", role: "agent", text: "첫 답변" },
-        { id: "user-1", role: "user", text: "추가 질문" },
-        { id: "agent-2", role: "agent", text: "둘째 답변" },
-      ],
-      hasOlderMessages: false,
-    };
-  }
-}
-
-test("runs the real console interface with fake terminal and control adapters", async () => {
+function terminal() {
   const input = new PassThrough();
+  const rawModes = [];
+  input.setRawMode = (value) => rawModes.push(value);
   const output = new PassThrough();
-  output.columns = 100;
-  output.rows = 30;
+  output.columns = 92;
+  output.rows = 24;
   let rendered = "";
   output.on("data", (chunk) => { rendered += chunk.toString("utf8"); });
-  const client = new FakeControlClient();
+  return { input, output, rawModes, rendered: () => rendered };
+}
 
+function key(input, name, text = "", options = {}) {
+  input.emit("keypress", text, { name, ctrl: false, meta: false, shift: false, ...options });
+}
+
+test("renders only the global session overview and never enables terminal mouse reporting", async () => {
+  const tty = terminal();
+  const client = new FakeControlClient();
+  let ensured;
   const running = runSessionConsole({
-    paths: { controlSocketPath: "/tmp/not-used.sock" },
+    paths: { controlSocketPath: "/tmp/control.sock", socketPath: "/tmp/codex.sock" },
+    ensureDaemon: async (options) => { ensured = options; },
+    createClient: () => client,
+    launchNative: async () => ({ exitCode: 0, signal: null }),
+    inputStream: tty.input,
+    outputStream: tty.output,
+    workspacePath: "/workspace",
+    listenForSignals: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  key(tty.input, "down");
+
+  const frame = tty.rendered().slice(tty.rendered().lastIndexOf("\x1b[2J"));
+  assert.match(frame, /Wattari Gattari/);
+  assert.match(frame, /Codex 작업/);
+  assert.match(frame, /Enter open native TUI/);
+  assert.doesNotMatch(frame, /message this|tokens|slash|direct approval/);
+  assert.doesNotMatch(tty.rendered(), /\x1b\[\?100[026]h/);
+  assert.deepEqual(ensured, { paths: { controlSocketPath: "/tmp/control.sock", socketPath: "/tmp/codex.sock" } });
+
+  key(tty.input, "c", "", { ctrl: true });
+  assert.deepEqual(await running, { exitCode: 0 });
+  assert.equal(client.closed, true);
+});
+
+test("hands the terminal to the selected native TUI and restores the overview afterwards", async () => {
+  const tty = terminal();
+  const client = new FakeControlClient();
+  const launches = [];
+  let finishLaunch;
+  const running = runSessionConsole({
+    paths: { controlSocketPath: "/tmp/control.sock", socketPath: "/tmp/codex.sock" },
     ensureDaemon: async () => {},
     createClient: () => client,
-    inputStream: input,
-    outputStream: output,
+    launchNative: (target) => {
+      launches.push(target);
+      return new Promise((resolve) => { finishLaunch = resolve; });
+    },
+    inputStream: tty.input,
+    outputStream: tty.output,
+    workspacePath: "/workspace",
+    listenForSignals: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  key(tty.input, "down");
+  key(tty.input, "return");
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(launches, [{ action: "open", session: client.session() }]);
+  assert.deepEqual(tty.rawModes.slice(-2), [true, false]);
+  const before = tty.rendered();
+  key(tty.input, "down");
+  assert.equal(tty.rendered(), before, "Waga must not consume input while the provider TUI owns the terminal");
+
+  finishLaunch({ exitCode: 0, signal: null });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(tty.rawModes.at(-1), true);
+  assert.equal(client.requests.filter(({ method }) => method === "workspace/register").length, 2);
+
+  key(tty.input, "c", "", { ctrl: true });
+  assert.deepEqual(await running, { exitCode: 0 });
+});
+
+test("delegates new Codex and Claude sessions to their native TUI", async () => {
+  const tty = terminal();
+  const client = new FakeControlClient();
+  const launches = [];
+  const running = runSessionConsole({
+    paths: { controlSocketPath: "/tmp/control.sock", socketPath: "/tmp/codex.sock" },
+    ensureDaemon: async () => {},
+    createClient: () => client,
+    launchNative: async (target) => { launches.push(target); return { exitCode: 0, signal: null }; },
+    inputStream: tty.input,
+    outputStream: tty.output,
     workspacePath: "/workspace",
     listenForSignals: false,
   });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.match(rendered, /Wattari Gattari/);
-  assert.match(rendered, /first/);
-  input.emit("keypress", "", { name: "down", ctrl: false, meta: false, shift: false });
-  input.emit("keypress", "", { name: "f3", ctrl: false, meta: false, shift: false });
+  key(tty.input, "n", "n");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(client.requests.some(({ method }) => method === "session/create"), false);
+  assert.deepEqual(launches[0], { action: "new", provider: "codex", cwd: "/workspace" });
+
+  key(tty.input, "tab");
+  key(tty.input, "n", "n");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(launches[1], { action: "new", provider: "claude", cwd: "/workspace" });
+
+  key(tty.input, "c", "", { ctrl: true });
+  assert.deepEqual(await running, { exitCode: 0 });
+});
+
+test("keeps overview metadata controls without implementing a conversation composer", async () => {
+  const tty = terminal();
+  const client = new FakeControlClient();
+  const running = runSessionConsole({
+    paths: { controlSocketPath: "/tmp/control.sock", socketPath: "/tmp/codex.sock" },
+    ensureDaemon: async () => {},
+    createClient: () => client,
+    launchNative: async () => ({ exitCode: 0, signal: null }),
+    inputStream: tty.input,
+    outputStream: tty.output,
+    workspacePath: "/workspace",
+    listenForSignals: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  key(tty.input, "down");
+  key(tty.input, "f3");
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(client.requests.at(-1), {
     method: "session/setCompleted",
     params: { workspacePath: "/workspace", sessionId: "codex:thread-1", completed: true },
   });
 
-  input.emit("keypress", "", { name: "c", ctrl: true, meta: false, shift: false });
-  assert.deepEqual(await running, { exitCode: 0 });
-  assert.equal(client.closed, true);
-  assert.equal(input.listenerCount("keypress"), 0);
-  assert.equal(output.listenerCount("resize"), 0);
-  assert.equal(input.isPaused(), true);
-});
-
-test("renders a bottom composer, compact transcript, status line, slash menu, and Esc interrupt", async () => {
-  const input = new PassThrough();
-  const output = new PassThrough();
-  output.columns = 96;
-  output.rows = 24;
-  let rendered = "";
-  output.on("data", (chunk) => { rendered += chunk.toString("utf8"); });
-  const client = new FakeControlClient();
-  const running = runSessionConsole({
-    paths: { controlSocketPath: "/tmp/not-used.sock" },
-    ensureDaemon: async () => {},
-    createClient: () => client,
-    inputStream: input,
-    outputStream: output,
-    workspacePath: "/workspace",
-    listenForSignals: false,
-  });
+  key(tty.input, "f2");
+  key(tty.input, undefined, "새 이름");
+  key(tty.input, "return");
   await new Promise((resolve) => setImmediate(resolve));
-
-  input.emit("keypress", "", { name: "down", ctrl: false, meta: false, shift: false });
-  input.emit("keypress", "", { name: "return", ctrl: false, meta: false, shift: false });
-  await new Promise((resolve) => setImmediate(resolve));
-  const frame = rendered.slice(rendered.lastIndexOf("\x1b[2J"));
-  assert.match(frame, /\[ first \]/);
-  assert.match(frame, /48;2;52;64;96m/);
-  assert.match(frame, /•\x1b\[0m 확인했습니다/);
-  const plainLines = frame.replaceAll(/\x1b\[[0-9;? ]*[A-Za-z]/g, "").split("\n");
-  const userLine = plainLines.findIndex((line) => line.trimEnd() === "› 세션을 확인해 주세요");
-  const agentLine = plainLines.findIndex((line) => line === "• 확인했습니다");
-  assert.equal(agentLine, userLine + 2, "사용자 메시지와 다음 에이전트 답변 사이에 빈 줄이 필요하다");
-  assert.doesNotMatch(frame, /You:/);
-  assert.doesNotMatch(frame, /Codex:/);
-  assert.match(frame, /git:main/);
-  assert.match(frame, /gpt-test high/);
-  assert.match(frame, /tokens 10k\/200k \(5%\)/);
-  assert.match(frame, /weekly 60% left/);
-  assert.doesNotMatch(frame, /PgUp\/PgDn transcript/);
-  assert.equal(frame.split("\n").length, 24);
-
-  output.columns = 20;
-  output.rows = 18;
-  output.emit("resize");
-  const resizedFrame = rendered.slice(rendered.lastIndexOf("\x1b[2J"));
-  assert.equal(resizedFrame.split("\n").length, 18);
-  assert.ok(
-    resizedFrame.split("48;2;52;64;96m").length - 1 >= 2,
-    "좁아진 열 너비에 맞춰 사용자 메시지를 다시 줄바꿈해야 한다",
-  );
-  const plainResizedFrame = resizedFrame.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
-  assert.match(plainResizedFrame, /^───────── \[ first \]$/m);
-  assert.match(plainResizedFrame, /^───────────────────$/m);
-  assert.match(plainResizedFrame, /^› message this Code$/m);
-  assert.match(plainResizedFrame, /^  x session$/m);
-  output.columns = 96;
-  output.rows = 24;
-  output.emit("resize");
-
-  input.emit("keypress", "/status", { name: undefined, ctrl: false, meta: false, shift: false });
-  input.emit("keypress", "", { name: "return", ctrl: false, meta: false, shift: false });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(client.requests.some(({ method }) => method === "session/send"), false);
-
-  input.emit("keypress", "/compact", { name: undefined, ctrl: false, meta: false, shift: false });
-  input.emit("keypress", "", { name: "return", ctrl: false, meta: false, shift: false });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(client.requests.findLast(({ method }) => method === "session/command"), {
-    method: "session/command",
-    params: { workspacePath: "/workspace", threadId: "thread-1", command: "/compact", argument: "" },
+  assert.deepEqual(client.requests.at(-1), {
+    method: "session/rename",
+    params: { workspacePath: "/workspace", threadId: "thread-1", name: "새 이름" },
   });
 
-  const commandCount = client.requests.filter(({ method }) => method === "session/command").length;
-  input.emit("keypress", "/ide", { name: undefined, ctrl: false, meta: false, shift: false });
-  input.emit("keypress", "", { name: "return", ctrl: false, meta: false, shift: false });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(client.requests.filter(({ method }) => method === "session/command").length, commandCount);
-  const attachFrame = rendered.slice(rendered.lastIndexOf("\x1b[2J"));
-  assert.match(attachFrame, /원본 CLI/);
-
-  input.emit("keypress", "/issue-loop continue", { name: undefined, ctrl: false, meta: false, shift: false });
-  input.emit("keypress", "", { name: "return", ctrl: false, meta: false, shift: false });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(client.requests.findLast(({ method }) => method === "session/send"), {
-    method: "session/send",
-    params: { workspacePath: "/workspace", threadId: "thread-1", text: "/issue-loop continue" },
-  });
-
-  const working = client.state("Working");
-  working.workspaces[0].sessions[0].workingSince = Date.now() - 3_000;
-  working.workspaces[0].sessions[0].activeTurnId = "turn-1";
-  working.workspaces[0].sessions[0].tokenUsage = null;
-  client.emit("state", working);
-  const workingFrame = rendered.slice(rendered.lastIndexOf("\x1b[2J"));
-  const plainWorkingFrame = workingFrame.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
-  assert.match(plainWorkingFrame, /Working \d+s · Esc interrupt/);
-  assert.match(plainWorkingFrame, /tokens ~\d+ visible/);
-  assert.ok(
-    plainWorkingFrame.indexOf("Working") < plainWorkingFrame.indexOf("[ first ]"),
-    "작업 표시는 입력창 윗 구분선보다 위에 있어야 한다",
-  );
-  input.emit("keypress", "", { name: "escape", ctrl: false, meta: false, shift: false });
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(client.requests.findLast(({ method }) => method === "session/interrupt"), {
-    method: "session/interrupt",
-    params: { workspacePath: "/workspace", threadId: "thread-1" },
-  });
-
-  input.emit("keypress", "", { name: "c", ctrl: true, meta: false, shift: false });
-  assert.deepEqual(await running, { exitCode: 0 });
-});
-
-test("mouse wheel scrolls the visible transcript without typing escape bytes into the composer", async () => {
-  const input = new PassThrough();
-  const output = new PassThrough();
-  output.columns = 80;
-  output.rows = 16;
-  let rendered = "";
-  output.on("data", (chunk) => { rendered += chunk.toString("utf8"); });
-  const client = new LongTranscriptClient();
-  const running = runSessionConsole({
-    paths: { controlSocketPath: "/tmp/not-used.sock" },
-    ensureDaemon: async () => {},
-    createClient: () => client,
-    inputStream: input,
-    outputStream: output,
-    workspacePath: "/workspace",
-    listenForSignals: false,
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-  input.emit("keypress", "", { name: "down", ctrl: false, meta: false, shift: false });
-  input.emit("keypress", "", { name: "return", ctrl: false, meta: false, shift: false });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  input.write("\x1b[<64;10;10M");
-  await new Promise((resolve) => setImmediate(resolve));
-  const frame = rendered.slice(rendered.lastIndexOf("\x1b[2J"));
-  const plain = frame.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
-  assert.match(rendered, /\x1b\[\?1000h\x1b\[\?1006h/);
-  assert.match(plain, /↓ 3 newer lines/);
-  assert.doesNotMatch(plain, /64;10;10M/);
-
-  input.emit("keypress", "", { name: "c", ctrl: true, meta: false, shift: false });
-  assert.deepEqual(await running, { exitCode: 0 });
-  assert.match(rendered, /\x1b\[\?1006l\x1b\[\?1000l/);
-});
-
-test("raw Escape cancels quick reply without readline's half-second ambiguity delay", async () => {
-  const input = new PassThrough();
-  const output = new PassThrough();
-  output.columns = 80;
-  output.rows = 20;
-  let rendered = "";
-  output.on("data", (chunk) => { rendered += chunk.toString("utf8"); });
-  const client = new FakeControlClient();
-  const running = runSessionConsole({
-    paths: { controlSocketPath: "/tmp/not-used.sock" },
-    ensureDaemon: async () => {},
-    createClient: () => client,
-    inputStream: input,
-    outputStream: output,
-    workspacePath: "/workspace",
-    listenForSignals: false,
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-  input.emit("keypress", "", { name: "down", ctrl: false, meta: false, shift: false });
-  input.emit("keypress", " ", { name: "space", ctrl: false, meta: false, shift: false });
-  assert.match(rendered.slice(rendered.lastIndexOf("\x1b[2J")), /reply to first/);
-
-  input.write("\x1b");
-  await new Promise((resolve) => setTimeout(resolve, 100));
-  assert.doesNotMatch(rendered.slice(rendered.lastIndexOf("\x1b[2J")), /reply to first/);
-
-  input.emit("keypress", "", { name: "c", ctrl: true, meta: false, shift: false });
-  assert.deepEqual(await running, { exitCode: 0 });
-});
-
-test("composer edits Unicode text at the visible arrow-key cursor", async () => {
-  const input = new PassThrough();
-  const output = new PassThrough();
-  output.columns = 80;
-  output.rows = 20;
-  const client = new FakeControlClient();
-  const running = runSessionConsole({
-    paths: { controlSocketPath: "/tmp/not-used.sock" },
-    ensureDaemon: async () => {},
-    createClient: () => client,
-    inputStream: input,
-    outputStream: output,
-    workspacePath: "/workspace",
-    listenForSignals: false,
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  input.write("가👨‍👩‍👧‍👦나");
-  input.write("\x1b[D");
-  input.write("\x7f");
-  input.write("X");
-  input.write("\x1b[3~");
-  input.write("\x1b[H");
-  input.write("새");
-  input.write("\x1b[F");
-  input.write(" 세션");
-  input.write("\r");
-  await new Promise((resolve) => setImmediate(resolve));
-
-  assert.deepEqual(client.requests.findLast(({ method }) => method === "session/create"), {
-    method: "session/create",
-    params: { workspacePath: "/workspace", prompt: "새가X 세션", provider: "codex" },
-  });
-
-  input.emit("keypress", "", { name: "c", ctrl: true, meta: false, shift: false });
-  assert.deepEqual(await running, { exitCode: 0 });
-});
-
-test("user transcript blocks have distinct contrast and blank lines on both sides", async () => {
-  const input = new PassThrough();
-  const output = new PassThrough();
-  output.columns = 80;
-  output.rows = 20;
-  let rendered = "";
-  output.on("data", (chunk) => { rendered += chunk.toString("utf8"); });
-  const running = runSessionConsole({
-    paths: { controlSocketPath: "/tmp/not-used.sock" },
-    ensureDaemon: async () => {},
-    createClient: () => new AlternatingTranscriptClient(),
-    inputStream: input,
-    outputStream: output,
-    workspacePath: "/workspace",
-    listenForSignals: false,
-  });
-  await new Promise((resolve) => setImmediate(resolve));
-  input.emit("keypress", "", { name: "down", ctrl: false, meta: false, shift: false });
-  input.emit("keypress", "", { name: "return", ctrl: false, meta: false, shift: false });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  const frame = rendered.slice(rendered.lastIndexOf("\x1b[2J"));
-  const plainLines = frame.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").split("\n");
-  const firstAgent = plainLines.findIndex((line) => line === "• 첫 답변");
-  const user = plainLines.findIndex((line) => line.trimEnd() === "› 추가 질문");
-  const secondAgent = plainLines.findIndex((line) => line === "• 둘째 답변");
-  assert.equal(user, firstAgent + 2);
-  assert.equal(secondAgent, user + 2);
-  assert.match(frame, /48;2;52;64;96m/);
-
-  input.emit("keypress", "", { name: "c", ctrl: true, meta: false, shift: false });
+  key(tty.input, "c", "", { ctrl: true });
   assert.deepEqual(await running, { exitCode: 0 });
 });

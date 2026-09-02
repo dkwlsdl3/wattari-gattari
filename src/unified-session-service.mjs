@@ -58,35 +58,6 @@ export class UnifiedSessionService extends EventEmitter {
     return groups.flat().sort((left, right) => right.updatedAt - left.updatedAt);
   }
 
-  async createSession(options = {}) {
-    const provider = options.provider ?? "codex";
-    return this.#requireProvider(provider).createSession(options);
-  }
-
-  async openSession(threadId, selectedSession = null) {
-    return this.#forSession(threadId, selectedSession).openSession(threadId, selectedSession);
-  }
-
-  async readSession(threadId, selectedSession = null) {
-    return this.#forSession(threadId, selectedSession).readSession(threadId, selectedSession);
-  }
-
-  async loadOlderMessages(threadId, selectedSession = null) {
-    return this.#forSession(threadId, selectedSession).loadOlderMessages(threadId, selectedSession);
-  }
-
-  async sendMessage(threadId, text, selectedSession = null) {
-    return this.#forSession(threadId, selectedSession).sendMessage(threadId, text, selectedSession);
-  }
-
-  async executeCommand(threadId, command, argument = "", selectedSession = null) {
-    return this.#forSession(threadId, selectedSession).executeCommand(threadId, command, argument, selectedSession);
-  }
-
-  async interruptSession(threadId, selectedSession = null) {
-    return this.#forSession(threadId, selectedSession).interruptSession(threadId, selectedSession);
-  }
-
   async renameSession(threadId, name, selectedSession = null) {
     return this.#forSession(threadId, selectedSession).renameSession(threadId, name, selectedSession);
   }

@@ -16,7 +16,6 @@ export class ControlServer {
   #server = null;
   #clients = new Set();
   #onState;
-  #onApproval;
 
   constructor({ socketPath, host }) {
     if (typeof socketPath !== "string" || !path.isAbsolute(socketPath)) {
@@ -28,7 +27,6 @@ export class ControlServer {
     this.socketPath = socketPath;
     this.#host = host;
     this.#onState = (state) => this.#broadcast({ event: "state", data: state });
-    this.#onApproval = (approval) => this.#broadcast({ event: "approval", data: approval });
   }
 
   async start() {
@@ -44,12 +42,10 @@ export class ControlServer {
     });
     fs.chmodSync(this.socketPath, 0o600);
     this.#host.on?.("state", this.#onState);
-    this.#host.on?.("approval", this.#onApproval);
   }
 
   async close() {
     this.#host.off?.("state", this.#onState);
-    this.#host.off?.("approval", this.#onApproval);
     for (const socket of this.#clients) socket.destroy();
     this.#clients.clear();
     const server = this.#server;

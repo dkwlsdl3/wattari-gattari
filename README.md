@@ -1,252 +1,151 @@
-<p align="center">
-  <a href="README.ko.md">한국어</a> · <strong>English</strong>
-</p>
+# Wattari Gattari
 
-<h1 align="center">Wattari Gattari</h1>
+> A lightweight terminal switchboard for native Codex and Claude Code sessions.
 
-<p align="center">
-  <strong>A human-controlled terminal hub for moving between Codex and Claude Code sessions.</strong>
-</p>
+[한국어](README.ko.md) · [Architecture decision](docs/adr/0002-native-provider-tui-wrapper.md) · [License](LICENSE)
 
-<p align="center">
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#highlights">Highlights</a> ·
-  <a href="#safety-model">Safety model</a> ·
-  <a href="#development">Development</a>
-</p>
+Wattari Gattari gives you one project-oriented overview, then gets out of the
+way. Select a session and continue in the provider's own terminal UI—with its
+real composer, slash commands, approvals, diffs, status line, scrolling, and
+input behavior.
 
-```text
- Wattari Gattari  codex + claude     global · revision 42 · direct approval
- 2 projects · 1 awaiting input · 2 working · 1 completed
+It is intentionally a wrapper, not another agent chat client.
 
-> ▾ sample-app  3 sessions · ~/work/sample-app
-    X #130 investigate duplicate refresh   Working          running tests
-    C #40 fail-closed snapshot              Awaiting input   READY
-    X #126 review DB migration              Completed        final report ready
+## Why
 
-  ▾ docs-site  0 sessions · ~/work/docs-site
-      No sessions yet.
+Codex and Claude Code already ship capable terminal interfaces. Reimplementing
+those interfaces creates lag, terminal bugs, and a permanent compatibility
+burden. Wattari Gattari keeps only the small layer that is useful across both:
 
-  new session provider: Codex (Tab to switch)
-> describe a task for a new Codex session
-```
-
-## What is Wattari Gattari?
-
-Wattari Gattari is a local TUI that collects Codex and Claude Code sessions from
-multiple projects into one tree. The user creates, switches, replies to, completes,
-and stops each session explicitly.
-
-It is not another LLM that assigns work on its own. Every worker session remains
-independent, while the user decides which session receives each task. The name
-roughly means “moving back and forth”: move freely between sessions without giving
-up human control over their lifetime or sensitive approvals.
-
-## Highlights
-
-- **Two providers, one screen** — Codex App Server threads and Claude background sessions share one tree.
-- **Screen-independent lifetime** — the daemon keeps sessions and active turns alive after the TUI closes.
-- **Shared across projects** — TUIs opened from different directories receive the same global state immediately.
-- **Direct conversation control** — create, message, steer an active Codex turn, interrupt, rename, reorder, complete, reopen, and explicitly stop sessions.
-- **Agent-native conversation view** — a bottom composer, compact agent bullets, clearly separated high-contrast user prompt blocks, a live activity line above the composer, and provider metadata below it.
-- **Dark-terminal palette** — muted true-colour accents distinguish Codex, Claude, prompts, and status metadata while the terminal keeps control of the font.
-- **Bounded transcripts** — refresh only the latest 100 items and load older history explicitly with `PageUp`.
-- **Direct approval gate** — sensitive Codex actions require a one-time decision from the foreground TUI.
-- **Safe peer questions** — ask once through an isolated, read-only shadow fork without writing into the original conversation.
-- **Local-only state** — sockets and catalogs use user-only filesystem permissions.
+- one overview for multiple workspaces and providers;
+- quick handoff to an existing native session;
+- session names, ordering, completion markers, and explicit stop controls;
+- one-shot, read-only peer questions through `waga ask`;
+- a background control service so the overview can detach and reconnect.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-  Human[User] --> TUI[waga TUI]
-  TUI -->|0600 control socket| Host[Waga daemon]
-  Host --> Registry[Workspace registry]
-  Host --> Codex[Codex App Server]
-  Host --> Claude[Claude background CLI]
-  Host --> Gate[Direct approval gate]
-  Host --> Broker[Peer broker]
-  Broker --> Shadow[Ephemeral read-only fork]
+  Human[You] --> Waga[Waga overview]
+  Waga -->|resume over App Server socket| Codex[Native Codex TUI]
+  Waga -->|attach| Claude[Native Claude TUI]
+  Waga --> Host[Local control daemon]
+  Host --> Shadow[Read-only peer shadow]
 ```
 
-The screen is a reconnecting client, not the parent of the worker processes.
-`Ctrl+C` detaches only the screen. Stopping a session or the shared daemon requires
-a separate confirmation chord.
+Waga suspends its own raw input while a provider TUI is active and restores the
+overview after that process exits. It never enables terminal mouse reporting,
+so selection and scrollback remain terminal-native.
 
 ## Requirements
 
-- A Linux or macOS terminal
-- Node.js 22 or later
-- The `codex` CLI
-- The `claude` CLI
+- Linux or macOS terminal
+- Node.js 22+
+- Codex CLI with App Server and `--remote` support
+- Claude Code CLI with `agents` and `attach` support
 
-The project is currently a private npm package intended for local use.
+The live versions used for the current compatibility pass were Codex CLI
+0.152.1 and Claude Code 2.1.258.
 
-## Quick start
+## Install
 
 ```bash
-cd /path/to/wattari-gattari
+git clone git@github.com:dkwlsdl3/wattari-gattari.git
+cd wattari-gattari
 npm install
 npm link
+waga doctor
 ```
 
-Run it from a project you want to manage:
+## Usage
 
 ```bash
-cd ~/work/sample-app
-waga
+waga                         # register this directory and open the overview
+waga --cwd ~/work/my-app     # open from another workspace
+waga agents                  # list sessions visible to peer questions
+waga ask <session> <task>    # one read-only shadow question
+waga doctor                  # check local CLI/runtime compatibility
+waga stop                    # stop the Waga control service
 ```
 
-Opening `waga` in another project connects to the same global hub:
-
-```bash
-cd ~/work/docs-site
-waga
-```
-
-## CLI
-
-```bash
-waga                              # Register the current directory and open the TUI
-waga --cwd ~/work/sample-app           # Open the TUI for a specific project
-waga agents                       # List sessions available for peer questions
-waga ask <session> "review this"  # Ask once through a read-only shadow fork
-waga doctor                       # Diagnose CLI, provider, and daemon contracts
-waga stop                         # Stop the shared daemon
-waga --version
-```
-
-`waga doctor` checks more than version strings. Without creating a model turn, it
-initializes Codex App Server and validates the output of Claude
-`agents --json`.
-
-## Key bindings
+Overview keys:
 
 | Key | Action |
 |---|---|
-| `↑` / `↓` | Select a project or session, or browse input history |
-| `←` / `→`, `Home` / `End` | Move within composer text (`←` returns to the list only when the conversation composer is empty) |
-| `Backspace` / `Delete` | Delete the character before or under the composer cursor |
-| `Enter` / `→` | Collapse or expand a project, or open a session |
-| `←` | Return from a conversation to the session list |
-| `Space` | Quickly reply to the selected session |
-| `Tab` | Switch the new-session provider between Codex and Claude |
-| `Shift+↑` / `Shift+↓` | Reorder a session in shared state |
-| `F2` | Rename the selected session |
-| `F3` | Mark an idle session `Completed`, or reopen it |
-| `PageUp` / `PageDown` | Navigate a long transcript and load older pages |
-| Mouse wheel | Move through the session list or scroll a conversation by three lines |
-| `Esc` | Cancel a quick reply, clear composer text, or interrupt an active turn when the conversation composer is empty |
-| `Ctrl+X`, `Ctrl+X` | Stop the selected session or all sessions in a project |
-| `Ctrl+C` | Detach only the TUI |
-| `Ctrl+Q`, `Ctrl+Q` | Stop the shared daemon |
+| `↑` / `↓` | Move selection |
+| `Enter` / `→` | Expand a workspace or open the selected native TUI |
+| `N` | Create/open a native session |
+| `Tab` | Switch the new-session provider |
+| `F2` | Rename Waga session metadata |
+| `F3` | Mark complete/reopen |
+| `Shift+↑` / `Shift+↓` | Reorder a session |
+| `Ctrl+X` | Stop the selected session or workspace sessions, after confirmation |
+| `Ctrl+C` | Detach the overview |
+| `Ctrl+Q` | Stop the Waga service, after confirmation |
 
-Wattari Gattari never treats the end of a provider turn as automatic completion.
-The user marks a reviewed result with `F3`; sending another message clears the
-completion marker.
+Inside a session, use the provider's normal keys and slash commands. Waga does
+not emulate them.
 
-Inside a conversation, type `/` to open the active provider's built-in command
-menu. Search names and descriptions, move with `↑`/`↓`, and select with `Tab` or
-`Enter`. A `●` command runs directly in Wattari Gattari; a `○` command needs the
-original CLI's interactive account, browser, picker, or confirmation UI.
+## Native handoff contract
 
-- Common: status and usage, interrupt, rename, copy the last answer, Git diff,
-  navigation, and exit
-- Codex App Server: `/compact`, `/fork`, `/review`, `/model`, `/effort`, `/fast`,
-  `/personality`, `/permissions`, `/mcp`, and `/skills`
-- Claude background: `/compact`, `/fork`, `/branch`, `/model`, `/effort`, and
-  built-in skill commands that can run in a background session, including review,
-  verification, and simplification
+- Existing Codex session:
+  `codex --remote unix://<waga-socket> -C <workspace> resume <thread-id>`
+- New Codex session: the same native TUI creates the persistent thread directly;
+  Waga observes `thread/started` and adds it to the overview
+- Existing Claude background session: `claude attach <short-id>`
+- New Claude session: `claude agents --cwd <workspace>` with Waga's bundled,
+  prompt-only peer-protocol agent loaded as the default
 
-The catalog mirrors 51 Codex and 111 Claude Code built-ins in the official docs
-as of 2026-09-02. The original CLI may expose a different subset depending on its
-version, platform, plan, and feature flags. Unknown slash-prefixed text, such as a
-project skill, is still sent to the provider as a normal prompt. Messages entered
-during an active Codex turn use App Server steering; Claude keeps its single-session
-safeguard and accepts the next message after the active turn ends.
+The managed Codex service inherits the user's normal Codex configuration. Waga
+does not disable plugins, MCP servers, skills, or native approval behavior.
+Peer-shadow execution is separate and remains ephemeral, read-only, and stripped
+of external mutation surfaces.
 
-## Safety model
+New sessions opened by Waga learn `waga agents` and `waga ask` automatically.
+`waga ask` is not just inventory: it asks an isolated shadow fork carrying the
+target session's context and returns one answer to the calling session. Either
+session can initiate; the request does not mutate the target transcript or start
+an automatic relay.
+Claude sessions that already existed before Waga keep their recorded system
+prompt; Waga does not rewrite that history.
 
-A managed Codex session receives `workspace-write` access only after Wattari
-Gattari verifies the exact `PreToolUse` approval hook and isolation contract.
+## Demo
 
-- Routine investigation, workspace edits, builds, and tests run within the session policy.
-- File deletion, Git push or forced cleanup, process termination, deployment, and permission widening require a TUI approval.
-- An approval is valid for 15 seconds and can be consumed once only when session, turn, tool item, and command text all match.
-- Missing screens, mismatched requests, and expired approvals fail closed.
-- Peer RPC has no approval capability and never automatically relays messages.
-- External MCP servers, apps, plugins, and computer use are disabled in the managed App Server.
-- Network access is disabled for managed turns.
-
-The shell classifier covers known dangerous forms such as direct deletion,
-`find -delete`, inline interpreters, containers, clusters, and deployment commands.
-It cannot infer every side effect hidden inside an arbitrary script. Keep Git state
-and an independent backup for important repositories.
-
-Claude's own `Needs input` permission state is display-only. Wattari Gattari does
-not impersonate Claude's permission UI; the user handles it directly with
-`claude attach <id>`.
-
-See [ADR 0001](docs/adr/0001-human-controlled-session-console.md) for the detailed
-design decision.
-
-## State and logs
-
-| Kind | Default location |
-|---|---|
-| Runtime socket / PID | `$XDG_RUNTIME_DIR/wattari-gattari` |
-| Catalogs / logs | `$XDG_STATE_HOME/wattari-gattari` or `~/.local/state/wattari-gattari` |
-
-On first use, legacy `agent-bus` catalogs are copied without modifying the original.
-Daemon and Codex App Server logs rotate at 2 MiB and retain the latest three backups.
-
-## Terminal demo
-
-For a README demo, use the isolated fake control adapter rather than recording real
-user sessions. The included [VHS](https://github.com/charmbracelet/vhs) tape keeps
-terminal dimensions and keystrokes reproducible. For lightweight recordings of a
-real operational session, [asciinema](https://github.com/asciinema/asciinema)'s
-`.cast` format is also a good fit.
-
-Demo asset rules:
-
-- Keep it between 10 and 20 seconds.
-- Never include real transcripts, paths, session IDs, or credentials.
-- Use only the fake daemon and temporary XDG state.
-- Version the `.tape` source alongside the generated GIF.
-
-The repository includes a demo that runs the real TUI against fake sessions only:
+Run the real overview against fake local data:
 
 ```bash
-npm run demo:tui       # Inspect the demo without recording
-npm run demo:record    # Generate the GIF in docs/assets after installing VHS
+npm run demo:tui
 ```
 
-The official VHS Docker image can render the same tape without a local installation.
-Review the content and size of `docs/assets/wattari-gattari-demo.gif` before adding
-it near the top of this README.
+Record the terminal demo with [VHS](https://github.com/charmbracelet/vhs):
+
+```bash
+npm run demo:record
+```
+
+The demo never starts a real model session.
 
 ## Development
 
 ```bash
-npm test                 # Isolated test suite
-npm run test:coverage    # Built-in Node.js coverage
-npm run check            # Syntax checks, tests, and fake broker demo
-npm pack --dry-run       # Inspect package contents
+npm test
+npm run test:coverage
+npm run check
+npm pack --dry-run
 ```
 
-CI runs `npm run check` and package validation on Node.js 22 and 24. Real-model E2E
-tests are kept out of the default suite to avoid cost and changes to user sessions;
-run them separately with isolated temporary state. See the
-[research notes](docs/research-2026-09-01.md) for measured background and the
-[TUI v0 specification](docs/tui-v0.md) for the screen contract.
+The architecture contract lives in
+[ADR 0002](docs/adr/0002-native-provider-tui-wrapper.md). The old custom
+conversation-screen specification is preserved only as historical context in
+[the superseded TUI note](docs/tui-v0.md).
 
-## Project status
+## Status
 
-Wattari Gattari is an early local tool. Its interfaces and provider contracts may
-still change. The current implementation has exercised real Codex and Claude session
-lifetime, direct approvals, and shadow questions, but it does not yet promise stable
-public-package compatibility.
+Wattari Gattari is an early local-first project. The provider command seams and
+control-plane behavior are covered by tests, but compatibility can change when
+Codex or Claude change their CLI contracts. Run `waga doctor` after upgrading a
+provider.
 
 ## License
 

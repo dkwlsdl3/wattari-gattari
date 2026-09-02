@@ -28,6 +28,16 @@ export async function runCli(args = process.argv.slice(2), {
     return runSessionConsole();
   },
 } = {}) {
+  async function requestWithDaemon(method, params) {
+    try {
+      return await request(method, params);
+    } catch (error) {
+      if (error?.code !== "ENOENT" && error?.code !== "ECONNREFUSED") throw error;
+      await ensureDaemon();
+      return request(method, params);
+    }
+  }
+
   let options;
   try {
     options = parseCliArgs(args);
@@ -52,15 +62,13 @@ export async function runCli(args = process.argv.slice(2), {
     const result = await stopDaemon();
     stdout.write(result.stopped ? `Stopped daemon ${result.pid}\n` : "Daemon is not running\n");
   } else if (options.command === "agents") {
-    await ensureDaemon();
-    const agents = await request("list_agents");
+    const agents = await requestWithDaemon("list_agents");
     for (const agent of agents) stdout.write(`${agent.id}\t${agent.status}\t${agent.name}\n`);
   } else if (options.command === "ask") {
     if (env.WAGA_PEER_HOP) {
       throw Object.assign(new Error("peer shadow 안에서는 다른 waga 요청을 시작할 수 없습니다"), { code: "PEER_HOP_LIMIT" });
     }
-    await ensureDaemon();
-    const result = await request("ask_agent", { target: options.target, task: options.task });
+    const result = await requestWithDaemon("ask_agent", { target: options.target, task: options.task });
     stdout.write(`${result.reply}\n`);
   } else {
     return (await runConsole()).exitCode;

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { appPaths } from "./app-paths.mjs";
 import { ControlClient } from "./control-client.mjs";
-import { VERSION } from "./product.mjs";
+import { DAEMON_PROTOCOL_VERSION, VERSION } from "./product.mjs";
 import { openRotatingLog } from "./rotating-log.mjs";
 
 export const DAEMON_ENTRY_PATH = fileURLToPath(new URL("./waga-daemon.mjs", import.meta.url));
@@ -91,22 +91,21 @@ export async function ensureWagaDaemon({
   migrateLegacyState(paths);
   if (await probe(paths.controlSocketPath)) {
     const state = await inspect(paths.controlSocketPath);
-    if (state?.version !== VERSION) {
-      throw Object.assign(new Error(`실행 중인 waga ${state?.version ?? "unknown"}와 설치된 ${VERSION}이 다릅니다. waga stop 후 다시 실행하십시오.`), {
+    if (state?.version !== VERSION || state?.protocolVersion !== DAEMON_PROTOCOL_VERSION) {
+      throw Object.assign(new Error(`실행 중인 waga daemon(${state?.version ?? "unknown"}, protocol ${state?.protocolVersion ?? "unknown"})과 설치된 코드(${VERSION}, protocol ${DAEMON_PROTOCOL_VERSION})가 다릅니다. waga stop 후 다시 실행하십시오.`), {
         code: "DAEMON_VERSION_MISMATCH",
       });
     }
-    return { started: false, version: state.version, ...paths };
+    return { started: false, version: state.version, protocolVersion: state.protocolVersion, ...paths };
   }
   const previousPid = readPid(paths.daemonPidPath);
   if (previousPid && alive(previousPid)) {
     throw new Error(`waga daemon ${previousPid} exists but its control socket is unavailable`);
   }
-  if (fs.existsSync(paths.controlSocketPath) && !previousPid) {
-    throw new Error(`Refusing to replace an unowned control socket: ${paths.controlSocketPath}`);
+  if (fs.existsSync(paths.controlSocketPath)) {
+    throw new Error(`Refusing to replace an unreachable control socket: ${paths.controlSocketPath}`);
   }
   if (previousPid) fs.unlinkSync(paths.daemonPidPath);
-  if (fs.existsSync(paths.controlSocketPath)) fs.unlinkSync(paths.controlSocketPath);
 
   const pid = startDaemon({ logPath: paths.daemonLogPath });
   if (!Number.isInteger(pid) || pid <= 1) throw new Error("waga daemon did not return a valid pid");
@@ -114,8 +113,10 @@ export async function ensureWagaDaemon({
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (await probe(paths.controlSocketPath)) {
       const state = await inspect(paths.controlSocketPath);
-      if (state?.version !== VERSION) throw new Error(`Started daemon reported unexpected version: ${state?.version ?? "unknown"}`);
-      return { started: true, pid, version: state.version, ...paths };
+      if (state?.version !== VERSION || state?.protocolVersion !== DAEMON_PROTOCOL_VERSION) {
+        throw new Error(`Started daemon reported unexpected identity: ${state?.version ?? "unknown"}, protocol ${state?.protocolVersion ?? "unknown"}`);
+      }
+      return { started: true, pid, version: state.version, protocolVersion: state.protocolVersion, ...paths };
     }
     if (!alive(pid)) break;
     await new Promise((resolve) => setTimeout(resolve, 50));

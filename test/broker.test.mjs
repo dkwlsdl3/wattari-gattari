@@ -20,18 +20,13 @@ async function fixture(t, adapter, name) {
   return socketPath;
 }
 
-test("lists agents and completes ask/notify round trips", async (t) => {
+test("lists agents and completes a one-request one-response round trip", async (t) => {
   const fake = new FakeAdapter({ agents: [{ name: "codex2" }, { name: "claude3", serialRequests: true }] });
   const socketPath = await fixture(t, fake, "roundtrip");
 
   const agents = await request("list_agents", {}, { socketPath });
   assert.deepEqual(agents.map((agent) => agent.id), ["fake:codex2", "fake:claude3"]);
   assert.equal((await request("ask_agent", { target: "claude3", task: "ping", timeoutMs: 100 }, { socketPath })).reply, "echo:ping");
-  assert.deepEqual(await request("notify_agent", { target: "fake:codex2", message: "hello" }, { socketPath }), {
-    delivered: true,
-    target: "fake:codex2",
-  });
-  assert.deepEqual(fake.notifications, [{ target: "fake:codex2", message: "hello" }]);
 });
 
 test("creates a user-only socket and refuses an unknown target", async (t) => {
@@ -66,7 +61,6 @@ test("serializes concurrent asks for an agent that requires it", async (t) => {
       active -= 1;
       return { reply: task };
     },
-    async notify() {},
   };
   const socketPath = await fixture(t, adapter, "serial");
   const [first, second] = await Promise.all([
@@ -82,7 +76,6 @@ test("rejects adapters that attempt multi-hop or auto-forwarded exchanges", asyn
     provider: "bad",
     async listAgents() { return [{ id: "bad:one", name: "one", status: "idle" }]; },
     async ask() { return { reply: "loop", exchangeCount: 2, autoForwarded: true }; },
-    async notify() {},
   };
   const socketPath = await fixture(t, adapter, "protocol-violation");
   await assert.rejects(

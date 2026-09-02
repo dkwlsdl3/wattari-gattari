@@ -1,13 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
-import os from "node:os";
-import path from "node:path";
-
-import {
-  configuredMcpServerNames,
-  managedAppServerArgs,
-} from "./codex-app-server.mjs";
+import { managedAppServerArgs } from "./codex-app-server.mjs";
 import { appPaths } from "./app-paths.mjs";
 import { openRotatingLog } from "./rotating-log.mjs";
 
@@ -20,7 +14,6 @@ export function managedCodexPaths(env = process.env) {
     pidPath: paths.pidPath,
     logPath: paths.logPath,
     catalogPath: paths.catalogPath,
-    approvalSocketPath: paths.approvalSocketPath,
   };
 }
 
@@ -67,13 +60,13 @@ function removeRuntimeEndpoint(paths) {
   if (fs.existsSync(paths.socketPath)) fs.unlinkSync(paths.socketPath);
 }
 
-function spawnBackgroundServer(args, { cwd, logPath, approvalSocketPath }) {
+function spawnBackgroundServer(args, { cwd, logPath }) {
   const logFd = openRotatingLog(logPath);
   try {
     const child = spawn("codex", args, {
       cwd,
       detached: true,
-      env: { ...process.env, WAGA_APPROVAL_SOCKET: approvalSocketPath },
+      env: process.env,
       stdio: ["ignore", logFd, logFd],
     });
     child.unref();
@@ -85,41 +78,36 @@ function spawnBackgroundServer(args, { cwd, logPath, approvalSocketPath }) {
 
 export async function ensureManagedCodexService({
   cwd = process.cwd(),
-  configPath = path.join(os.homedir(), ".codex", "config.toml"),
   paths = managedCodexPaths(),
   probe = probeSocket,
   startServer = spawnBackgroundServer,
+  alive = processExists,
 } = {}) {
   fs.mkdirSync(paths.directory, { recursive: true, mode: 0o700 });
   if (await probe(paths.socketPath)) return { started: false, ...paths };
 
   const previousPid = readPid(paths.pidPath);
-  if (previousPid && processExists(previousPid)) {
+  if (previousPid && alive(previousPid)) {
     throw new Error(`Codex background service process ${previousPid} exists but its socket is unavailable`);
   }
-  if (fs.existsSync(paths.socketPath) && !previousPid) {
-    throw new Error(`Refusing to replace an unowned socket: ${paths.socketPath}`);
+  if (fs.existsSync(paths.socketPath)) {
+    throw new Error(`Refusing to replace an unreachable Codex socket: ${paths.socketPath}`);
   }
   if (previousPid) {
-    if (fs.existsSync(paths.socketPath)) fs.unlinkSync(paths.socketPath);
     fs.unlinkSync(paths.pidPath);
   }
 
-  const names = fs.existsSync(configPath)
-    ? configuredMcpServerNames(fs.readFileSync(configPath, "utf8"))
-    : [];
-  const args = managedAppServerArgs(paths.socketPath, { mcpServerNames: names });
+  const args = managedAppServerArgs(paths.socketPath);
   const pid = startServer(args, {
     cwd,
     logPath: paths.logPath,
-    approvalSocketPath: paths.approvalSocketPath,
   });
   if (!Number.isInteger(pid) || pid <= 1) throw new Error("Codex background service did not return a valid pid");
   fs.writeFileSync(paths.pidPath, `${pid}\n`, { mode: 0o600 });
 
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (await probe(paths.socketPath)) return { started: true, pid, ...paths };
-    if (!processExists(pid)) break;
+    if (!alive(pid)) break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Codex background service failed to open ${paths.socketPath}; see ${paths.logPath}`);

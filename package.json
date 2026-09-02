@@ -2,7 +2,7 @@
   "name": "wattari-gattari",
   "version": "0.3.0",
   "private": true,
-  "description": "Human-controlled TUI for local Codex and Claude Code sessions",
+  "description": "A lightweight terminal switchboard for native Codex and Claude Code sessions",
   "type": "module",
   "bin": {
     "waga": "src/cli.mjs"
@@ -11,6 +11,7 @@
     "src",
     "demo",
     "docs",
+    "integrations",
     "README.md",
     "README.ko.md",
     "LICENSE",

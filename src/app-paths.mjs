@@ -24,7 +24,6 @@ export function appPaths(env = process.env, homeDirectory = os.homedir()) {
     catalogPath: path.join(stateDirectory, "codex-sessions.json"),
     claudeAliasCatalogPath: path.join(stateDirectory, "claude-aliases.json"),
     workspaceRegistryPath: path.join(stateDirectory, "workspaces.json"),
-    approvalSocketPath: path.join(runtimeDirectory, "approval.sock"),
     legacyCatalogPath: path.join(legacyRuntimeDirectory, "codex-sessions.json"),
     legacyStatePaths: {
       catalogPath: path.join(legacyStateDirectory, "codex-sessions.json"),

@@ -8,29 +8,32 @@ class FakeProvider extends EventEmitter {
   constructor(provider) {
     super();
     this.provider = provider;
-    this.sessions = [{ id: `${provider}:${provider === "claude" ? "abcdef12" : "uuid"}`, threadId: provider === "claude" ? "abcdef12" : "uuid", provider, updatedAt: provider === "claude" ? 2 : 1 }];
+    this.sessions = [{
+      id: `${provider}:id`,
+      threadId: `${provider}-thread`,
+      provider,
+      updatedAt: provider === "claude" ? 2 : 1,
+    }];
+    this.calls = [];
   }
   async connect() {}
   async detach() {}
   async listSessions() { return this.sessions; }
-  async createSession(options) { return { provider: this.provider, options }; }
-  async sendMessage(threadId, text) { return { provider: this.provider, threadId, text }; }
-  async executeCommand(threadId, command, argument) { return { provider: this.provider, threadId, command, argument }; }
-  async interruptSession(threadId) { return { provider: this.provider, threadId, interrupted: true }; }
-  async stopSession(threadId) { return { provider: this.provider, threadId }; }
+  async renameSession(threadId, name) { this.calls.push(["rename", threadId, name]); }
+  async stopSession(threadId) { this.calls.push(["stop", threadId]); }
 }
 
-test("combines providers and routes by selected session without id ambiguity", async () => {
+test("combines providers and routes metadata operations", async () => {
   const codex = new FakeProvider("codex");
   const claude = new FakeProvider("claude");
   const service = new UnifiedSessionService({ codex, claude });
   await service.connect();
+
   assert.deepEqual((await service.listSessions()).map(({ provider }) => provider), ["claude", "codex"]);
-  assert.equal((await service.createSession({ provider: "claude", prompt: "hi" })).provider, "claude");
-  assert.equal((await service.sendMessage("uuid", "hello", codex.sessions[0])).provider, "codex");
-  assert.equal((await service.sendMessage("abcdef12", "hello", claude.sessions[0])).provider, "claude");
-  assert.equal((await service.interruptSession("uuid", codex.sessions[0])).interrupted, true);
-  assert.equal((await service.executeCommand("abcdef12", "/compact", "", claude.sessions[0])).provider, "claude");
+  await service.renameSession("claude-thread", "name", claude.sessions[0]);
+  await service.stopSession("codex-thread", codex.sessions[0]);
+  assert.deepEqual(claude.calls, [["rename", "claude-thread", "name"]]);
+  assert.deepEqual(codex.calls.at(-1), ["stop", "codex-thread"]);
 });
 
 test("keeps Codex available when Claude cannot connect", async () => {
@@ -40,5 +43,4 @@ test("keeps Codex available when Claude cannot connect", async () => {
   const service = new UnifiedSessionService({ codex, claude });
   await service.connect();
   assert.deepEqual((await service.listSessions()).map(({ provider }) => provider), ["codex"]);
-  await assert.rejects(service.createSession({ provider: "claude", prompt: "hi" }), { code: "PROVIDER_UNAVAILABLE" });
 });

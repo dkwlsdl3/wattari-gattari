@@ -16,7 +16,6 @@ function testPaths(directory) {
     pidPath: path.join(directory, "codex.pid"),
     logPath: path.join(directory, "codex.log"),
     catalogPath: path.join(directory, "codex-sessions.json"),
-    approvalSocketPath: path.join(directory, "approval.sock"),
   };
 }
 
@@ -45,7 +44,6 @@ test("starts a detached socket service and records its pid", async (t) => {
   let seenOptions;
   const result = await ensureManagedCodexService({
     paths,
-    configPath: "/missing/config.toml",
     probe: async () => started,
     startServer: (args, options) => {
       seenArgs = args;
@@ -56,13 +54,32 @@ test("starts a detached socket service and records its pid", async (t) => {
   });
   assert.equal(result.started, true);
   assert.equal(fs.readFileSync(paths.pidPath, "utf8"), `${process.pid}\n`);
-  assert.deepEqual(seenArgs.slice(0, 4), [
-    "--dangerously-bypass-hook-trust",
+  assert.deepEqual(seenArgs, [
     "app-server",
     "--listen",
     `unix://${paths.socketPath}`,
   ]);
-  assert.equal(seenOptions.approvalSocketPath, paths.approvalSocketPath);
+  assert.deepEqual(seenOptions, { cwd: process.cwd(), logPath: paths.logPath });
+});
+
+test("never replaces an unreachable socket when a sandbox cannot see the host pid", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "waga-service-test-"));
+  t.after(() => fs.rmSync(directory, { recursive: true }));
+  const paths = testPaths(directory);
+  fs.writeFileSync(paths.pidPath, "4242\n", { mode: 0o600 });
+  fs.writeFileSync(paths.socketPath, "host socket placeholder", { mode: 0o600 });
+  let starts = 0;
+
+  await assert.rejects(ensureManagedCodexService({
+    paths,
+    probe: async () => false,
+    alive: () => false,
+    startServer: () => { starts += 1; return 9999; },
+  }), /Refusing to replace an unreachable Codex socket/);
+
+  assert.equal(starts, 0);
+  assert.equal(fs.readFileSync(paths.pidPath, "utf8"), "4242\n");
+  assert.equal(fs.readFileSync(paths.socketPath, "utf8"), "host socket placeholder");
 });
 
 test("stops only the recorded managed app-server process and keeps its catalog", async (t) => {
@@ -79,7 +96,6 @@ test("stops only the recorded managed app-server process and keeps its catalog",
     paths,
     readCommandLine: () => [
       "/usr/bin/codex",
-      "--dangerously-bypass-hook-trust",
       "app-server",
       "--listen",
       `unix://${paths.socketPath}`,

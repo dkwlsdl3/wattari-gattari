@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 
-import { VERSION } from "./product.mjs";
+import { DAEMON_PROTOCOL_VERSION, VERSION } from "./product.mjs";
 
 function hostError(code, message) {
   return Object.assign(new Error(message), { code });
@@ -13,9 +13,6 @@ function sameState(left, right) {
 export class WagaHost extends EventEmitter {
   #registry;
   #sessionFactory;
-  #approvalServer;
-  #approvalLedger;
-  #approval = null;
   #services = new Map();
   #serviceStarts = new Map();
   #sessions = new Map();
@@ -25,23 +22,15 @@ export class WagaHost extends EventEmitter {
   #revision = 0;
   #closed = false;
 
-  constructor({ registry, sessionFactory, approvalServer = null, approvalLedger = null }) {
+  constructor({ registry, sessionFactory }) {
     super();
     if (!registry || typeof registry.snapshot !== "function") throw new TypeError("Host requires a workspace registry");
     if (typeof sessionFactory !== "function") throw new TypeError("Host requires a session factory");
     this.#registry = registry;
     this.#sessionFactory = sessionFactory;
-    this.#approvalServer = approvalServer;
-    this.#approvalLedger = approvalLedger;
   }
 
   async start() {
-    if (this.#approvalServer) {
-      this.#approvalServer.on("request", (request) => this.#acceptApprovalRequest(request));
-      this.#approvalServer.on("resolved", ({ requestId }) => this.#clearApproval(requestId));
-      this.#approvalServer.on("abandoned", ({ requestId }) => this.#clearApproval(requestId));
-      await this.#approvalServer.start();
-    }
     const workspaces = this.#registry.snapshot().workspaces;
     await Promise.all(workspaces.map(async (workspace) => {
       await this.#ensureService(workspace.path);
@@ -58,15 +47,14 @@ export class WagaHost extends EventEmitter {
     await Promise.allSettled([...this.#refreshOperations.values()]);
     await Promise.all([...this.#services.values()].map((service) => Promise.resolve(service.detach?.()).catch(() => {})));
     this.#services.clear();
-    await this.#approvalServer?.close();
   }
 
   snapshot() {
     const registry = this.#registry.snapshot();
     return {
       version: VERSION,
+      protocolVersion: DAEMON_PROTOCOL_VERSION,
       revision: this.#revision,
-      approval: this.#approval ? structuredClone(this.#approval) : null,
       workspaces: registry.workspaces.map((workspace) => {
         const sessions = this.#sessions.get(workspace.path) ?? [];
         const order = new Map(workspace.sessionOrder.map((key, index) => [key, index]));
@@ -96,39 +84,6 @@ export class WagaHost extends EventEmitter {
         return this.#unregisterWorkspace(params.path);
       case "workspace/stopAll":
         return this.#stopAllSessions(params.path);
-      case "session/create":
-        return this.#createSession(params);
-      case "session/open":
-        return this.#sessionCall(params, "openSession", params.threadId);
-      case "session/read":
-        return this.#sessionCall(params, "readSession", params.threadId);
-      case "session/older":
-        return this.#sessionCall(params, "loadOlderMessages", params.threadId);
-      case "session/send": {
-        const result = await this.#sessionCall(params, "sendMessage", params.threadId, params.text);
-        const selected = (this.#sessions.get(params.workspacePath) ?? []).find((session) => session.threadId === params.threadId);
-        const reopened = selected
-          ? this.#registry.setSessionCompleted(params.workspacePath, selected.id, false)
-          : false;
-        await this.#refreshWorkspace(params.workspacePath, { forcePublish: reopened });
-        return result;
-      }
-      case "session/command": {
-        const result = await this.#sessionCall(
-          params,
-          "executeCommand",
-          params.threadId,
-          params.command,
-          params.argument ?? "",
-        );
-        await this.#refreshWorkspace(params.workspacePath);
-        return result;
-      }
-      case "session/interrupt": {
-        const result = await this.#sessionCall(params, "interruptSession", params.threadId);
-        await this.#refreshWorkspace(params.workspacePath);
-        return result;
-      }
       case "session/rename": {
         const result = await this.#sessionCall(params, "renameSession", params.threadId, params.name);
         await this.#refreshWorkspace(params.workspacePath);
@@ -140,8 +95,6 @@ export class WagaHost extends EventEmitter {
         return this.#reorderSession(params);
       case "session/setCompleted":
         return this.#setSessionCompleted(params);
-      case "approval/resolve":
-        return this.#resolveApproval(params);
       case "daemon/shutdown":
         setImmediate(() => this.emit("shutdownRequested"));
         return { stopping: true };
@@ -181,14 +134,6 @@ export class WagaHost extends EventEmitter {
     }
     await this.#refreshWorkspace(workspacePath);
     return { stopped: sessions.map((session) => session.threadId) };
-  }
-
-  async #createSession({ workspacePath, prompt, name, provider = "codex" }) {
-    const service = await this.#service(workspacePath);
-    const session = await service.createSession({ prompt, name, cwd: workspacePath, provider });
-    this.#registry.recordSession(workspacePath, session.id);
-    await this.#refreshWorkspace(workspacePath);
-    return session;
   }
 
   async #stopSession({ workspacePath, threadId }) {
@@ -235,9 +180,7 @@ export class WagaHost extends EventEmitter {
     if (this.#services.has(workspacePath)) return this.#services.get(workspacePath);
     if (this.#serviceStarts.has(workspacePath)) return this.#serviceStarts.get(workspacePath);
     const start = (async () => {
-      const service = this.#sessionFactory(workspacePath, {
-        onServerRequest: (request) => this.handleServerRequest(request),
-      });
+      const service = this.#sessionFactory(workspacePath);
       service.on?.("changed", () => this.#scheduleRefresh(workspacePath, { forcePublish: true }));
       await service.connect();
       this.#services.set(workspacePath, service);
@@ -297,39 +240,4 @@ export class WagaHost extends EventEmitter {
     this.emit("state", this.snapshot());
   }
 
-  handleServerRequest(request) {
-    return this.#approvalLedger?.consumeServerRequest(request);
-  }
-
-  #acceptApprovalRequest(request) {
-    const managed = [...this.#sessions.values()].flat().some((session) => session.threadId === request.payload.session_id);
-    if (!managed) {
-      this.#approvalServer.resolve(request.requestId, "deny");
-      return;
-    }
-    this.#approval = request;
-    this.emit("approval", structuredClone(request));
-  }
-
-  #clearApproval(requestId) {
-    if (this.#approval?.requestId !== requestId) return;
-    this.#approval = null;
-    this.emit("approval", null);
-  }
-
-  #resolveApproval({ requestId, decision }) {
-    if (!this.#approval || this.#approval.requestId !== requestId) {
-      throw hostError("APPROVAL_NOT_CURRENT", "현재 화면의 승인 요청과 일치하지 않습니다");
-    }
-    if (decision !== "approve" && decision !== "deny") {
-      throw hostError("APPROVAL_DECISION_INVALID", "승인은 approve 또는 deny여야 합니다");
-    }
-    const resolvedDecision = decision === "approve" && this.#approvalLedger?.authorizeHook(this.#approval.payload)
-      ? "approve"
-      : "deny";
-    if (!this.#approvalServer.resolve(requestId, resolvedDecision)) {
-      throw hostError("APPROVAL_NOT_CURRENT", "승인 요청이 이미 해결되었거나 만료됐습니다");
-    }
-    return { requestId, decision: resolvedDecision };
-  }
 }

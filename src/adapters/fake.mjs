@@ -1,6 +1,5 @@
 export class FakeAdapter {
   provider = "fake";
-  notifications = [];
 
   constructor({ agents = [{ name: "fake1" }], delayMs = 0 } = {}) {
     this.agents = agents.map((agent) => ({
@@ -27,9 +26,5 @@ export class FakeAdapter {
       });
     }
     return { target: agent.id, reply: `echo:${task}` };
-  }
-
-  async notify(agent, message) {
-    this.notifications.push({ target: agent.id, message });
   }
 }
