@@ -79,6 +79,10 @@ export class UnifiedSessionService extends EventEmitter {
     return this.#forSession(threadId, selectedSession).sendMessage(threadId, text, selectedSession);
   }
 
+  async executeCommand(threadId, command, argument = "", selectedSession = null) {
+    return this.#forSession(threadId, selectedSession).executeCommand(threadId, command, argument, selectedSession);
+  }
+
   async interruptSession(threadId, selectedSession = null) {
     return this.#forSession(threadId, selectedSession).interruptSession(threadId, selectedSession);
   }

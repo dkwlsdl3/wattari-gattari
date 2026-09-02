@@ -63,8 +63,14 @@ Codex와 Claude 작업세션을 직접 제어하는 화면입니다.
   비어 있을 때 `Esc`를 누르거나 `/interrupt`를 실행하면 현재 턴만 중단하고 세션과
   transcript는 유지합니다. Claude 작업 중 추가 메시지는 세션 복제를 막기 위해
   거절하지만 `Esc` 중단은 지원합니다.
-- `/` 메뉴는 `/status`, `/statusline`, `/interrupt`, `/rename`, `/back`, `/help`를
-  로컬에서 처리합니다. 알려지지 않은 slash 시작 텍스트는 일반 프롬프트로 전달합니다.
+- `/` 메뉴는 현재 제공자의 공식 기본 명령 카탈로그를 이름·설명으로 검색합니다.
+  `●`는 Waga 로컬 또는 provider background API에서 실행하고, 원본 CLI의 대화형 UI가
+  필요한 명령은 `○`로 표시한 뒤 실행 위치를 안내합니다. 알려지지 않은 slash 시작
+  텍스트는 프로젝트 스킬 호환성을 위해 일반 프롬프트로 전달합니다.
+- Codex의 압축·fork·review·모델·추론 강도·속도 tier·personality·권한 상태·MCP·스킬은
+  App Server RPC로 실행합니다. Claude는 압축·fork·모델·추론 강도와 background에서
+  실행 가능한 기본 스킬 명령만 전달하고, 계정·브라우저·picker 명령을 background
+  프롬프트로 가장하지 않습니다.
 
 상세 진입은 선택된 thread를 다시 전체 목록에서 찾지 않고 바로 최근 transcript를
 조회합니다. 화면에는 터미널 높이에 맞는 메시지만 그리며, 터미널 `resize` 이벤트마다

@@ -43,6 +43,9 @@ class FakeSessionService extends EventEmitter {
     if (session) session.status = "Awaiting input";
     return { interrupted: true, threadId };
   }
+  async executeCommand(threadId, command, argument, selected) {
+    return { threadId, command, argument, provider: selected.provider };
+  }
 }
 
 class FakeApprovalServer extends EventEmitter {
@@ -94,6 +97,25 @@ test("aggregates empty workspaces and multiple sessions into one shared snapshot
     ["docs-site", 0],
   ]);
   assert.deepEqual(state.workspaces[0].sessions.map(({ id }) => id), [first.id, second.id]);
+});
+
+test("routes provider slash commands through the selected managed session", async (t) => {
+  const { host } = fixture(t);
+  await host.start();
+  const workspacePath = "/workspace/sample-app";
+  await host.dispatch("workspace/register", { path: workspacePath });
+  const session = await host.dispatch("session/create", { workspacePath, prompt: "first" });
+  assert.deepEqual(await host.dispatch("session/command", {
+    workspacePath,
+    threadId: session.threadId,
+    command: "/compact",
+    argument: "",
+  }), {
+    threadId: session.threadId,
+    command: "/compact",
+    argument: "",
+    provider: "codex",
+  });
 });
 
 test("shares one correlated approval across clients and rejects stale decisions", async (t) => {

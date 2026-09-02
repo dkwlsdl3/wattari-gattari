@@ -52,6 +52,20 @@ class FakeBackend {
             },
           };
         }
+        if (method === "model/list") {
+          return {
+            data: [{
+              id: "gpt-test",
+              model: "gpt-test",
+              displayName: "GPT Test",
+              isDefault: true,
+              serviceTiers: [{ id: "priority", name: "Fast" }],
+            }],
+            nextCursor: null,
+          };
+        }
+        if (method === "thread/compact/start") return {};
+        if (method === "skills/list") return { data: [{ cwd: "/workspace", skills: [{ name: "test-skill" }] }] };
         if (method === "hooks/list") {
           return {
             data: [{
@@ -90,6 +104,30 @@ class FakeBackend {
           backend.items.set(threadId, []);
           backend.turns.set(threadId, []);
           return { thread: { ...thread, threadSource: params.threadSource }, sandbox: backend.sandbox };
+        }
+        if (method === "thread/fork") {
+          const source = backend.active.find((item) => item.id === params.threadId);
+          const thread = {
+            ...source,
+            id: SECOND_THREAD_ID,
+            name: null,
+            status: { type: "idle" },
+            threadSource: params.threadSource,
+          };
+          backend.active.push(thread);
+          backend.items.set(thread.id, [...backend.items.get(source.id)]);
+          backend.turns.set(thread.id, [...backend.turns.get(source.id)]);
+          return {
+            thread,
+            sandbox: backend.sandbox,
+            approvalPolicy: params.approvalPolicy,
+            approvalsReviewer: params.approvalsReviewer,
+            cwd: params.cwd,
+            model: "gpt-test",
+            modelProvider: "openai",
+            reasoningEffort: "high",
+            serviceTier: null,
+          };
         }
         if (method === "thread/name/set") {
           const thread = [...backend.active, ...backend.archived].find((item) => item.id === params.threadId);
@@ -250,6 +288,38 @@ test("steers and interrupts the active Codex turn instead of rejecting mid-turn 
   assert.deepEqual(interrupted, { interrupted: true, threadId: THREAD_ID, turnId: TURN_ID });
   assert.equal(backend.turns.get(THREAD_ID)[0].status, "interrupted");
   assert.equal((await service.listSessions())[0].status, "Awaiting input");
+});
+
+test("executes Codex App Server slash commands and applies model settings to later turns", async (t) => {
+  const backend = new FakeBackend();
+  const catalogPath = testCatalogPath(t);
+  const service = new CodexSessionService({
+    cwd: "/workspace",
+    catalogPath,
+    clientFactory: (options) => backend.client(options),
+  });
+  await service.connect();
+  const created = await service.createSession({ prompt: "first" });
+  backend.complete();
+
+  assert.match((await service.executeCommand(created.threadId, "/model", "gpt-test")).message, /GPT Test/);
+  assert.match((await service.executeCommand(created.threadId, "/effort", "xhigh")).message, /xhigh/);
+  assert.match((await service.executeCommand(created.threadId, "/fast", "on")).message, /Fast/);
+  assert.match((await service.executeCommand(created.threadId, "/personality", "pragmatic")).message, /pragmatic/);
+  assert.match((await service.executeCommand(created.threadId, "/permissions")).message, /read-only/);
+  assert.match((await service.executeCommand(created.threadId, "/compact")).message, /압축/);
+  assert.match((await service.executeCommand(created.threadId, "/skills")).message, /test-skill/);
+  const forked = await service.executeCommand(created.threadId, "/fork", "alternate");
+  assert.equal(forked.session.threadId, SECOND_THREAD_ID);
+  assert.equal(forked.session.name, "alternate");
+  assert.deepEqual([...new ManagedThreadCatalog(catalogPath).read()], [THREAD_ID, SECOND_THREAD_ID]);
+
+  await service.sendMessage(created.threadId, "next");
+  const turn = backend.requests.findLast(({ method }) => method === "turn/start");
+  assert.equal(turn.params.model, "gpt-test");
+  assert.equal(turn.params.effort, "xhigh");
+  assert.equal(turn.params.serviceTier, "priority");
+  assert.equal(turn.params.personality, "pragmatic");
 });
 
 test("publishes real model, context, git, rate-limit, and working-time metadata", async (t) => {

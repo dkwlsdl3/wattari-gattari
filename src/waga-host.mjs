@@ -113,6 +113,17 @@ export class WagaHost extends EventEmitter {
         await this.#refreshWorkspace(params.workspacePath, { forcePublish: reopened });
         return result;
       }
+      case "session/command": {
+        const result = await this.#sessionCall(
+          params,
+          "executeCommand",
+          params.threadId,
+          params.command,
+          params.argument ?? "",
+        );
+        await this.#refreshWorkspace(params.workspacePath);
+        return result;
+      }
       case "session/interrupt": {
         const result = await this.#sessionCall(params, "interruptSession", params.threadId);
         await this.#refreshWorkspace(params.workspacePath);

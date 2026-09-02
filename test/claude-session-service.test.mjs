@@ -170,9 +170,12 @@ test("stops an idle live worker before resuming so Claude keeps the same session
   });
   await service.connect();
   const [session] = await service.listSessions();
+  await service.executeCommand(session.threadId, "/model", "sonnet", session);
+  await service.executeCommand(session.threadId, "/effort", "high", session);
   await service.sendMessage(session.threadId, "continue", session);
   assert.deepEqual(calls.slice(-2).map((args) => args[0]), ["stop", "--background"]);
   assert.equal(calls.at(-1)[calls.at(-1).indexOf("--resume") + 1], row.sessionId);
+  assert.deepEqual(calls.at(-1).slice(0, 5), ["--background", "--model", "sonnet", "--effort", "high"]);
 });
 
 test("opening a sleeping Claude session wakes the same id without adding a prompt", async (t) => {
@@ -212,4 +215,44 @@ test("opening a sleeping Claude session wakes the same id without adding a promp
   assert.equal(opened.status, "Awaiting input");
   assert.deepEqual(opened.messages.map((message) => message.text), ["ready"]);
   assert.deepEqual(calls.find((args) => args[0] === "--background"), ["--background", "--resume", sessionId]);
+});
+
+test("forks a Claude background session under a new id", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "waga-claude-service-"));
+  t.after(() => fs.rmSync(directory, { recursive: true }));
+  const workspace = path.join(directory, "workspace");
+  fs.mkdirSync(workspace, { recursive: true });
+  const original = {
+    id: "abcdef12",
+    sessionId: "abcdef12-0000-4000-8000-000000000000",
+    cwd: workspace,
+    kind: "background",
+    status: "idle",
+    state: "done",
+    name: "original",
+    pid: process.pid,
+  };
+  const rows = [original];
+  const calls = [];
+  const service = new ClaudeSessionService({
+    cwd: workspace,
+    claudeHome: path.join(directory, ".claude"),
+    aliasCatalogPath: path.join(directory, "aliases.json"),
+    run: async (args) => {
+      calls.push(args);
+      if (args[0] === "agents") return { stdout: JSON.stringify(rows) };
+      if (args[0] === "stop") return { stdout: "stopped\n" };
+      if (args.includes("--fork-session")) {
+        rows.push({ ...original, id: "12345678", sessionId: "12345678-0000-4000-8000-000000000000", name: "fork" });
+        return { stdout: "12345678\n" };
+      }
+      throw new Error(`unexpected args: ${args.join(" ")}`);
+    },
+  });
+  await service.connect();
+  const [session] = await service.listSessions();
+  const result = await service.executeCommand(session.threadId, "/fork", "alternative", session);
+  assert.equal(result.session.threadId, "12345678");
+  assert.equal(result.session.name, "alternative");
+  assert.ok(calls.some((args) => args.includes("--fork-session")));
 });

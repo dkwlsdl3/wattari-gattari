@@ -165,6 +165,7 @@ export class ClaudeSessionService extends EventEmitter {
   #aliases;
   #watchers = new Map();
   #transcripts = new Map();
+  #resumeSettings = new Map();
   #connected = false;
 
   constructor({
@@ -209,6 +210,7 @@ export class ClaudeSessionService extends EventEmitter {
         if (row.status) this.#aliases.unhide(id);
         else continue;
       }
+      const settings = this.#resumeSettings.get(row.id) ?? {};
       sessions.push({
         id,
         threadId: row.id,
@@ -225,6 +227,8 @@ export class ClaudeSessionService extends EventEmitter {
         workingSince: status === "Working"
           ? Date.parse(jobState?.createdAt ?? row.startedAt ?? "") || null
           : null,
+        model: settings.model ?? row.model ?? null,
+        reasoningEffort: settings.effort ?? row.effort ?? null,
       });
     }
     return sessions.sort((left, right) => right.updatedAt - left.updatedAt);
@@ -249,7 +253,7 @@ export class ClaudeSessionService extends EventEmitter {
   async openSession(threadId, selectedSession = null) {
     let session = await this.#findSession(threadId, selectedSession);
     if (session.status === "Sleeping" && session.controllable) {
-      const { stdout } = await this.#run(["--background", "--resume", session.sessionId], { cwd: session.cwd });
+      const { stdout } = await this.#run(this.#resumeArguments(session), { cwd: session.cwd });
       const returnedId = parseBackgroundSessionId(stdout);
       if (returnedId !== threadId) {
         throw new ClaudeSessionError("CLAUDE_RESUME_FORKED", `Claude가 ${threadId} 대신 ${returnedId} 세션을 만들었습니다`);
@@ -293,7 +297,7 @@ export class ClaudeSessionService extends EventEmitter {
     if (session.status === "Awaiting input") {
       await this.#run(["stop", threadId], { cwd: session.cwd });
     }
-    const { stdout } = await this.#run(["--background", "--resume", session.sessionId, text.trim()], { cwd: session.cwd });
+    const { stdout } = await this.#run(this.#resumeArguments(session, text.trim()), { cwd: session.cwd });
     const returnedId = parseBackgroundSessionId(stdout);
     if (returnedId !== threadId) {
       throw new ClaudeSessionError("CLAUDE_RESUME_FORKED", `Claude가 ${threadId} 대신 ${returnedId} 세션을 만들었습니다`);
@@ -301,6 +305,53 @@ export class ClaudeSessionService extends EventEmitter {
     this.#aliases.unhide(session.id);
     this.emit("changed", { method: "waga/claude-turn-started", params: { threadId } });
     return { threadId, started: true };
+  }
+
+  async executeCommand(threadId, command, argument = "", selectedSession = null) {
+    const session = await this.#findSession(threadId, selectedSession, { fresh: true });
+    const value = argument.trim();
+    if (command === "/compact") {
+      await this.sendMessage(threadId, value ? `/compact ${value}` : "/compact", session);
+      return { message: "Claude Code 컨텍스트 압축을 시작했습니다" };
+    }
+    if (command === "/model") {
+      if (!value) return { message: `현재 모델: ${this.#resumeSettings.get(threadId)?.model ?? session.model ?? "Claude 기본값"} · /model sonnet|opus|fable|<전체 모델 ID>` };
+      this.#setResumeSetting(threadId, "model", value);
+      return { message: `다음 턴부터 Claude 모델을 ${value}(으)로 사용합니다` };
+    }
+    if (command === "/effort") {
+      if (!value) return { message: `현재 추론 강도: ${this.#resumeSettings.get(threadId)?.effort ?? session.reasoningEffort ?? "default"} · /effort low|medium|high|xhigh|max` };
+      if (!new Set(["low", "medium", "high", "xhigh", "max"]).has(value)) {
+        throw new ClaudeSessionError("INVALID_EFFORT", "사용법: /effort low|medium|high|xhigh|max");
+      }
+      this.#setResumeSetting(threadId, "effort", value);
+      return { message: `다음 턴부터 Claude 추론 강도를 ${value}(으)로 사용합니다` };
+    }
+    if (command === "/fork" || command === "/branch") {
+      if (session.status === "Working" || session.status === "Needs input") {
+        throw new ClaudeSessionError("TURN_IN_PROGRESS", `${command} 명령은 현재 턴이 끝난 뒤 실행할 수 있습니다`);
+      }
+      if (session.status === "Awaiting input") await this.#run(["stop", threadId], { cwd: session.cwd });
+      const args = this.#resumeArguments(session);
+      args.splice(1, 0, "--fork-session");
+      const { stdout } = await this.#run(args, { cwd: session.cwd });
+      const forkId = parseBackgroundSessionId(stdout);
+      if (forkId === threadId) throw new ClaudeSessionError("CLAUDE_FORK_REUSED_ID", "Claude가 fork에 새 background id를 반환하지 않았습니다");
+      this.#aliases.unhide(`claude:${forkId}`);
+      const forked = await this.#waitForSession(forkId);
+      if (value) this.#aliases.set(forked.id, value);
+      this.emit("changed", { method: "waga/claude-forked", params: { threadId, forkId } });
+      return { message: `Claude 세션을 ${forkId}(으)로 분기했습니다`, session: { ...forked, name: value || forked.name } };
+    }
+    if (new Set([
+      "/batch", "/claude-api", "/code-review", "/dataviz", "/deep-research",
+      "/design", "/init", "/loop", "/review", "/security-review", "/simplify",
+      "/verify", "/workflow-authoring",
+    ]).has(command)) {
+      await this.sendMessage(threadId, value ? `${command} ${value}` : command, session);
+      return { message: `${command} 명령을 Claude Code background 세션에 전달했습니다` };
+    }
+    throw new ClaudeSessionError("COMMAND_UNSUPPORTED", `Waga background 세션에서 실행할 수 없는 Claude 명령입니다: ${command}`);
   }
 
   async interruptSession(threadId, selectedSession = null) {
@@ -326,6 +377,7 @@ export class ClaudeSessionService extends EventEmitter {
     if (!session.controllable) throw new ClaudeSessionError("SESSION_NOT_CONTROLLABLE", "background Claude 세션만 제어할 수 있습니다");
     await this.#run(["stop", threadId], { cwd: session.cwd });
     this.#transcripts.delete(threadId);
+    this.#resumeSettings.delete(threadId);
     this.#aliases.remove(session.id);
     this.#aliases.hide(session.id);
     this.emit("changed", { method: "waga/claude-stopped", params: { threadId } });
@@ -336,6 +388,21 @@ export class ClaudeSessionService extends EventEmitter {
     const session = (await this.listSessions()).find((candidate) => candidate.threadId === threadId);
     if (!session) throw new ClaudeSessionError("SESSION_NOT_FOUND", `Claude 세션을 찾을 수 없습니다: ${threadId}`);
     return session;
+  }
+
+  #resumeArguments(session, prompt = null) {
+    const settings = this.#resumeSettings.get(session.threadId) ?? {};
+    const args = ["--background"];
+    if (settings.model) args.push("--model", settings.model);
+    if (settings.effort) args.push("--effort", settings.effort);
+    args.push("--resume", session.sessionId);
+    if (prompt) args.push(prompt);
+    return args;
+  }
+
+  #setResumeSetting(threadId, key, value) {
+    const current = this.#resumeSettings.get(threadId) ?? {};
+    this.#resumeSettings.set(threadId, { ...current, [key]: value });
   }
 
   async #waitForSession(threadId) {

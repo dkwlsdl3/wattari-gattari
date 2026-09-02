@@ -142,12 +142,25 @@ Wattari Gattari never treats the end of a provider turn as automatic completion.
 The user marks a reviewed result with `F3`; sending another message clears the
 completion marker.
 
-Inside a conversation, type `/` to open Wattari Gattari's local command menu.
-The initial commands are `/status`, `/statusline`, `/interrupt`, `/rename`,
-`/back`, and `/help`. Unknown slash-prefixed text is sent to the provider as a
-normal prompt, so provider or project-specific commands remain usable. Codex
-messages entered while a turn is active use App Server steering; Claude keeps its
-single-session safeguard and accepts the next message after the active turn ends.
+Inside a conversation, type `/` to open the active provider's built-in command
+menu. Search names and descriptions, move with `↑`/`↓`, and select with `Tab` or
+`Enter`. A `●` command runs directly in Wattari Gattari; a `○` command needs the
+original CLI's interactive account, browser, picker, or confirmation UI.
+
+- Common: status and usage, interrupt, rename, copy the last answer, Git diff,
+  navigation, and exit
+- Codex App Server: `/compact`, `/fork`, `/review`, `/model`, `/effort`, `/fast`,
+  `/personality`, `/permissions`, `/mcp`, and `/skills`
+- Claude background: `/compact`, `/fork`, `/branch`, `/model`, `/effort`, and
+  built-in skill commands that can run in a background session, including review,
+  verification, and simplification
+
+The catalog mirrors 51 Codex and 111 Claude Code built-ins in the official docs
+as of 2026-09-02. The original CLI may expose a different subset depending on its
+version, platform, plan, and feature flags. Unknown slash-prefixed text, such as a
+project skill, is still sent to the provider as a normal prompt. Messages entered
+during an active Codex turn use App Server steering; Claude keeps its single-session
+safeguard and accepts the next message after the active turn ends.
 
 ## Safety model
 

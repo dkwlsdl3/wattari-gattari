@@ -112,6 +112,7 @@ export class CodexSessionService extends EventEmitter {
   #workspaceWriteEnabled = false;
   #runtime = new Map();
   #rateLimits = null;
+  #turnSettings = new Map();
 
   constructor({
     cwd = process.cwd(),
@@ -290,11 +291,133 @@ export class CodexSessionService extends EventEmitter {
     return this.#startTurn(threadId, text.trim());
   }
 
+  async executeCommand(threadId, command, argument = "") {
+    this.#assertConnected();
+    const session = await this.#findSession(threadId);
+    if (!session) throw new CodexSessionError("SESSION_NOT_FOUND", `관리 세션을 찾을 수 없습니다: ${threadId}`);
+    const value = argument.trim();
+
+    if (command === "/compact") {
+      this.#assertIdleCommand(session, command);
+      await this.#client.request("thread/compact/start", { threadId });
+      this.emit("changed", { method: "waga/thread-compacted", params: { threadId } });
+      return { message: "Codex 컨텍스트 압축을 시작했습니다" };
+    }
+    if (command === "/fork") {
+      this.#assertIdleCommand(session, command);
+      const response = await this.#client.request("thread/fork", {
+        threadId,
+        cwd: session.cwd,
+        approvalPolicy: this.#workspaceWriteEnabled ? "on-request" : "never",
+        approvalsReviewer: "user",
+        sandbox: this.#workspaceWriteEnabled ? "workspace-write" : "read-only",
+        config: this.#workspaceWriteEnabled ? { bypass_hook_trust: true } : undefined,
+        excludeTurns: true,
+        ephemeral: false,
+        threadSource: THREAD_SOURCE,
+      });
+      this.#assertSessionIsolation(response);
+      const forkId = response.thread?.id;
+      if (!forkId) throw new CodexSessionError("THREAD_ID_MISSING", "Codex가 fork thread id를 반환하지 않았습니다");
+      this.catalog.record(forkId);
+      this.#rememberMetadata(forkId, response);
+      const name = value || `${session.name} (fork)`;
+      await this.#client.request("thread/name/set", { threadId: forkId, name });
+      const forked = publicSession({ ...response.thread, name }, false, this.#runtime.get(forkId), this.#rateLimits);
+      this.emit("changed", { method: "waga/thread-forked", params: { threadId, forkId } });
+      return { message: `'${name}' 세션으로 분기했습니다`, session: forked };
+    }
+    if (command === "/review") {
+      this.#assertIdleCommand(session, command);
+      const target = value
+        ? { type: "custom", instructions: value }
+        : { type: "uncommittedChanges" };
+      const response = await this.#client.request("review/start", { threadId, target, delivery: "inline" });
+      this.#rememberTurnStarted(threadId, response.turn);
+      this.emit("changed", { method: "waga/review-started", params: { threadId, turn: response.turn } });
+      return { message: value ? "지정한 기준으로 코드 리뷰를 시작했습니다" : "현재 변경사항 코드 리뷰를 시작했습니다" };
+    }
+    if (command === "/model") {
+      const page = await this.#client.request("model/list", { limit: 100, includeHidden: false });
+      const models = page.data ?? [];
+      if (!value) {
+        const current = this.#turnSettings.get(threadId)?.model ?? session.model ?? "default";
+        return { message: `현재 모델: ${current} · 사용 가능: ${models.map((model) => model.model).join(", ")}` };
+      }
+      const selected = models.find((model) => model.model === value || model.id === value || model.displayName === value);
+      if (!selected) throw new CodexSessionError("MODEL_NOT_FOUND", `사용 가능한 Codex 모델이 아닙니다: ${value}`);
+      this.#setTurnSetting(threadId, "model", selected.model);
+      this.#runtimeFor(threadId).model = selected.model;
+      return { message: `다음 턴부터 모델을 ${selected.displayName}(${selected.model})(으)로 사용합니다` };
+    }
+    if (command === "/effort") {
+      if (!value) {
+        const current = this.#turnSettings.get(threadId)?.effort ?? session.reasoningEffort ?? "default";
+        return { message: `현재 추론 강도: ${current} · /effort low|medium|high|xhigh|max` };
+      }
+      if (!new Set(["low", "medium", "high", "xhigh", "max"]).has(value)) {
+        throw new CodexSessionError("INVALID_EFFORT", "사용법: /effort low|medium|high|xhigh|max");
+      }
+      this.#setTurnSetting(threadId, "effort", value);
+      this.#runtimeFor(threadId).reasoningEffort = value;
+      return { message: `다음 턴부터 추론 강도를 ${value}(으)로 사용합니다` };
+    }
+    if (command === "/fast") {
+      const current = this.#turnSettings.get(threadId)?.serviceTier ?? session.serviceTier ?? "default";
+      if (!value) return { message: `현재 응답 속도 tier: ${current} · /fast on|off` };
+      if (!new Set(["on", "off"]).has(value)) throw new CodexSessionError("INVALID_FAST_MODE", "사용법: /fast on|off");
+      if (value === "on") {
+        const page = await this.#client.request("model/list", { limit: 100, includeHidden: false });
+        const modelName = this.#turnSettings.get(threadId)?.model ?? session.model;
+        const model = page.data.find((candidate) => candidate.model === modelName)
+          ?? page.data.find((candidate) => candidate.isDefault);
+        if (!model?.serviceTiers?.some((tier) => tier.id === "priority")) {
+          throw new CodexSessionError("FAST_MODE_UNAVAILABLE", `${modelName ?? "현재 모델"}은(는) Fast tier를 지원하지 않습니다`);
+        }
+      }
+      const serviceTier = value === "on" ? "priority" : null;
+      this.#setTurnSetting(threadId, "serviceTier", serviceTier);
+      this.#runtimeFor(threadId).serviceTier = serviceTier;
+      return { message: value === "on" ? "다음 턴부터 Fast tier(priority)를 사용합니다" : "다음 턴부터 기본 응답 속도를 사용합니다" };
+    }
+    if (command === "/personality") {
+      if (!value) return { message: `현재 personality: ${this.#turnSettings.get(threadId)?.personality ?? "default"} · /personality none|friendly|pragmatic` };
+      if (!new Set(["none", "friendly", "pragmatic"]).has(value)) {
+        throw new CodexSessionError("INVALID_PERSONALITY", "사용법: /personality none|friendly|pragmatic");
+      }
+      this.#setTurnSetting(threadId, "personality", value);
+      return { message: `다음 턴부터 personality를 ${value}(으)로 사용합니다` };
+    }
+    if (command === "/permissions") {
+      return {
+        message: this.#workspaceWriteEnabled
+          ? "현재 권한: workspace-write + on-request 직접 승인 · Waga 안전 정책상 슬래시 명령으로 권한을 확대할 수 없습니다"
+          : "현재 권한: read-only + never · 승인 hook이 확인되지 않아 쓰기가 잠겨 있습니다",
+      };
+    }
+    if (command === "/mcp") {
+      const page = await this.#client.request("mcpServerStatus/list", { threadId, limit: MAX_PAGE_SIZE, detail: "full" });
+      const active = page.data.filter(hasExternalMcpSurface).map(({ name }) => name);
+      return { message: active.length ? `활성 MCP: ${active.join(", ")}` : "Waga 관리 세션은 외부 MCP가 모두 비활성화되어 있습니다" };
+    }
+    if (command === "/skills") {
+      const result = await this.#client.request("skills/list", { cwds: [session.cwd], forceReload: false });
+      const skills = (result.data ?? []).flatMap((entry) => entry.skills ?? []).map((skill) => skill.name).filter(Boolean);
+      return { message: skills.length ? `사용 가능한 스킬 ${skills.length}개: ${skills.join(", ")}` : "현재 workspace에서 발견한 스킬이 없습니다" };
+    }
+    throw new CodexSessionError("COMMAND_UNSUPPORTED", `Waga에서 실행할 수 없는 Codex 명령입니다: ${command}`);
+  }
+
   async #startTurn(threadId, text) {
+    const settings = this.#turnSettings.get(threadId) ?? {};
     const response = await this.#client.request("turn/start", {
       threadId,
       input: [{ type: "text", text, text_elements: [] }],
       turnTrigger: "waga-user",
+      model: settings.model,
+      effort: settings.effort,
+      personality: settings.personality,
+      serviceTier: settings.serviceTier,
       responsesapiClientMetadata: { waga_origin: "direct-human-tui" },
       approvalPolicy: this.#workspaceWriteEnabled ? "on-request" : "never",
       approvalsReviewer: "user",
@@ -356,6 +479,7 @@ export class CodexSessionService extends EventEmitter {
     await this.#client.request("thread/archive", { threadId });
     this.#transcripts.delete(threadId);
     this.#runtime.delete(threadId);
+    this.#turnSettings.delete(threadId);
     this.catalog.remove(threadId);
     this.emit("changed", { method: "waga/session-stopped", params: { threadId } });
   }
@@ -462,6 +586,17 @@ export class CodexSessionService extends EventEmitter {
     const current = this.#runtime.get(threadId) ?? {};
     this.#runtime.set(threadId, current);
     return current;
+  }
+
+  #setTurnSetting(threadId, key, value) {
+    const current = this.#turnSettings.get(threadId) ?? {};
+    this.#turnSettings.set(threadId, { ...current, [key]: value });
+  }
+
+  #assertIdleCommand(session, command) {
+    if (session.status === "Working") {
+      throw new CodexSessionError("TURN_IN_PROGRESS", `${command} 명령은 현재 턴이 끝난 뒤 실행할 수 있습니다`);
+    }
   }
 
   #rememberMetadata(threadId, response) {

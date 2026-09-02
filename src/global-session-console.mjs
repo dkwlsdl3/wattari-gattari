@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import readline from "node:readline";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import { ensureWagaDaemon } from "./waga-background.mjs";
@@ -12,6 +14,7 @@ import { InputHistory } from "./input-history.mjs";
 import { DISPLAY_NAME } from "./product.mjs";
 import { sessionTree, preserveCursor } from "./session-tree.mjs";
 import { shutdownDialogDecision, stopDialogDecision } from "./session-console-keys.mjs";
+import { matchSlashCommands, slashCommand, slashCommandsFor } from "./slash-commands.mjs";
 
 const ESC = "\x1b[";
 const reset = `${ESC}0m`;
@@ -35,14 +38,7 @@ const cursorShow = `${ESC}?25h`;
 const cursorHide = `${ESC}?25l`;
 const cursorBlinkingBar = `${ESC}5 q`;
 const cursorDefaultShape = `${ESC}0 q`;
-const slashCommands = [
-  { name: "/status", description: "현재 세션과 상태선 정보 보기" },
-  { name: "/statusline", description: "상태선에서 제공하는 정보 보기" },
-  { name: "/interrupt", description: "현재 작업 중단" },
-  { name: "/rename", description: "세션 이름 변경: /rename 새 이름" },
-  { name: "/back", description: "세션 목록으로 돌아가기" },
-  { name: "/help", description: "지원하는 슬래시 명령 보기" },
-];
+const execFileAsync = promisify(execFile);
 
 export async function runSessionConsole({
   paths = appPaths(),
@@ -308,17 +304,20 @@ function inputPanel(width, { title = null } = {}) {
 }
 
 function slashMatches() {
-  if (view === "overview" || !input.startsWith("/") || input.includes(" ")) return [];
-  return slashCommands.filter((command) => command.name.startsWith(input));
+  if (view === "overview") return [];
+  return matchSlashCommands(detail?.provider, input);
 }
 
 function slashMenuLines(width) {
   const matches = slashMatches();
   if (!matches.length) return [];
   slashCursor = Math.min(slashCursor, matches.length - 1);
-  return matches.slice(0, 6).map((command, index) => {
-    const marker = index === slashCursor ? "›" : " ";
-    return fitCells(`${marker} ${command.name.padEnd(13)} ${command.description}`, Math.max(1, width - 1));
+  const start = Math.max(0, Math.min(slashCursor - 5, matches.length - 6));
+  return matches.slice(start, start + 6).map((command, index) => {
+    const absoluteIndex = start + index;
+    const marker = absoluteIndex === slashCursor ? "›" : " ";
+    const availability = command.support === "attach" ? "○" : "●";
+    return fitCells(`${marker} ${availability} ${command.name.padEnd(19)} ${command.description}`, Math.max(1, width - 1));
   });
 }
 
@@ -569,8 +568,8 @@ async function openFocusedSession() {
 async function submitInput() {
   const text = input.trim();
   if (!text) return;
-  const slashCommand = text.split(/\s+/, 1)[0];
-  if (view !== "overview" && slashCommands.some(({ name }) => name === slashCommand)) {
+  const commandName = text.split(/\s+/, 1)[0];
+  if (view !== "overview" && slashCommand(detail?.provider, commandName)) {
     input = "";
     inputHistory.reset();
     try {
@@ -628,9 +627,9 @@ async function interruptCurrent() {
 async function runSlashCommand(text) {
   const [command, ...arguments_] = text.split(/\s+/);
   const argument = arguments_.join(" ").trim();
-  if (command === "/status" || command === "/statusline") {
+  if (["/status", "/statusline", "/usage", "/context", "/cost", "/stats"].includes(command)) {
     notice = statusLine(detail, Math.max(40, outputStream.columns ?? 120)).replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "").trim();
-  } else if (command === "/interrupt") {
+  } else if (command === "/interrupt" || command === "/stop") {
     await interruptCurrent();
   } else if (command === "/rename") {
     if (!argument) {
@@ -640,12 +639,49 @@ async function runSlashCommand(text) {
     await client.request("session/rename", { workspacePath: detail.cwd, threadId: detail.threadId, name: argument });
     detail.name = argument;
     notice = `세션 이름을 '${argument}'(으)로 변경했습니다`;
-  } else if (command === "/back") {
+  } else if (["/back", "/new", "/resume", "/clear"].includes(command)) {
     view = "overview";
     detail = null;
-    notice = "";
+    notice = command === "/back" ? "" : "새 세션을 만들거나 기존 세션을 선택하세요";
+  } else if (command === "/copy") {
+    const last = [...(detail.messages ?? [])].reverse().find((message) => message.role === "agent")?.text;
+    if (!last) {
+      notice = "복사할 에이전트 답변이 없습니다";
+      return;
+    }
+    outputStream.write(`\x1b]52;c;${Buffer.from(last).toString("base64")}\x07`);
+    notice = "마지막 에이전트 답변을 클립보드로 복사했습니다";
+  } else if (command === "/diff") {
+    const { stdout } = await execFileAsync("git", ["diff", "--stat", "--", "."], {
+      cwd: detail.cwd,
+      encoding: "utf8",
+      timeout: 5_000,
+    });
+    notice = stdout.trim() || "추적 중인 파일의 변경사항이 없습니다";
+  } else if (command === "/exit" || command === "/quit") {
+    cleanup();
   } else if (command === "/help") {
-    notice = slashCommands.map(({ name, description }) => `${name} ${description}`).join(" · ");
+    const commands = slashCommandsFor(detail.provider);
+    const runnable = commands.filter(({ support }) => support !== "attach").length;
+    notice = `${detail.provider === "claude" ? "Claude Code" : "Codex"} 기본 명령 ${commands.length}개 · ● Waga 실행 가능 ${runnable}개 · ○ 원본 TUI에서 실행 · / 뒤에 검색어를 입력하세요`;
+  } else {
+    const selected = slashCommand(detail.provider, command);
+    if (selected?.support === "attach") {
+      notice = `${command}은(는) ${detail.provider === "claude" ? "Claude Code" : "Codex"}의 대화형 터미널 UI가 필요합니다. 해당 세션을 원본 CLI에서 attach/resume해 실행하세요`;
+      return;
+    }
+    const result = await client.request("session/command", {
+      workspacePath: detail.cwd,
+      threadId: detail.threadId,
+      command,
+      argument,
+    });
+    notice = result.message ?? `${command} 명령을 실행했습니다`;
+    if (result.session?.threadId) {
+      view = result.session.threadId;
+      detail = { ...result.session, messages: [] };
+      await refreshDetail();
+    }
   }
 }
 

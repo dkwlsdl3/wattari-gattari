@@ -161,6 +161,22 @@ test("renders a bottom composer, compact transcript, status line, slash menu, an
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(client.requests.some(({ method }) => method === "session/send"), false);
 
+  input.emit("keypress", "/compact", { name: undefined, ctrl: false, meta: false, shift: false });
+  input.emit("keypress", "", { name: "return", ctrl: false, meta: false, shift: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(client.requests.findLast(({ method }) => method === "session/command"), {
+    method: "session/command",
+    params: { workspacePath: "/workspace", threadId: "thread-1", command: "/compact", argument: "" },
+  });
+
+  const commandCount = client.requests.filter(({ method }) => method === "session/command").length;
+  input.emit("keypress", "/ide", { name: undefined, ctrl: false, meta: false, shift: false });
+  input.emit("keypress", "", { name: "return", ctrl: false, meta: false, shift: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(client.requests.filter(({ method }) => method === "session/command").length, commandCount);
+  const attachFrame = rendered.slice(rendered.lastIndexOf("\x1b[2J"));
+  assert.match(attachFrame, /원본 CLI/);
+
   input.emit("keypress", "/issue-loop continue", { name: undefined, ctrl: false, meta: false, shift: false });
   input.emit("keypress", "", { name: "return", ctrl: false, meta: false, shift: false });
   await new Promise((resolve) => setImmediate(resolve));

@@ -137,11 +137,23 @@ waga --version
 `Completed`는 provider의 단순한 턴 종료를 자동으로 오해하지 않습니다. 사용자가 최종
 보고를 확인한 뒤 `F3`으로 표시하며, 새 메시지를 보내면 완료 표시가 해제됩니다.
 
-대화 화면에서 `/`를 입력하면 와따리가따리 자체 명령 메뉴가 열립니다. 현재 지원하는
-명령은 `/status`, `/statusline`, `/interrupt`, `/rename`, `/back`, `/help`입니다.
-목록에 없는 `/` 시작 텍스트는 일반 프롬프트로 제공자에게 보내므로 프로젝트·제공자
-고유 명령도 막지 않습니다. Codex가 작업 중일 때 보낸 메시지는 App Server steering으로
-현재 턴에 추가하며, Claude는 세션 복제 방지를 위해 현재 턴이 끝난 뒤 다음 메시지를 받습니다.
+대화 화면에서 `/`를 입력하면 현재 제공자의 기본 명령 메뉴가 열립니다. 명령명과 설명을
+검색할 수 있고 `↑`/`↓`로 이동한 뒤 `Tab` 또는 `Enter`로 선택합니다. 목록의 `●`는
+Wattari Gattari에서 바로 실행할 수 있다는 뜻이고, `○`는 계정·브라우저·확인 대화상자 등
+원본 CLI의 대화형 화면이 필요하다는 뜻입니다.
+
+- 공통: 상태·사용량, 중단, 이름 변경, 마지막 답변 복사, Git diff, 목록 이동과 종료
+- Codex App Server: `/compact`, `/fork`, `/review`, `/model`, `/effort`, `/fast`,
+  `/personality`, `/permissions`, `/mcp`, `/skills`
+- Claude background: `/compact`, `/fork`, `/branch`, `/model`, `/effort`와 background에서
+  실행 가능한 기본 스킬 명령(코드 리뷰·검증·단순화 등)
+
+카탈로그는 2026-09-02 공식 문서의 Codex 기본 명령 51개와 Claude Code 기본 명령
+111개를 반영합니다. 설치 버전·운영체제·요금제·feature flag에 따라 실제 원본 CLI의
+목록은 달라질 수 있습니다. 카탈로그에 없는 프로젝트 스킬 같은 `/` 시작 텍스트는 일반
+프롬프트로 제공자에게 그대로 전달합니다. Codex 작업 중 일반 메시지는 App Server
+steering으로 현재 턴에 추가하며, Claude는 세션 복제 방지를 위해 현재 턴이 끝난 뒤
+다음 메시지를 받습니다.
 
 ## 안전 모델
 
