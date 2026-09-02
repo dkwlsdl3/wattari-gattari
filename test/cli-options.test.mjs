@@ -3,9 +3,13 @@ import test from "node:test";
 
 import { parseCliArgs } from "../src/cli-options.mjs";
 
-test("bare CLI lists sessions and agents remains an alias", () => {
-  assert.equal(parseCliArgs([]).command, "list");
+test("bare CLI selects the interactive default and agents remains a list alias", () => {
+  assert.equal(parseCliArgs([]).command, "default");
   assert.equal(parseCliArgs(["agents"]).command, "list");
+  assert.equal(parseCliArgs(["list"]).command, "list");
+  assert.equal(parseCliArgs(["--json"]).command, "list");
+  assert.equal(parseCliArgs(["--provider", "claude"]).command, "list");
+  assert.equal(parseCliArgs(["overview", "--cwd", "/tmp"]).command, "overview");
 });
 
 test("ask parses target, message, timeout, and cwd", () => {

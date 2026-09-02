@@ -13,6 +13,35 @@ test("list renders provider-prefixed ids", async () => {
   assert.match(stdout.value, /^claude:1\tidle\tproof\t\/tmp/);
 });
 
+test("bare CLI opens the dock on an interactive terminal", async () => {
+  const stdout = output();
+  stdout.isTTY = true;
+  const stdin = { isTTY: true };
+  let seen;
+  const dock = async (options) => { seen = options; return { code: 4 }; };
+  assert.equal(await runCli([], { stdin, stdout, stderr: output(), bridge: {}, dock }), 4);
+  assert.deepEqual(seen, { cwd: path.resolve(process.cwd()) });
+});
+
+test("bare CLI keeps the text list when output is not interactive", async () => {
+  const stdout = output();
+  const bridge = { async discover() { return { sessions: [], warnings: [] }; } };
+  assert.equal(await runCli([], { stdin: { isTTY: false }, stdout, stderr: output(), bridge }), 0);
+  assert.equal(stdout.value, "");
+});
+
+test("internal overview delegates to the dashboard", async () => {
+  const stdin = { isTTY: true };
+  const stdout = output();
+  stdout.isTTY = true;
+  let seen;
+  const overview = async (options) => { seen = options; return 6; };
+  assert.equal(await runCli(["overview", "--cwd", "/tmp"], {
+    stdin, stdout, stderr: output(), bridge: {}, overview,
+  }), 6);
+  assert.equal(seen.cwd, path.resolve("/tmp"));
+});
+
 test("text list keeps provider warnings off stdout", async () => {
   const stdout = output();
   const stderr = output();

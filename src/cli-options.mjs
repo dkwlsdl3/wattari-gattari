@@ -1,11 +1,11 @@
-const COMMANDS = new Set(["list", "agents", "send", "ask", "open", "doctor", "help"]);
+const COMMANDS = new Set(["list", "agents", "send", "ask", "open", "overview", "doctor", "help"]);
 
 function invalid(message) {
   return Object.assign(new Error(message), { code: "INVALID_ARGUMENT" });
 }
 
 export function parseCliArgs(args) {
-  const options = { command: "list", cwd: null, provider: null, timeoutMs: 180_000, json: false };
+  const options = { command: "default", cwd: null, provider: null, timeoutMs: 180_000, json: false };
   const positional = [];
   let commandSeen = false;
   for (let index = 0; index < args.length; index += 1) {
@@ -32,6 +32,7 @@ export function parseCliArgs(args) {
     } else positional.push(arg);
   }
 
+  if (options.command === "default" && (options.json || options.provider)) options.command = "list";
   if (options.provider && !["claude", "codex"].includes(options.provider)) throw invalid(`Unknown provider: ${options.provider}`);
   if (["send", "ask"].includes(options.command)) {
     options.target = positional.shift();
