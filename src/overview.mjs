@@ -8,6 +8,18 @@ const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
 const color = (code, text) => `${ESC}${code}m${text}${RESET}`;
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const DUBEOLSIK_COMMAND_KEYS = new Map([
+  ["ㅗ", "h"],
+  ["ㅓ", "j"],
+  ["ㅏ", "k"],
+  ["ㅣ", "l"],
+  ["ㄱ", "r"],
+  ["ㅂ", "q"],
+]);
+
+function dockCommandName(text, key) {
+  return key.name ?? DUBEOLSIK_COMMAND_KEYS.get(text) ?? DUBEOLSIK_COMMAND_KEYS.get(key.sequence);
+}
 
 function safeText(value) {
   return String(value ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim();
@@ -141,7 +153,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
   while (lines.length < height - 5) lines.push("");
   if (warnings.length) lines.push(`  ${color("38;5;214", fit(`경고: ${safeText(warnings[0].provider)} · ${safeText(warnings[0].message)}`, usableWidth))}`);
   else lines.push(`  ${color("38;5;245", fit(notice || "세션 상태는 자동으로 새로고침됩니다.", usableWidth))}`);
-  lines.push(`  ${color("38;5;245", fit(wide ? "↑↓ 이동   ←→ 접기/펼치기   Enter 열기/접기   / 검색   Tab 제공자   r 새로고침   q 돌아가기" : "↑↓ 이동  Enter 열기/접기  / 검색  q 복귀", usableWidth))}`);
+  lines.push(`  ${color("38;5;245", fit(wide ? "↑↓ 이동   ←→ 접기/펼치기   Enter 열기/접기   / 검색   Tab 제공자   r/ㄱ 새로고침   q/ㅂ 돌아가기" : "↑↓ 이동  Enter 열기/접기  / 검색  q/ㅂ 복귀", usableWidth))}`);
   lines.push(`  ${color("38;5;114", fit(nativeHint, usableWidth))}`);
   if (query) lines.push(`  ${color("38;5;229", fit(`검색: ${query}`, usableWidth))}`);
   else lines.push("");
@@ -231,7 +243,7 @@ export async function runOverview({
   inputStream.setRawMode(true);
   inputStream.resume();
 
-  const onKeypress = (_text, key = {}) => {
+  const onKeypress = (text, key = {}) => {
     if (busy || closed) return;
     if (searching) {
       if (key.name === "escape") { searching = false; query = ""; }
@@ -246,17 +258,18 @@ export async function runOverview({
     }
     const nodes = visibleNodes();
     reconcileSelection(nodes);
-    if (key.name === "up" || key.name === "k") selected = Math.max(0, selected - 1);
-    else if (key.name === "down" || key.name === "j") selected = Math.min(Math.max(0, nodes.length - 1), selected + 1);
-    else if (key.name === "tab") {
+    const commandName = dockCommandName(text, key);
+    if (commandName === "up" || commandName === "k") selected = Math.max(0, selected - 1);
+    else if (commandName === "down" || commandName === "j") selected = Math.min(Math.max(0, nodes.length - 1), selected + 1);
+    else if (commandName === "tab") {
       provider = provider === null ? "claude" : provider === "claude" ? "codex" : null;
       selected = 0;
       selectedKey = null;
       selectFirstSession();
     }
     else if (key.sequence === "/") searching = true;
-    else if (key.name === "r") { notice = "새로고침 중입니다."; render(); void refresh(); return; }
-    else if (key.name === "q" || (key.ctrl && key.name === "c")) {
+    else if (commandName === "r") { notice = "새로고침 중입니다."; render(); void refresh(); return; }
+    else if (commandName === "q" || (key.ctrl && commandName === "c")) {
       busy = true;
       void workspace.leave()
         .then((result) => { if (result?.closeOverview) cleanup(); })
@@ -264,18 +277,18 @@ export async function runOverview({
         .finally(() => { busy = false; });
       return;
     }
-    else if ((key.name === "left" || key.name === "h") && nodes[selected]?.type === "workspace") collapsed.add(nodes[selected].cwd);
-    else if ((key.name === "left" || key.name === "h") && nodes[selected]?.type === "session") {
+    else if ((commandName === "left" || commandName === "h") && nodes[selected]?.type === "workspace") collapsed.add(nodes[selected].cwd);
+    else if ((commandName === "left" || commandName === "h") && nodes[selected]?.type === "session") {
       const parentIndex = nodes.findIndex((node) => node.key === nodes[selected].workspaceKey);
       if (parentIndex >= 0) selected = parentIndex;
     }
-    else if ((key.name === "right" || key.name === "l") && nodes[selected]?.type === "workspace") collapsed.delete(nodes[selected].cwd);
-    else if (key.name === "return" && nodes[selected]?.type === "workspace") {
+    else if ((commandName === "right" || commandName === "l") && nodes[selected]?.type === "workspace") collapsed.delete(nodes[selected].cwd);
+    else if (commandName === "return" && nodes[selected]?.type === "workspace") {
       const cwd = nodes[selected].cwd;
       if (collapsed.has(cwd)) collapsed.delete(cwd);
       else collapsed.add(cwd);
     }
-    else if (key.name === "return" && nodes[selected]?.type === "session") {
+    else if (commandName === "return" && nodes[selected]?.type === "session") {
       busy = true;
       const target = nodes[selected].session;
       notice = `${target.name} 세션을 여는 중입니다.`;

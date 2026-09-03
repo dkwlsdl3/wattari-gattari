@@ -311,3 +311,79 @@ test("provider tabs clear stale rows and select the first matching session", asy
   input.emit("keypress", "q", { name: "q", sequence: "q" });
   assert.equal(await running, 0);
 });
+
+test("overview accepts Dubeolsik aliases for navigation refresh and leave", async () => {
+  const stable = [
+    { id: "codex:a", provider: "codex", status: "idle", name: "A", cwd: "/work/p", updatedAt: 2 },
+    { id: "codex:b", provider: "codex", status: "idle", name: "B", cwd: "/work/p", updatedAt: 1 },
+  ];
+  const input = ttyInput();
+  const output = capturedOutput();
+  let discoveries = 0;
+  let leaves = 0;
+  const bridge = {
+    async discover() {
+      discoveries += 1;
+      return { sessions: stable, warnings: [] };
+    },
+  };
+  const workspace = {
+    async focusOrOpen() {},
+    async leave() {
+      leaves += 1;
+      return { closeOverview: true };
+    },
+  };
+  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  input.emit("keypress", "ㅓ", { sequence: "ㅓ" });
+  assert.equal(selectedSessionName(output), "A");
+  input.emit("keypress", "ㅓ", { sequence: "ㅓ" });
+  assert.equal(selectedSessionName(output), "B");
+  input.emit("keypress", "ㅏ", { sequence: "ㅏ" });
+  assert.equal(selectedSessionName(output), "A");
+
+  input.emit("keypress", "ㅗ", { sequence: "ㅗ" });
+  assert.match(plain(output.writes.at(-1)), /›\s+▾\s+p/);
+  input.emit("keypress", "ㅗ", { sequence: "ㅗ" });
+  assert.match(plain(output.writes.at(-1)), /›\s+▸\s+p/);
+  input.emit("keypress", "ㅣ", { sequence: "ㅣ" });
+  assert.match(plain(output.writes.at(-1)), /›\s+▾\s+p/);
+
+  const discoveriesBeforeRefresh = discoveries;
+  input.emit("keypress", "ㄱ", { sequence: "ㄱ" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(discoveries, discoveriesBeforeRefresh + 1);
+
+  input.emit("keypress", "ㅂ", { sequence: "ㅂ" });
+  assert.equal(await running, 0);
+  assert.equal(leaves, 1);
+});
+
+test("overview keeps Dubeolsik text as text while searching", async () => {
+  const input = ttyInput();
+  const output = capturedOutput();
+  let leaves = 0;
+  const bridge = {
+    async discover() { return { sessions: [sessions[0]], warnings: [] }; },
+  };
+  const workspace = {
+    async focusOrOpen() {},
+    async leave() {
+      leaves += 1;
+      return { closeOverview: true };
+    },
+  };
+  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  input.emit("keypress", "/", { sequence: "/" });
+  input.emit("keypress", "ㅂ", { sequence: "ㅂ" });
+  assert.match(plain(output.writes.at(-1)), /검색: ㅂ/);
+  assert.equal(leaves, 0);
+
+  input.emit("keypress", "", { name: "escape" });
+  input.emit("keypress", "q", { name: "q", sequence: "q" });
+  assert.equal(await running, 0);
+});
