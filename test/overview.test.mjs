@@ -100,6 +100,9 @@ test("overview frame distinguishes providers and keeps navigation help visible",
   assert.match(frame, /CODEX/);
   assert.match(frame, /CLAUDE/);
   assert.match(frame, /Enter 열기/);
+  assert.match(frame, /Ctrl\+N 새 세션/);
+  assert.match(frame, /Ctrl\+R 갱신/);
+  assert.match(frame, /Ctrl\+Q 나가기/);
   assert.match(frame, /tmux prefix \+ 0/);
 });
 
@@ -109,6 +112,12 @@ test("overview frame switches to a compact layout when the terminal narrows", ()
   assert.match(frame, /CLAUDE/);
   assert.match(frame, /검색/);
   assert.doesNotMatch(frame, /\/work\/ui/);
+});
+
+test("empty overview points to the control-key refresh command", () => {
+  const frame = plain(buildOverviewFrame({ sessions: [], width: 100, height: 20 }));
+  assert.match(frame, /Ctrl\+R을 눌러 새로고침하세요/);
+  assert.doesNotMatch(frame, /(^|\s)r을 눌러/);
 });
 
 test("Enter collapses and expands a workspace without opening a native session", async () => {
@@ -133,7 +142,7 @@ test("Enter collapses and expands a workspace without opening a native session",
   assert.match(plain(output.writes.at(-1)), /CODEX/);
   assert.equal(nativeOpens, 0);
 
-  input.emit("keypress", "q", { name: "q", sequence: "q" });
+  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
   assert.equal(await running, 0);
 });
 
@@ -207,7 +216,7 @@ test("overview pauses discovery while a direct native TUI owns the terminal", as
 
   releaseNative({ code: 0 });
   await new Promise((resolve) => setImmediate(resolve));
-  input.emit("keypress", "q", { name: "q", sequence: "q" });
+  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
   assert.equal(await running, 0);
   assert.equal(discoveriesWhileBusy, discoveriesWhenOpened);
 });
@@ -251,7 +260,7 @@ test("overview keeps newer keyboard selection when an older refresh completes", 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(selectedSessionName(output), "C");
 
-  input.emit("keypress", "q", { name: "q", sequence: "q" });
+  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
   assert.equal(await running, 0);
 });
 
@@ -279,7 +288,7 @@ test("overview navigation stops at tree boundaries instead of wrapping", async (
   input.emit("keypress", "", { name: "down" });
   assert.equal(selectedSessionName(output), "B");
 
-  input.emit("keypress", "q", { name: "q", sequence: "q" });
+  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
   assert.equal(await running, 0);
 });
 
@@ -308,16 +317,17 @@ test("provider tabs clear stale rows and select the first matching session", asy
   assert.doesNotMatch(plain(codexFrame), /CLAUDE/);
   assert.equal(selectedSessionName(output), "배포");
 
-  input.emit("keypress", "q", { name: "q", sequence: "q" });
+  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
   assert.equal(await running, 0);
 });
 
-test("overview accepts Dubeolsik aliases for navigation refresh and leave", async () => {
+test("overview uses IME-independent control shortcuts for commands", async (t) => {
   const stable = [
     { id: "codex:a", provider: "codex", status: "idle", name: "A", cwd: "/work/p", updatedAt: 2 },
     { id: "codex:b", provider: "codex", status: "idle", name: "B", cwd: "/work/p", updatedAt: 1 },
   ];
   const input = ttyInput();
+  t.after(() => input.emit("end"));
   const output = capturedOutput();
   let discoveries = 0;
   let leaves = 0;
@@ -337,53 +347,103 @@ test("overview accepts Dubeolsik aliases for navigation refresh and leave", asyn
   const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
   await new Promise((resolve) => setImmediate(resolve));
 
+  input.emit("keypress", "j", { name: "j", sequence: "j" });
   input.emit("keypress", "ㅓ", { sequence: "ㅓ" });
-  assert.equal(selectedSessionName(output), "A");
-  input.emit("keypress", "ㅓ", { sequence: "ㅓ" });
-  assert.equal(selectedSessionName(output), "B");
-  input.emit("keypress", "ㅏ", { sequence: "ㅏ" });
-  assert.equal(selectedSessionName(output), "A");
-
-  input.emit("keypress", "ㅗ", { sequence: "ㅗ" });
   assert.match(plain(output.writes.at(-1)), /›\s+▾\s+p/);
-  input.emit("keypress", "ㅗ", { sequence: "ㅗ" });
-  assert.match(plain(output.writes.at(-1)), /›\s+▸\s+p/);
-  input.emit("keypress", "ㅣ", { sequence: "ㅣ" });
-  assert.match(plain(output.writes.at(-1)), /›\s+▾\s+p/);
-
   const discoveriesBeforeRefresh = discoveries;
+  input.emit("keypress", "r", { name: "r", sequence: "r" });
   input.emit("keypress", "ㄱ", { sequence: "ㄱ" });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(discoveries, discoveriesBeforeRefresh + 1);
-
+  assert.equal(discoveries, discoveriesBeforeRefresh);
+  input.emit("keypress", "q", { name: "q", sequence: "q" });
   input.emit("keypress", "ㅂ", { sequence: "ㅂ" });
+  assert.equal(leaves, 0);
+
+  input.emit("keypress", "\u0012", { name: "r", sequence: "\u0012", ctrl: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(discoveries, discoveriesBeforeRefresh + 1);
+  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
   assert.equal(await running, 0);
   assert.equal(leaves, 1);
 });
 
-test("overview keeps Dubeolsik text as text while searching", async () => {
+test("overview creates a provider-owned session from its one-line composer", async (t) => {
   const input = ttyInput();
+  t.after(() => input.emit("end"));
   const output = capturedOutput();
-  let leaves = 0;
+  let created = null;
+  let resolveCreate;
+  const createCalled = new Promise((resolve) => { resolveCreate = resolve; });
+  let discovered = [];
   const bridge = {
-    async discover() { return { sessions: [sessions[0]], warnings: [] }; },
+    async discover() { return { sessions: discovered, warnings: [] }; },
+    async create(provider, prompt, options) {
+      created = { provider, prompt, options };
+      discovered = [{ id: "codex:thread-new", nativeId: "thread-new", provider: "codex", status: "working", name: prompt, cwd: options.cwd, updatedAt: 1 }];
+      resolveCreate();
+      return { provider, nativeId: "thread-new" };
+    },
   };
   const workspace = {
     async focusOrOpen() {},
-    async leave() {
-      leaves += 1;
-      return { closeOverview: true };
-    },
+    async leave() { return { closeOverview: true }; },
   };
-  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  const running = runOverview({ bridge, workspace, defaultCwd: "/work/new", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
   await new Promise((resolve) => setImmediate(resolve));
 
-  input.emit("keypress", "/", { sequence: "/" });
-  input.emit("keypress", "ㅂ", { sequence: "ㅂ" });
-  assert.match(plain(output.writes.at(-1)), /검색: ㅂ/);
-  assert.equal(leaves, 0);
+  input.emit("keypress", "n", { name: "n", sequence: "n" });
+  assert.doesNotMatch(plain(output.writes.at(-1)), /새 세션 ·/);
+  input.emit("keypress", "\u000e", { name: "n", sequence: "\u000e", ctrl: true });
+  assert.match(plain(output.writes.at(-1)), /새 세션 · CLAUDE · \/work\/new/);
+  input.emit("keypress", "", { name: "tab" });
+  assert.match(plain(output.writes.at(-1)), /새 세션 · CODEX · \/work\/new/);
+  input.emit("keypress", "작업", { sequence: "작업" });
+  input.emit("keypress", "", { name: "left" });
+  input.emit("keypress", "새", { sequence: "새" });
+  assert.match(plain(output.writes.at(-1)), /› 작새업/);
+  input.emit("keypress", "", { name: "return" });
+  await createCalled;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(created, { provider: "codex", prompt: "작새업", options: { cwd: "/work/new" } });
+  assert.equal(selectedSessionName(output), "작새업");
+  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  assert.equal(await running, 0);
+});
+
+test("new-session composer keeps a failed prompt editable and Escape cancels it", async (t) => {
+  const input = ttyInput();
+  t.after(() => input.emit("end"));
+  const output = capturedOutput();
+  let creates = 0;
+  const bridge = {
+    async discover() { return { sessions: [], warnings: [] }; },
+    async create() {
+      creates += 1;
+      throw new Error("provider unavailable");
+    },
+  };
+  const workspace = {
+    async focusOrOpen() {},
+    async leave() { return { closeOverview: true }; },
+  };
+  const running = runOverview({ bridge, workspace, defaultCwd: "/work/new", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  input.emit("keypress", "\u000e", { name: "n", sequence: "\u000e", ctrl: true });
+  input.emit("keypress", "", { name: "return" });
+  assert.match(plain(output.writes.at(-1)), /프롬프트를 입력하세요/);
+  assert.equal(creates, 0);
+
+  input.emit("keypress", "실패해도 유지", { sequence: "실패해도 유지" });
+  input.emit("keypress", "", { name: "return" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(creates, 1);
+  assert.match(plain(output.writes.at(-1)), /오류: provider unavailable/);
+  assert.match(plain(output.writes.at(-1)), /› 실패해도 유지/);
 
   input.emit("keypress", "", { name: "escape" });
-  input.emit("keypress", "q", { name: "q", sequence: "q" });
+  assert.doesNotMatch(plain(output.writes.at(-1)), /새 세션 ·|provider unavailable|실패해도 유지/);
+  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
   assert.equal(await running, 0);
 });

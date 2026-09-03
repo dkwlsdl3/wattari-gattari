@@ -63,13 +63,24 @@ export class CodexProvider {
 
   async list({ cwd } = {}) {
     return this.#withClient(async (client) => {
-      const loaded = [];
+      const loadedIds = [];
       let cursor = null;
       do {
         const page = await client.request("thread/loaded/list", { cursor, limit: 100 });
-        loaded.push(...page.data);
+        loadedIds.push(...page.data);
         cursor = page.nextCursor;
       } while (cursor);
+
+      const uniqueIds = [...new Set(loadedIds)];
+      const reads = await Promise.allSettled(uniqueIds.map(async (threadId) => {
+        const result = await client.request("thread/read", { threadId, includeTurns: false });
+        if (!result?.thread || result.thread.id !== threadId) {
+          throw Object.assign(new Error(`Codex thread/read response does not match ${threadId}`), { code: "CODEX_THREAD_READ_INVALID" });
+        }
+        return result.thread;
+      }));
+      const loaded = reads.filter((result) => result.status === "fulfilled").map((result) => result.value);
+      if (uniqueIds.length && !loaded.length) throw reads.find((result) => result.status === "rejected").reason;
 
       const requestedCwd = cwd ? path.resolve(cwd) : null;
       const roots = loaded
@@ -83,6 +94,26 @@ export class CodexProvider {
           return true;
         })
         .map(toSession);
+    });
+  }
+
+  async create(prompt, { cwd = process.cwd() } = {}) {
+    const workspace = path.resolve(cwd);
+    return this.#withClient(async (client) => {
+      const started = await client.request("thread/start", { cwd: workspace });
+      const threadId = started?.thread?.id;
+      if (typeof threadId !== "string" || !threadId) {
+        throw Object.assign(new Error("Codex thread/start response is missing its thread id"), { code: "CODEX_THREAD_START_INVALID" });
+      }
+      const turn = await client.request("turn/start", {
+        threadId,
+        input: [{ type: "text", text: prompt, textElements: [] }],
+      });
+      const turnId = turn?.turn?.id;
+      if (typeof turnId !== "string" || !turnId) {
+        throw Object.assign(new Error(`Codex turn/start response is missing its turn id for ${threadId}`), { code: "CODEX_TURN_START_INVALID" });
+      }
+      return { provider: this.name, nativeId: threadId, turnId };
     });
   }
 

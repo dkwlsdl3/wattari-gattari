@@ -75,9 +75,12 @@ waga doctor
 
 dock은 세션을 접고 펼칠 수 있는 프로젝트 트리로 묶습니다. `↑`/`↓`로 이동하고,
 프로젝트에서는 `←`/`→` 또는 `Enter`로 접고 펼치며, 세션에서는 `Enter`로 네이티브
-TUI를 엽니다. `/`는 검색, `Tab`은 전체 → Claude → Codex 필터 순환, `q`는 이전 화면
-복귀입니다. 기본 `auto` backend는 tmux가 있으면 사용하고, 실행 파일이 없으면
-`direct` mode로 전환합니다.
+TUI를 엽니다. `/`는 검색, `Tab`은 전체 → Claude → Codex 필터 순환입니다. `Ctrl+N`은
+선택한 프로젝트에서 새 세션 입력창을 열고, 입력창의 `Tab`으로 Claude/Codex를 고른 뒤
+`Enter`로 정식 background session을 생성합니다. `Ctrl+R`은 새로고침, `Ctrl+Q` 또는
+`Ctrl+C`는 이전 화면 복귀입니다. 문자 명령에 `Ctrl`을 사용하므로 한글 IME 상태에서도
+조합 대기 없이 동작합니다. 기본 `auto` backend는 tmux가 있으면 사용하고, 실행 파일이
+없으면 `direct` mode로 전환합니다.
 
 tmux backend의 네이티브 TUI에서는 prefix 뒤 `0`으로 dock에 돌아옵니다. Waga 격리
 server에서는 `Alt+G`도 동작합니다. direct mode에서는 Claude의 `Ctrl+Z`, Codex의

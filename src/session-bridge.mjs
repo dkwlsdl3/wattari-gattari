@@ -39,6 +39,11 @@ export class SessionBridge {
     return { sessions: sessions.sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0)), warnings };
   }
 
+  async create(provider, prompt, { cwd } = {}) {
+    if (typeof prompt !== "string" || !prompt.trim()) throw new BridgeError("PROMPT_REQUIRED", "Prompt is required");
+    return this.#provider(provider).create(prompt.trim(), { cwd });
+  }
+
   async send(target, message, { cwd } = {}) {
     const { provider, session } = await this.#resolve(target, cwd);
     const requestId = crypto.randomUUID();

@@ -28,8 +28,12 @@ Waga는 provider가 소유한 실제 세션 사이의 얇은 메시지 브리지
   기록은 섞지 않습니다.
 - `NativeLauncher`는 provider의 Agents 화면과 정확한 native session attach 명령만
   위임합니다.
-- bare `waga`의 작은 session dock은 ADR 0004와 ADR 0005가 정의합니다. transcript와 입력기는
-  계속 provider TUI만 소유하고, text 목록은 `waga list`가 제공합니다.
+- bare `waga`의 작은 session dock은 ADR 0004와 ADR 0005가 정의합니다. dock은 새 세션의
+  첫 요청만 받는 한 줄 입력기를 가질 수 있지만, 이후 transcript와 대화 입력기는 계속
+  provider TUI만 소유하고 text 목록은 `waga list`가 제공합니다.
+- 새 Claude 세션은 공개 `claude --bg <prompt>` 경계로 만들고, 새 Codex 세션은 이미 연결한
+  native App Server daemon의 `thread/start`와 `turn/start`로 만듭니다. 둘 다 provider의
+  Agents 목록과 세션 수명에 속하며 Waga 자체 세션을 만들지 않습니다.
 - `send`는 단방향 알림이며 제출과 즉시 반환된 Claude hold/refuse까지만 확인합니다.
 - `ask`는 작업 중인 대상에 메시지를 먼저 넣지 않습니다. 유휴 상태까지의 대기와 제출
   뒤 답변 대기에 서로 다른 제한 시간을 적용하고, `waiting`·`submitted`·`replied` 전이를

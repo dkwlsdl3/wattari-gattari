@@ -42,6 +42,12 @@ export function parseClaudeAgents(stdout) {
   return rows;
 }
 
+export function parseClaudeBackgroundId(stdout) {
+  const match = /^backgrounded\s+·\s+([0-9a-f]{8})(?:\s+·[^\r\n]*)?\s*$/im.exec(String(stdout));
+  if (!match) throw Object.assign(new Error("Claude background output is missing its session id"), { code: "CLAUDE_BACKGROUND_INVALID" });
+  return match[1];
+}
+
 function statusOf(row) {
   if (row.status === "busy" || row.state === "working") return "working";
   if (row.status === "waiting") return "needs-input";
@@ -93,6 +99,12 @@ export class ClaudeProvider {
       });
     }
     return sessions;
+  }
+
+  async create(prompt, { cwd = process.cwd() } = {}) {
+    const workspace = canonical(cwd);
+    const { stdout } = await this.#run(["--bg", "--", prompt], { cwd: workspace });
+    return { provider: this.name, nativeId: parseClaudeBackgroundId(stdout) };
   }
 
   async send(session, message, { requestId }) {

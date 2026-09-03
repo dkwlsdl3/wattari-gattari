@@ -23,14 +23,16 @@ test("daemon version parser rejects protocol drift", () => {
 });
 
 test("Codex provider lists only top-level sessions owned by Agents view", async () => {
-  const { provider, calls } = harness((method) => {
+  const threads = new Map([
+    ["agent-task", { id: "agent-task", cwd: "/work", name: "active agent", source: "appServer", status: { type: "active" }, updatedAt: 6 }],
+    ["child", { id: "child", cwd: "/work", name: "child", source: "appServer", parentThreadId: "agent-task", status: { type: "idle" }, updatedAt: 5 }],
+  ]);
+  const { provider, calls } = harness((method, params) => {
     if (method === "thread/loaded/list") return {
-      data: [
-        { id: "agent-task", cwd: "/work", name: "active agent", source: "appServer", status: { type: "active" }, updatedAt: 6 },
-        { id: "child", cwd: "/work", name: "child", source: "appServer", parentThreadId: "agent-task", status: { type: "idle" }, updatedAt: 5 },
-      ],
+      data: ["agent-task", "child"],
       nextCursor: null,
     };
+    if (method === "thread/read") return { thread: threads.get(params.threadId) };
     if (method === "thread/list") throw new Error("ordinary history must not be queried");
     throw new Error(method);
   });
@@ -42,20 +44,37 @@ test("Codex provider lists only top-level sessions owned by Agents view", async 
 
 test("Codex provider drops ephemeral roots and filters loaded sessions by cwd", async () => {
   const shared = { id: "shared", cwd: "/work", name: "shared", source: "cli", status: { type: "active" }, updatedAt: 7 };
-  const { provider } = harness((method) => {
+  const threads = new Map([
+    ["shared", shared],
+    ["other", { id: "other", cwd: "/elsewhere", source: "appServer", status: { type: "idle" }, updatedAt: 9 }],
+    ["ephemeral", { id: "ephemeral", cwd: "/work", source: "appServer", ephemeral: true, status: { type: "idle" }, updatedAt: 8 }],
+  ]);
+  const { provider } = harness((method, params) => {
     if (method === "thread/loaded/list") return {
-      data: [
-        shared,
-        { id: "other", cwd: "/elsewhere", source: "appServer", status: { type: "idle" }, updatedAt: 9 },
-        { id: "ephemeral", cwd: "/work", source: "appServer", ephemeral: true, status: { type: "idle" }, updatedAt: 8 },
-      ],
+      data: ["shared", "other", "ephemeral"],
       nextCursor: null,
     };
+    if (method === "thread/read") return { thread: threads.get(params.threadId) };
     throw new Error(method);
   });
   const rows = await provider.list({ cwd: "/work" });
   assert.deepEqual(rows.map(({ id }) => id), ["codex:shared"]);
   assert.equal(rows[0].status, "working");
+});
+
+test("Codex create starts a native daemon thread and dispatches its first turn", async () => {
+  const { provider, calls } = harness((method) => {
+    if (method === "thread/start") return { thread: { id: "thread-new" } };
+    if (method === "turn/start") return { turn: { id: "turn-new" } };
+    throw new Error(method);
+  });
+  const result = await provider.create("implement the parser", { cwd: "/work/project" });
+  assert.deepEqual(result, { provider: "codex", nativeId: "thread-new", turnId: "turn-new" });
+  assert.deepEqual(calls.find(([method]) => method === "thread/start")[1], { cwd: "/work/project" });
+  assert.deepEqual(calls.find(([method]) => method === "turn/start")[1], {
+    threadId: "thread-new",
+    input: [{ type: "text", text: "implement the parser", textElements: [] }],
+  });
 });
 
 test("Codex send uses standalone tool output, not a user message", async () => {

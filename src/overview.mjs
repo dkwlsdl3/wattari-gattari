@@ -8,18 +8,6 @@ const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
 const color = (code, text) => `${ESC}${code}m${text}${RESET}`;
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
-const DUBEOLSIK_COMMAND_KEYS = new Map([
-  ["ㅗ", "h"],
-  ["ㅓ", "j"],
-  ["ㅏ", "k"],
-  ["ㅣ", "l"],
-  ["ㄱ", "r"],
-  ["ㅂ", "q"],
-]);
-
-function dockCommandName(text, key) {
-  return key.name ?? DUBEOLSIK_COMMAND_KEYS.get(text) ?? DUBEOLSIK_COMMAND_KEYS.get(key.sequence);
-}
 
 function safeText(value) {
   return String(value ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim();
@@ -53,6 +41,25 @@ function fit(value, width) {
     used += size;
   }
   return `${result}…${" ".repeat(Math.max(0, width - used - 1))}`;
+}
+
+function editorLine(value, cursor, width) {
+  const cells = graphemes(value);
+  const contentWidth = Math.max(1, width - 2);
+  let start = 0;
+  while (start < cursor && widthOf(cells.slice(start, cursor).join("")) >= contentWidth) start += 1;
+  let end = start;
+  let used = 0;
+  while (end < cells.length) {
+    const size = widthOf(cells[end]);
+    if (used + size > contentWidth - 1) break;
+    used += size;
+    end += 1;
+  }
+  const before = cells.slice(start, cursor).join("");
+  const atCursor = cells[cursor] ?? " ";
+  const after = cells.slice(cursor + 1, end).join("");
+  return `› ${before}${ESC}7m${atCursor}${RESET}${after}`;
 }
 
 function statusPriority(status) {
@@ -116,7 +123,7 @@ function counts(sessions) {
   return `${count("needs-input")} need input   ${count("working")} working   ${count("idle")} ready`;
 }
 
-export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", nodes = buildOverviewTree(sessions, { collapsed, query }), selected = 0, width = 100, height = 30, warnings = [], provider = null, notice = "", nativeHint = "네이티브 TUI: tmux prefix + 0 → overview" }) {
+export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", nodes = buildOverviewTree(sessions, { collapsed, query }), selected = 0, width = 100, height = 30, warnings = [], provider = null, notice = "", newTask = null, nativeHint = "네이티브 TUI: tmux prefix + 0 → overview" }) {
   const usableWidth = Math.max(1, width - 4);
   const visibleRows = Math.max(1, height - 9);
   const safeSelected = Math.max(0, Math.min(selected, Math.max(0, nodes.length - 1)));
@@ -129,7 +136,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
   lines.push(`  ${color("38;5;245", fit(`${counts(sessions)}${provider ? `   filter: ${provider}` : ""}`, usableWidth))}`);
   lines.push(`  ${color("38;5;238", "─".repeat(Math.max(1, usableWidth)))}`);
 
-  if (!sessions.length) lines.push(`  ${color("38;5;245", query ? "검색 결과가 없습니다." : "발견된 세션이 없습니다. r을 눌러 새로고침하세요.")}`);
+  if (!sessions.length) lines.push(`  ${color("38;5;245", query ? "검색 결과가 없습니다." : "발견된 세션이 없습니다. Ctrl+R을 눌러 새로고침하세요.")}`);
   for (let index = offset; index < Math.min(nodes.length, offset + visibleRows); index += 1) {
     const node = nodes[index];
     const active = index === safeSelected;
@@ -151,17 +158,29 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     lines.push(active ? `${ESC}48;5;236m${row}${RESET}` : row);
   }
   while (lines.length < height - 5) lines.push("");
-  if (warnings.length) lines.push(`  ${color("38;5;214", fit(`경고: ${safeText(warnings[0].provider)} · ${safeText(warnings[0].message)}`, usableWidth))}`);
-  else lines.push(`  ${color("38;5;245", fit(notice || "세션 상태는 자동으로 새로고침됩니다.", usableWidth))}`);
-  lines.push(`  ${color("38;5;245", fit(wide ? "↑↓ 이동   ←→ 접기/펼치기   Enter 열기/접기   / 검색   Tab 제공자   r/ㄱ 새로고침   q/ㅂ 돌아가기" : "↑↓ 이동  Enter 열기/접기  / 검색  q/ㅂ 복귀", usableWidth))}`);
-  lines.push(`  ${color("38;5;114", fit(nativeHint, usableWidth))}`);
-  if (query) lines.push(`  ${color("38;5;229", fit(`검색: ${query}`, usableWidth))}`);
-  else lines.push("");
+  if (newTask) {
+    const providerName = newTask.provider === "claude" ? "CLAUDE" : "CODEX";
+    const heading = newTask.error
+      ? color("38;5;203", fit(`오류: ${safeText(newTask.error)}`, usableWidth))
+      : color("1;38;5;117", fit(`새 세션 · ${providerName} · ${newTask.cwd}${newTask.submitting ? " · 생성 중" : ""}`, usableWidth));
+    lines.push(`  ${heading}`);
+    lines.push(`  ${color("38;5;245", fit("Tab 제공자 전환   ←→ 커서   Enter 생성   Esc 취소   Ctrl+U 지우기", usableWidth))}`);
+    lines.push(`  ${editorLine(newTask.prompt, newTask.cursor, usableWidth)}`);
+    lines.push("");
+  } else {
+    if (warnings.length) lines.push(`  ${color("38;5;214", fit(`경고: ${safeText(warnings[0].provider)} · ${safeText(warnings[0].message)}`, usableWidth))}`);
+    else lines.push(`  ${color("38;5;245", fit(notice || "세션 상태는 자동으로 새로고침됩니다.", usableWidth))}`);
+    lines.push(`  ${color("38;5;245", fit(wide ? "↑↓ 이동  ←→ 접기  Enter 열기  / 검색  Tab 필터  Ctrl+N 새 세션  Ctrl+R 갱신  Ctrl+Q 나가기" : "Ctrl+N 새 세션  Ctrl+Q 나가기", usableWidth))}`);
+    lines.push(`  ${color("38;5;114", fit(nativeHint, usableWidth))}`);
+    if (query) lines.push(`  ${color("38;5;229", fit(`검색: ${query}`, usableWidth))}`);
+    else lines.push("");
+  }
   return lines.slice(0, height).join("\n");
 }
 
 export async function runOverview({
   filterCwd = null,
+  defaultCwd = process.cwd(),
   bridge,
   workspace = new TmuxWorkspace(),
   commandFor = nativeSessionCommand,
@@ -184,6 +203,7 @@ export async function runOverview({
   const collapsed = new Set();
   let query = "";
   let searching = false;
+  let newTask = null;
   let provider = null;
   let refreshing = false;
   let notice = "세션을 불러오는 중입니다.";
@@ -218,12 +238,13 @@ export async function runOverview({
       warnings,
       provider,
       notice,
+      newTask,
       nativeHint,
     })}`);
   };
 
-  const refresh = async () => {
-    if (refreshing || closed || busy) return;
+  const refresh = async ({ whileBusy = false } = {}) => {
+    if (refreshing || closed || (busy && !whileBusy)) return;
     refreshing = true;
     try {
       const discovered = await bridge.discover(filterCwd ? { cwd: path.resolve(filterCwd) } : {});
@@ -243,8 +264,75 @@ export async function runOverview({
   inputStream.setRawMode(true);
   inputStream.resume();
 
+  const leave = () => {
+    busy = true;
+    void workspace.leave()
+      .then((result) => { if (result?.closeOverview) cleanup(); })
+      .catch((error) => { warnings = [{ provider: "waga", message: error.message }]; render(); })
+      .finally(() => { busy = false; });
+  };
+
+  const submitNewTask = () => {
+    const prompt = newTask.prompt.trim();
+    if (!prompt) {
+      newTask.error = "프롬프트를 입력하세요.";
+      render();
+      return;
+    }
+    const draft = { ...newTask, prompt, cursor: Math.min(newTask.cursor, graphemes(prompt).length), submitting: true, error: "" };
+    newTask = draft;
+    busy = true;
+    render();
+    void (async () => {
+      try {
+        const created = await bridge.create(draft.provider, draft.prompt, { cwd: draft.cwd });
+        newTask = null;
+        notice = `${draft.provider === "claude" ? "Claude" : "Codex"} 새 세션을 생성했습니다.`;
+        await refresh({ whileBusy: true });
+        const session = allSessions.find((candidate) => candidate.provider === created.provider && candidate.nativeId === created.nativeId);
+        if (session) selectedKey = session.id;
+      } catch (error) {
+        newTask = { ...draft, submitting: false, error: error.message };
+      } finally {
+        busy = false;
+        if (!closed) render();
+      }
+    })();
+  };
+
   const onKeypress = (text, key = {}) => {
     if (busy || closed) return;
+    if (key.ctrl && (key.name === "q" || key.name === "c")) {
+      leave();
+      return;
+    }
+    if (newTask) {
+      const cells = graphemes(newTask.prompt);
+      if (key.name === "escape") newTask = null;
+      else if (key.name === "tab") newTask = { ...newTask, provider: newTask.provider === "claude" ? "codex" : "claude", error: "" };
+      else if (key.name === "return") { submitNewTask(); return; }
+      else if (key.name === "left") newTask.cursor = Math.max(0, newTask.cursor - 1);
+      else if (key.name === "right") newTask.cursor = Math.min(cells.length, newTask.cursor + 1);
+      else if (key.name === "home") newTask.cursor = 0;
+      else if (key.name === "end") newTask.cursor = cells.length;
+      else if (key.name === "backspace" && newTask.cursor > 0) {
+        cells.splice(newTask.cursor - 1, 1);
+        newTask = { ...newTask, prompt: cells.join(""), cursor: newTask.cursor - 1, error: "" };
+      } else if (key.name === "delete" && newTask.cursor < cells.length) {
+        cells.splice(newTask.cursor, 1);
+        newTask = { ...newTask, prompt: cells.join(""), error: "" };
+      } else if (key.ctrl && key.name === "u") newTask = { ...newTask, prompt: "", cursor: 0, error: "" };
+      else if (!key.ctrl && !key.meta) {
+        const inserted = String(key.sequence ?? text ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
+        if (inserted) {
+          const added = graphemes(inserted);
+          cells.splice(newTask.cursor, 0, ...added);
+          newTask = { ...newTask, prompt: cells.join(""), cursor: newTask.cursor + added.length, error: "" };
+        }
+      }
+      render();
+      return;
+    }
     if (searching) {
       if (key.name === "escape") { searching = false; query = ""; }
       else if (key.name === "return") searching = false;
@@ -258,37 +346,39 @@ export async function runOverview({
     }
     const nodes = visibleNodes();
     reconcileSelection(nodes);
-    const commandName = dockCommandName(text, key);
-    if (commandName === "up" || commandName === "k") selected = Math.max(0, selected - 1);
-    else if (commandName === "down" || commandName === "j") selected = Math.min(Math.max(0, nodes.length - 1), selected + 1);
-    else if (commandName === "tab") {
+    if (key.name === "up") selected = Math.max(0, selected - 1);
+    else if (key.name === "down") selected = Math.min(Math.max(0, nodes.length - 1), selected + 1);
+    else if (key.name === "tab") {
       provider = provider === null ? "claude" : provider === "claude" ? "codex" : null;
       selected = 0;
       selectedKey = null;
       selectFirstSession();
     }
     else if (key.sequence === "/") searching = true;
-    else if (commandName === "r") { notice = "새로고침 중입니다."; render(); void refresh(); return; }
-    else if (commandName === "q" || (key.ctrl && commandName === "c")) {
-      busy = true;
-      void workspace.leave()
-        .then((result) => { if (result?.closeOverview) cleanup(); })
-        .catch((error) => { warnings = [{ provider: "waga", message: error.message }]; render(); })
-        .finally(() => { busy = false; });
-      return;
+    else if (key.ctrl && key.name === "n") {
+      const node = nodes[selected];
+      newTask = {
+        provider: node?.type === "session" ? node.session.provider : provider ?? "claude",
+        cwd: path.resolve(node?.cwd ?? filterCwd ?? defaultCwd),
+        prompt: "",
+        cursor: 0,
+        error: "",
+        submitting: false,
+      };
     }
-    else if ((commandName === "left" || commandName === "h") && nodes[selected]?.type === "workspace") collapsed.add(nodes[selected].cwd);
-    else if ((commandName === "left" || commandName === "h") && nodes[selected]?.type === "session") {
+    else if (key.ctrl && key.name === "r") { notice = "새로고침 중입니다."; render(); void refresh(); return; }
+    else if (key.name === "left" && nodes[selected]?.type === "workspace") collapsed.add(nodes[selected].cwd);
+    else if (key.name === "left" && nodes[selected]?.type === "session") {
       const parentIndex = nodes.findIndex((node) => node.key === nodes[selected].workspaceKey);
       if (parentIndex >= 0) selected = parentIndex;
     }
-    else if ((commandName === "right" || commandName === "l") && nodes[selected]?.type === "workspace") collapsed.delete(nodes[selected].cwd);
-    else if (commandName === "return" && nodes[selected]?.type === "workspace") {
+    else if (key.name === "right" && nodes[selected]?.type === "workspace") collapsed.delete(nodes[selected].cwd);
+    else if (key.name === "return" && nodes[selected]?.type === "workspace") {
       const cwd = nodes[selected].cwd;
       if (collapsed.has(cwd)) collapsed.delete(cwd);
       else collapsed.add(cwd);
     }
-    else if (commandName === "return" && nodes[selected]?.type === "session") {
+    else if (key.name === "return" && nodes[selected]?.type === "session") {
       busy = true;
       const target = nodes[selected].session;
       notice = `${target.name} 세션을 여는 중입니다.`;

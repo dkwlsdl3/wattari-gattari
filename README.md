@@ -76,9 +76,12 @@ targets; an exact unique native ID or session name also works.
 
 The dock groups sessions into collapsible project trees. Use `↑`/`↓` to move,
 `←`/`→` or `Enter` to collapse and expand a project, and `Enter` on a session to
-open its native TUI. `/` searches, `Tab` cycles all → Claude → Codex, and `q`
-returns. The default `auto` backend uses tmux when available and otherwise falls
-back to `direct` mode.
+open its native TUI. `/` searches and `Tab` cycles all → Claude → Codex. `Ctrl+N`
+opens a new-session composer in the selected project; use `Tab` in the composer
+to choose Claude or Codex, then `Enter` to create a real background session.
+`Ctrl+R` refreshes and `Ctrl+Q` or `Ctrl+C` returns. Control-key commands avoid
+IME composition delays. The default `auto` backend uses tmux when available and
+otherwise falls back to `direct` mode.
 
 With tmux, use your prefix followed by `0` to return to the dock; Waga's isolated
 server also provides `Alt+G`. In direct mode, detach the native view with `Ctrl+Z`

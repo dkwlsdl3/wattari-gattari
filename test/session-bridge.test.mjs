@@ -7,6 +7,7 @@ function provider(name, sessions, calls = []) {
   return {
     name,
     async list(options) { calls.push(["list", options]); return sessions; },
+    async create(message, options) { calls.push(["create", message, options]); return { provider: name, nativeId: `${name}-new` }; },
     async send(session, message, options) { calls.push(["send", session, message, options]); return { target: session.id, requestId: options.requestId }; },
     async ask(session, message, options) { calls.push(["ask", session, message, options]); return { target: session.id, requestId: options.requestId, reply: "yes" }; },
   };
@@ -40,4 +41,13 @@ test("ambiguous unprefixed name fails with exact candidates", async () => {
     provider("codex", [{ id: "codex:b", provider: "codex", name: "same" }]),
   ] });
   await assert.rejects(bridge.send("same", "hello"), { code: "TARGET_AMBIGUOUS" });
+});
+
+test("create delegates one prompt to the selected native provider", async () => {
+  const calls = [];
+  const bridge = new SessionBridge({ providers: [provider("claude", [], calls), provider("codex", [], calls)] });
+  const result = await bridge.create("codex", "implement the parser", { cwd: "/work/project" });
+  assert.deepEqual(result, { provider: "codex", nativeId: "codex-new" });
+  assert.deepEqual(calls, [["create", "implement the parser", { cwd: "/work/project" }]]);
+  await assert.rejects(bridge.create("codex", "   ", { cwd: "/work/project" }), { code: "PROMPT_REQUIRED" });
 });

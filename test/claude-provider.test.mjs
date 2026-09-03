@@ -5,10 +5,38 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { ClaudeProvider, parseClaudeAgents } from "../src/providers/claude.mjs";
+import { ClaudeProvider, parseClaudeAgents, parseClaudeBackgroundId } from "../src/providers/claude.mjs";
 
 test("Claude agents parser rejects drifted output", () => {
   assert.throws(() => parseClaudeAgents("{}"), { code: "CLAUDE_AGENTS_INVALID" });
+});
+
+test("Claude background parser accepts the measured CLI output", () => {
+  const stdout = [
+    "backgrounded · 8d96d424 · waga-proof-create-cli",
+    "  claude agents             list sessions",
+    "  claude attach 8d96d424    open in this terminal",
+    "",
+  ].join("\n");
+  assert.equal(parseClaudeBackgroundId(stdout), "8d96d424");
+  assert.equal(parseClaudeBackgroundId("backgrounded · 646ce04f\n  claude agents  list sessions\n"), "646ce04f");
+  assert.throws(() => parseClaudeBackgroundId("started maybe"), { code: "CLAUDE_BACKGROUND_INVALID" });
+});
+
+test("Claude create starts an official background agent in the requested workspace", async () => {
+  let invocation;
+  const provider = new ClaudeProvider({
+    run: async (args, options) => {
+      invocation = { args, options };
+      return { stdout: "backgrounded · 1234abcd · task\n" };
+    },
+  });
+  const result = await provider.create("review this change", { cwd: "/work/project" });
+  assert.deepEqual(result, { provider: "claude", nativeId: "1234abcd" });
+  assert.deepEqual(invocation, {
+    args: ["--bg", "--", "review this change"],
+    options: { cwd: "/work/project" },
+  });
 });
 
 test("Claude provider joins agents JSON to the live peer registry", async (t) => {

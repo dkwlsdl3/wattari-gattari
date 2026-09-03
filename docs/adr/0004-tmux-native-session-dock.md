@@ -23,8 +23,14 @@ tmux 안에서 다시 별도 tmux client를 attach하면 prefix, detach, mouse �
 - 대화형 terminal에서 bare `waga`는 모든 workspace의 세션을 모은 전역 통합 dock을
   엽니다. `waga --cwd PATH`를 명시한 경우에만 해당 workspace로 제한합니다. 비대화형
   호출과 `waga list`는 기존 text 출력을 유지합니다.
-- Waga overview는 workspace별 접이식 트리에 세션 이름, provider, 상태, 검색과 선택만
-  그립니다. transcript, 입력, 승인, token 표시, slash command는 그리지 않습니다.
+- Waga overview는 workspace별 접이식 트리에 세션 이름, provider, 상태, 검색과 선택을
+  그립니다. 선택한 workspace에서 provider가 소유할 새 세션의 첫 요청을 작성하는 한 줄
+  입력기만 추가하며 transcript, 후속 대화 입력, 승인, token 표시, slash command는
+  그리지 않습니다.
+- `Ctrl+N`은 새 세션 입력기를 열고 `Tab`으로 Claude/Codex를 전환합니다. Claude는 공개
+  background CLI, Codex는 기존 native App Server daemon으로 생성하며 완료 후 목록을
+  새로고침합니다. 문자 명령은 IME 조합 상태에 영향받지 않도록 `Ctrl+N`, `Ctrl+R`,
+  `Ctrl+Q`를 사용합니다.
 - 선택한 Claude 세션은 `claude attach <native-id>`, Codex 세션은 기존 native daemon의
   socket을 지정한 `codex resume <native-id> --remote …`로 엽니다.
 - 각 네이티브 TUI는 tmux window 하나를 사용하며 session ID를 window option에 기록합니다.
@@ -33,7 +39,7 @@ tmux 안에서 다시 별도 tmux client를 attach하면 prefix, detach, mouse �
   설정 파일을 읽거나 바꾸지 않습니다.
 - tmux 안에서는 중첩 attach를 만들지 않습니다. 현재 tmux server에 전역 Waga session
   하나를 만들고 `switch-client`로 전환합니다. 명시적 `--cwd` dock만 workspace별로
-  분리합니다. `q`는 `switch-client -l`로 원래 session에 돌아갑니다.
+  분리합니다. `Ctrl+Q` 또는 `Ctrl+C`는 `switch-client -l`로 원래 session에 돌아갑니다.
 - 같은 Waga tmux session에 여러 terminal client가 붙으면 네이티브 세션별 window를
   중복 실행하지 않고 같은 pane을 공유합니다. 출력과 입력뿐 아니라 선택한 window도
   tmux session 단위로 공유되는 제약을 받아들입니다.
@@ -52,7 +58,8 @@ tmux 안에서 다시 별도 tmux client를 attach하면 prefix, detach, mouse �
 
 tmux는 화면 배치와 전환만 소유합니다. provider daemon, 세션 상태, transcript, 도구,
 승인과 모델 실행은 계속 Claude Code와 Codex가 소유합니다. Waga의 provider seam은 세션
-발견 결과를 정확한 attach 명령으로 바꾸는 부분뿐입니다.
+발견 결과를 정확한 attach 명령으로 바꾸고 첫 요청으로 native session을 생성하는
+부분까지입니다.
 
 기존 사용자 tmux session, provider session, native daemon에는 입력하거나 종료 신호를
 보내지 않습니다. 실제 통합 검증은 `waga-proof-*` 이름의 별도 tmux socket과 임시
