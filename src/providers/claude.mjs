@@ -19,6 +19,13 @@ function canonical(value) {
   try { return fs.realpathSync(resolved); } catch { return resolved; }
 }
 
+function claudeProjectCwd(value) {
+  const cwd = canonical(value);
+  const worktreeMarker = `${path.sep}.claude${path.sep}worktrees${path.sep}`;
+  const markerIndex = cwd.indexOf(worktreeMarker);
+  return markerIndex > 0 ? cwd.slice(0, markerIndex) : cwd;
+}
+
 function processAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 1) return false;
   try { process.kill(pid, 0); return true; } catch (error) { return error.code === "EPERM"; }
@@ -55,24 +62,27 @@ export class ClaudeProvider {
   }
 
   async list({ cwd } = {}) {
-    const { stdout } = await this.#run(["agents", "--json", "--all"], { cwd });
     const expectedCwd = cwd ? canonical(cwd) : null;
+    const args = ["agents", "--json"];
+    if (expectedCwd) args.push("--cwd", expectedCwd);
+    const { stdout } = await this.#run(args, { cwd: expectedCwd ?? undefined });
     const sessions = [];
     for (const row of parseClaudeAgents(stdout)) {
-      if (expectedCwd && canonical(row.cwd) !== expectedCwd) continue;
       if (!processAlive(row.pid)) continue;
       let registry;
       try { registry = JSON.parse(fs.readFileSync(path.join(this.#home, ".claude", "sessions", `${row.pid}.json`), "utf8")); } catch { continue; }
       if (registry.pid !== row.pid || registry.sessionId !== row.sessionId || registry.peerProtocol !== 1) continue;
       if (typeof registry.messagingSocketPath !== "string" || !path.isAbsolute(registry.messagingSocketPath)) continue;
       try { if (!fs.lstatSync(registry.messagingSocketPath).isSocket()) continue; } catch { continue; }
+      const sessionCwd = canonical(row.cwd);
       sessions.push({
         id: `claude:${row.sessionId}`,
         nativeId: row.id,
         sessionId: row.sessionId,
         provider: this.name,
         name: row.name ?? registry.name ?? row.id,
-        cwd: canonical(row.cwd),
+        cwd: sessionCwd,
+        projectCwd: expectedCwd ?? claudeProjectCwd(sessionCwd),
         status: statusOf(row),
         updatedAt: Number(row.startedAt ?? registry.updatedAt ?? 0),
         socketPath: registry.messagingSocketPath,

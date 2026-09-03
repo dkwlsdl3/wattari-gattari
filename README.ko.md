@@ -87,9 +87,10 @@ server에서는 `Alt+G`도 동작합니다. direct mode에서는 Claude의 `Ctrl
 bare `waga`는 모든 프로젝트에서 살아 있는 세션을 찾습니다. `--cwd PATH`를 명시한 경우에만
 해당 프로젝트로 제한합니다. tmux backend는 하나의 전역 session과 네이티브 세션별
 window 하나를 재사용하므로 여러 terminal client가 붙어도 같은 작업 화면을 공유합니다.
-Codex는 현재 로드된 최상위 세션과 최근 대화형 CLI/VSCode 세션 20개만 표시합니다.
-과거 `exec`·App Server 자동화 기록은 숨기되, 현재 로드되어 실행 중인 자동화 세션은
-실행 중인 동안 목록에 남깁니다.
+Codex는 현재 Codex Agents가 소유한 최상위 세션만 표시합니다. 일반 CLI/VSCode 대화
+기록은 목록에 섞지 않습니다. Claude는 활성 `claude agents --json` 목록만 사용하며,
+Claude가 만든 worktree는 각 세션의 실제 작업 디렉터리를 유지한 채 상위 프로젝트
+트리 아래에 묶습니다.
 
 tmux 밖에서 시작하면 Waga 전용 격리 server를 사용합니다. 이미 tmux 안이라면 현재
 server에 Waga session을 만들고 전환하므로 tmux 안에 tmux를 중첩하지 않습니다. Waga는

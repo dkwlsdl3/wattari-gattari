@@ -22,7 +22,7 @@ test("daemon version parser rejects protocol drift", () => {
   assert.throws(() => parseDaemonVersion("no"), { code: "CODEX_DAEMON_INVALID" });
 });
 
-test("Codex provider combines loaded sessions with recent interactive roots", async () => {
+test("Codex provider lists only top-level sessions owned by Agents view", async () => {
   const { provider, calls } = harness((method) => {
     if (method === "thread/loaded/list") return {
       data: [
@@ -31,37 +31,29 @@ test("Codex provider combines loaded sessions with recent interactive roots", as
       ],
       nextCursor: null,
     };
-    if (method === "thread/list") return {
+    if (method === "thread/list") throw new Error("ordinary history must not be queried");
+    throw new Error(method);
+  });
+  const rows = await provider.list({ cwd: "/work" });
+  assert.deepEqual(rows.map(({ id }) => id), ["codex:agent-task"]);
+  assert.equal(rows[0].status, "working");
+  assert.equal(calls.some(([method]) => method === "thread/list"), false);
+});
+
+test("Codex provider drops ephemeral roots and filters loaded sessions by cwd", async () => {
+  const shared = { id: "shared", cwd: "/work", name: "shared", source: "cli", status: { type: "active" }, updatedAt: 7 };
+  const { provider } = harness((method) => {
+    if (method === "thread/loaded/list") return {
       data: [
-        { id: "thread-1", cwd: "/work", name: "proof", source: "cli", status: { type: "idle" }, updatedAt: 5 },
-        { id: "mcp-proof", cwd: "/work", name: "MCP validation", source: "appServer", status: { type: "idle" }, updatedAt: 4 },
-        { id: "exec-proof", cwd: "/work", name: "exec validation", source: "exec", status: { type: "idle" }, updatedAt: 3 },
+        shared,
+        { id: "other", cwd: "/elsewhere", source: "appServer", status: { type: "idle" }, updatedAt: 9 },
+        { id: "ephemeral", cwd: "/work", source: "appServer", ephemeral: true, status: { type: "idle" }, updatedAt: 8 },
       ],
       nextCursor: null,
     };
     throw new Error(method);
   });
   const rows = await provider.list({ cwd: "/work" });
-  assert.deepEqual(rows.map(({ id }) => id), ["codex:agent-task", "codex:thread-1"]);
-  assert.equal(rows[0].status, "working");
-  const params = calls.find(([method]) => method === "thread/list")[1];
-  assert.deepEqual(params.sourceKinds, ["cli", "vscode"]);
-  assert.equal(params.limit, 20);
-  assert.equal(params.parentThreadId, null);
-  assert.equal(params.cwd, "/work");
-});
-
-test("Codex provider de-duplicates loaded interactive sessions and drops ephemeral roots", async () => {
-  const shared = { id: "shared", cwd: "/work", name: "shared", source: "cli", status: { type: "active" }, updatedAt: 7 };
-  const { provider } = harness((method) => {
-    if (method === "thread/loaded/list") return {
-      data: [shared, { id: "ephemeral", cwd: "/work", source: "appServer", ephemeral: true, status: { type: "idle" }, updatedAt: 8 }],
-      nextCursor: null,
-    };
-    if (method === "thread/list") return { data: [{ ...shared, status: { type: "idle" } }], nextCursor: null };
-    throw new Error(method);
-  });
-  const rows = await provider.list();
   assert.deepEqual(rows.map(({ id }) => id), ["codex:shared"]);
   assert.equal(rows[0].status, "working");
 });

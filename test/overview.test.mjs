@@ -71,6 +71,20 @@ test("overview groups sessions into collapsible workspace trees", () => {
   ]);
 });
 
+test("overview groups provider worktrees by their owning project", () => {
+  const project = "/work/keeper";
+  const grouped = [
+    { ...sessions[0], cwd: project, projectCwd: project },
+    { ...sessions[1], cwd: `${project}/.claude/worktrees/issue-1`, projectCwd: project },
+  ];
+  const nodes = buildOverviewTree(grouped);
+  assert.deepEqual(nodes.map(({ type, cwd }) => [type, cwd]), [
+    ["workspace", project],
+    ["session", project],
+    ["session", project],
+  ]);
+});
+
 test("overview frame renders each workspace once with a tree toggle", () => {
   const grouped = sessions.slice(0, 2).map((session) => ({ ...session, cwd: "/work/shared" }));
   const frame = plain(buildOverviewFrame({ sessions: grouped, selected: 0, width: 100, height: 20, query: "", warnings: [] }));

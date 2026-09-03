@@ -60,7 +60,7 @@ export function selectOverviewSessions(sessions, { query = "", provider = null, 
   const needle = query.trim().toLocaleLowerCase();
   return [...sessions]
     .filter((session) => !provider || session.provider === provider)
-    .filter((session) => !needle || `${session.name} ${session.cwd} ${session.id}`.toLocaleLowerCase().includes(needle))
+    .filter((session) => !needle || `${session.name} ${session.cwd} ${session.projectCwd ?? ""} ${session.id}`.toLocaleLowerCase().includes(needle))
     .sort(compareOverviewSessions)
     .slice(0, limit);
 }
@@ -68,7 +68,7 @@ export function selectOverviewSessions(sessions, { query = "", provider = null, 
 export function buildOverviewTree(sessions, { collapsed = new Set(), query = "" } = {}) {
   const workspaces = new Map();
   for (const session of sessions) {
-    const cwd = String(session.cwd || "/");
+    const cwd = String(session.projectCwd || session.cwd || "/");
     if (!workspaces.has(cwd)) workspaces.set(cwd, []);
     workspaces.get(cwd).push(session);
   }

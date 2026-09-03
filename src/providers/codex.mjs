@@ -6,8 +6,6 @@ import { buildPeerEnvelope } from "../bridge/envelope.mjs";
 import { CodexAppServerClient } from "../codex-app-server.mjs";
 
 const execFileAsync = promisify(execFile);
-const INTERACTIVE_SOURCE_KINDS = ["cli", "vscode"];
-const RECENT_LIMIT = 20;
 
 async function defaultRun(args) {
   return execFileAsync("codex", args, { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 30_000 });
@@ -71,22 +69,10 @@ export class CodexProvider {
         cursor = page.nextCursor;
       } while (cursor);
 
-      const recent = await client.request("thread/list", {
-        archived: false,
-        cwd: cwd ? path.resolve(cwd) : undefined,
-        limit: RECENT_LIMIT,
-        parentThreadId: null,
-        sortDirection: "desc",
-        sortKey: "updated_at",
-        sourceKinds: INTERACTIVE_SOURCE_KINDS,
-        useStateDbOnly: true,
-      });
-
       const requestedCwd = cwd ? path.resolve(cwd) : null;
-      const roots = [
-        ...loaded.filter((thread) => !requestedCwd || (thread.cwd && path.resolve(thread.cwd) === requestedCwd)),
-        ...recent.data.filter((thread) => INTERACTIVE_SOURCE_KINDS.includes(thread.source)),
-      ].filter(isRootSession);
+      const roots = loaded
+        .filter((thread) => !requestedCwd || (thread.cwd && path.resolve(thread.cwd) === requestedCwd))
+        .filter(isRootSession);
       const seen = new Set();
       return roots
         .filter((thread) => {

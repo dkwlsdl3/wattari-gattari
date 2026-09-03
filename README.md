@@ -87,10 +87,10 @@ in Claude or `Ctrl+D` in Codex. The provider session keeps running.
 Bare `waga` discovers live sessions across all projects. A cwd filter is applied
 only when `--cwd PATH` is explicit. The tmux backend reuses one global session and
 one window per native session, including when multiple terminal clients attach.
-For Codex, the dock includes loaded top-level sessions plus the 20 most recent
-interactive CLI/VSCode sessions. Historical `exec` and App Server automation
-threads are omitted; a currently loaded automation thread remains visible while
-it is active.
+For Codex, the dock mirrors the top-level sessions currently owned by Codex
+Agents. Ordinary CLI/VSCode history is not mixed into the dock. For Claude, it
+uses the active `claude agents --json` list and groups Claude-managed worktrees
+under their parent project while preserving each session's real working directory.
 
 When started outside tmux, Waga uses its own isolated tmux server. When started
 inside tmux, it creates a Waga session in the current server and switches to it;
