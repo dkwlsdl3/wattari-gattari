@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  GLOBAL_DOCK_SESSION,
   TmuxWorkspace,
   shellCommand,
   workspaceSessionName,
@@ -28,11 +29,28 @@ test("enter uses switch-client instead of nesting when already inside tmux", asy
   };
   const workspace = new TmuxWorkspace({ run, launch: async () => { throw new Error("must not attach nested tmux"); }, env: { TMUX: "/tmp/tmux,1,0" }, cliPath: "/app/cli.mjs", nodePath: "/usr/bin/node" });
   assert.deepEqual(await workspace.enter({ cwd: "/tmp/project" }), { code: 0, mode: "existing" });
-  assert.ok(calls.some((args) => args[0] === "new-session"));
+  const created = calls.find((args) => args[0] === "new-session");
+  assert.ok(created);
+  assert.ok(created.includes(GLOBAL_DOCK_SESSION));
+  assert.doesNotMatch(created.at(-1), /--cwd/);
   assert.ok(calls.some((args) => args[0] === "switch-client"));
   assert.ok(!calls.flat().includes("attach-session"));
   assert.ok(!calls.some((args) => args.includes("mouse")), "Waga must preserve the user's tmux mouse and terminal selection behavior");
   assert.ok(calls.some((args) => args.includes("status-right") && args.some((value) => value.includes("prefix+0"))));
+});
+
+test("explicit cwd creates a workspace-scoped dock and filter", async () => {
+  const calls = [];
+  const run = async (args) => {
+    calls.push(args);
+    if (args.includes("has-session")) return { stdout: "", stderr: "missing", code: 1 };
+    return { stdout: "", stderr: "", code: 0 };
+  };
+  const workspace = new TmuxWorkspace({ run, launch: async () => ({ code: 0 }), env: {}, cliPath: "/app/cli.mjs", nodePath: "/usr/bin/node", socketName: "waga-test" });
+  assert.deepEqual(await workspace.enter({ cwd: "/tmp/launch", filterCwd: "/tmp/project" }), { code: 0, mode: "isolated" });
+  const created = calls.find((args) => args.includes("new-session"));
+  assert.ok(created.includes(workspaceSessionName("/tmp/project")));
+  assert.match(created.at(-1), /'overview' '--cwd' '\/tmp\/project'/);
 });
 
 test("enter attaches an isolated server when outside tmux", async () => {

@@ -8,6 +8,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_SOCKET = `waga-${typeof process.getuid === "function" ? process.getuid() : "user"}`;
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 const CURRENT_WINDOW_FORMAT = "#[bold,fg=colour234,bg=colour117] #{?#{==:#{window_name},overview},OVERVIEW,#{window_name}} ";
+export const GLOBAL_DOCK_SESSION = "waga-global";
 
 function cleanResult(error) {
   return {
@@ -84,9 +85,10 @@ export class TmuxWorkspace {
     this.#socketName = socketName;
   }
 
-  async enter({ cwd = process.cwd() } = {}) {
+  async enter({ cwd = process.cwd(), filterCwd = null } = {}) {
     const workspace = path.resolve(cwd);
-    const sessionName = workspaceSessionName(workspace);
+    const filter = filterCwd ? path.resolve(filterCwd) : null;
+    const sessionName = filter ? workspaceSessionName(filter) : GLOBAL_DOCK_SESSION;
     const insideTmux = Boolean(this.#env.TMUX);
     const mode = insideTmux ? "existing" : "isolated";
     const prefix = insideTmux ? [] : ["-L", this.#socketName, "-f", "/dev/null"];
@@ -105,15 +107,15 @@ export class TmuxWorkspace {
     }
 
     const exists = await this.#call([...prefix, "has-session", "-t", sessionName], { check: false });
-    const command = shellCommand("env", [
+    const commandArgs = [
       `WAGA_TMUX_MODE=${mode}`,
       `WAGA_TMUX_SESSION=${sessionName}`,
       this.#nodePath,
       this.#cliPath,
       "overview",
-      "--cwd",
-      workspace,
-    ]);
+    ];
+    if (filter) commandArgs.push("--cwd", filter);
+    const command = shellCommand("env", commandArgs);
     if (exists.code !== 0) {
       await this.#call([...prefix, "new-session", "-d", "-s", sessionName, "-n", "overview", "-c", workspace, command]);
     } else {
@@ -205,6 +207,6 @@ export class TmuxWorkspace {
   }
 }
 
-export async function enterWagaDock({ cwd = process.cwd(), workspace = new TmuxWorkspace() } = {}) {
-  return workspace.enter({ cwd });
+export async function enterWagaDock({ cwd = process.cwd(), filterCwd = null, workspace = new TmuxWorkspace() } = {}) {
+  return workspace.enter({ cwd, filterCwd });
 }

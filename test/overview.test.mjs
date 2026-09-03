@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 
-import { buildOverviewFrame, selectOverviewSessions } from "../src/overview.mjs";
+import { buildOverviewFrame, runOverview, selectOverviewSessions } from "../src/overview.mjs";
 
 const sessions = [
   { id: "codex:1", provider: "codex", status: "idle", name: "API 검토", cwd: "/work/api", updatedAt: 20 },
@@ -33,4 +34,30 @@ test("overview frame switches to a compact layout when the terminal narrows", ()
   assert.match(frame, /CLAUDE/);
   assert.match(frame, /검색/);
   assert.doesNotMatch(frame, /\/work\/ui/);
+});
+
+test("overview discovery is global unless a cwd filter is explicit", async () => {
+  for (const [filterCwd, expected] of [[null, {}], ["/tmp/project", { cwd: "/tmp/project" }]]) {
+    const input = Object.assign(new EventEmitter(), {
+      isTTY: true,
+      setRawMode() {},
+      resume() {},
+    });
+    const output = Object.assign(new EventEmitter(), {
+      isTTY: true,
+      columns: 80,
+      rows: 20,
+      write() {},
+    });
+    let discoveredWith;
+    const bridge = {
+      async discover(options) {
+        discoveredWith = options;
+        queueMicrotask(() => input.emit("end"));
+        return { sessions: [], warnings: [] };
+      },
+    };
+    assert.equal(await runOverview({ filterCwd, bridge, inputStream: input, outputStream: output, listenForSignals: false }), 0);
+    assert.deepEqual(discoveredWith, expected);
+  }
 });

@@ -110,7 +110,7 @@ export function buildOverviewFrame({ sessions, selected = 0, width = 100, height
 }
 
 export async function runOverview({
-  cwd = process.cwd(),
+  filterCwd = null,
   bridge,
   workspace = new TmuxWorkspace(),
   commandFor = nativeSessionCommand,
@@ -157,7 +157,7 @@ export async function runOverview({
     refreshing = true;
     const before = visible()[selected]?.id ?? selectedId;
     try {
-      const discovered = await bridge.discover({ cwd: path.resolve(cwd) });
+      const discovered = await bridge.discover(filterCwd ? { cwd: path.resolve(filterCwd) } : {});
       allSessions = discovered.sessions;
       warnings = discovered.warnings;
       const sessions = visible();

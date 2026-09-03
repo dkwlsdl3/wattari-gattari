@@ -63,8 +63,8 @@ export async function runCli(args = process.argv.slice(2), {
     if (options.command === "version") stdout.write(`${VERSION}\n`);
     else if (options.command === "help") stdout.write(`${usage()}\n`);
     else if (options.command === "doctor") return (await doctor({ output: stdout, cwd })).exitCode;
-    else if (options.command === "default" && stdin.isTTY && stdout.isTTY) return (await dock({ cwd })).code;
-    else if (options.command === "overview") return await overview({ cwd, bridge, inputStream: stdin, outputStream: stdout, errorOutput: stderr });
+    else if (options.command === "default" && stdin.isTTY && stdout.isTTY) return (await dock({ cwd, filterCwd: options.cwd ? cwd : null })).code;
+    else if (options.command === "overview") return await overview({ filterCwd: options.cwd ? cwd : null, bridge, inputStream: stdin, outputStream: stdout, errorOutput: stderr });
     else if (options.command === "list" || options.command === "default") writeList(stdout, stderr, await bridge.discover({ provider: options.provider, cwd: options.cwd ? cwd : undefined }), options.json);
     else if (options.command === "send") {
       const result = await bridge.send(options.target, options.message, { cwd: options.cwd ? cwd : undefined });

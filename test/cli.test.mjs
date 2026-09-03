@@ -20,7 +20,17 @@ test("bare CLI opens the dock on an interactive terminal", async () => {
   let seen;
   const dock = async (options) => { seen = options; return { code: 4 }; };
   assert.equal(await runCli([], { stdin, stdout, stderr: output(), bridge: {}, dock }), 4);
-  assert.deepEqual(seen, { cwd: path.resolve(process.cwd()) });
+  assert.deepEqual(seen, { cwd: path.resolve(process.cwd()), filterCwd: null });
+});
+
+test("interactive CLI filters the dock only when cwd is explicit", async () => {
+  const stdout = output();
+  stdout.isTTY = true;
+  const stdin = { isTTY: true };
+  let seen;
+  const dock = async (options) => { seen = options; return { code: 0 }; };
+  assert.equal(await runCli(["--cwd", "/tmp"], { stdin, stdout, stderr: output(), bridge: {}, dock }), 0);
+  assert.deepEqual(seen, { cwd: path.resolve("/tmp"), filterCwd: path.resolve("/tmp") });
 });
 
 test("bare CLI keeps the text list when output is not interactive", async () => {
@@ -39,7 +49,17 @@ test("internal overview delegates to the dashboard", async () => {
   assert.equal(await runCli(["overview", "--cwd", "/tmp"], {
     stdin, stdout, stderr: output(), bridge: {}, overview,
   }), 6);
-  assert.equal(seen.cwd, path.resolve("/tmp"));
+  assert.equal(seen.filterCwd, path.resolve("/tmp"));
+});
+
+test("internal overview discovers all projects without an explicit cwd", async () => {
+  const stdin = { isTTY: true };
+  const stdout = output();
+  stdout.isTTY = true;
+  let seen;
+  const overview = async (options) => { seen = options; return 0; };
+  assert.equal(await runCli(["overview"], { stdin, stdout, stderr: output(), bridge: {}, overview }), 0);
+  assert.equal(seen.filterCwd, null);
 });
 
 test("text list keeps provider warnings off stdout", async () => {
