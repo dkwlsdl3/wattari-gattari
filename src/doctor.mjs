@@ -11,6 +11,7 @@ function command(args) {
 export function defaultDoctorProbes() {
   return {
     node: async () => ({ ok: Number(process.versions.node.split(".")[0]) >= 22, detail: process.version }),
+    tmux: async () => command(["tmux", "-V"]),
     codexCli: async () => command(["codex", "--version"]),
     claudeCli: async () => command(["claude", "--version"]),
     codexAgents: async () => {
@@ -35,18 +36,18 @@ export function defaultDoctorProbes() {
 }
 
 const CHECKS = [
-  ["Node", "node"], ["Codex CLI", "codexCli"], ["Claude CLI", "claudeCli"],
+  ["Node", "node"], ["tmux (optional)", "tmux", false], ["Codex CLI", "codexCli"], ["Claude CLI", "claudeCli"],
   ["Codex Agents", "codexAgents"], ["Codex daemon", "codexDaemon"], ["Claude peer registry", "claudeAgents"],
 ];
 
 export async function runDoctor({ output = process.stdout, probes = defaultDoctorProbes() } = {}) {
   const checks = [];
-  for (const [name, key] of CHECKS) {
+  for (const [name, key, required = true] of CHECKS) {
     let result;
     try { result = await probes[key](); } catch (error) { result = { ok: false, detail: error.message }; }
-    const check = { name, ok: result.ok === true, detail: result.detail || "no detail" };
+    const check = { name, ok: result.ok === true, required, detail: result.detail || "no detail" };
     checks.push(check);
     output.write(`${check.ok ? "OK" : "--"}  ${check.name}: ${check.detail}\n`);
   }
-  return { exitCode: checks.every((check) => check.ok) ? 0 : 1, checks };
+  return { exitCode: checks.every((check) => check.ok || !check.required) ? 0 : 1, checks };
 }

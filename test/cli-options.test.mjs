@@ -12,9 +12,17 @@ test("bare CLI selects the interactive default and agents remains a list alias",
   assert.equal(parseCliArgs(["overview", "--cwd", "/tmp"]).command, "overview");
 });
 
+test("interactive dock backend is explicit and validated", () => {
+  assert.equal(parseCliArgs([]).backend, "auto");
+  assert.equal(parseCliArgs(["--backend", "direct"]).backend, "direct");
+  assert.equal(parseCliArgs(["--backend", "tmux"]).backend, "tmux");
+  assert.throws(() => parseCliArgs(["--backend", "other"]), { code: "INVALID_ARGUMENT" });
+  assert.throws(() => parseCliArgs(["list", "--backend", "direct"]), { code: "INVALID_ARGUMENT" });
+});
+
 test("ask parses target, message, timeout, and cwd", () => {
   assert.deepEqual(parseCliArgs(["ask", "codex:x", "hello", "there", "--timeout", "1.5", "--cwd", "/tmp"]), {
-    command: "ask", cwd: "/tmp", provider: null, timeoutMs: 1500, json: false, target: "codex:x", message: "hello there",
+    command: "ask", cwd: "/tmp", provider: null, backend: "auto", timeoutMs: 1500, json: false, target: "codex:x", message: "hello there",
   });
 });
 

@@ -72,7 +72,7 @@ function counts(sessions) {
   return `${count("needs-input")} need input   ${count("working")} working   ${count("idle")} ready`;
 }
 
-export function buildOverviewFrame({ sessions, selected = 0, width = 100, height = 30, query = "", warnings = [], provider = null, notice = "" }) {
+export function buildOverviewFrame({ sessions, selected = 0, width = 100, height = 30, query = "", warnings = [], provider = null, notice = "", nativeHint = "네이티브 TUI: tmux prefix + 0 → overview" }) {
   const usableWidth = Math.max(1, width - 4);
   const visibleRows = Math.max(1, height - 9);
   const safeSelected = Math.max(0, Math.min(selected, Math.max(0, sessions.length - 1)));
@@ -103,7 +103,7 @@ export function buildOverviewFrame({ sessions, selected = 0, width = 100, height
   if (warnings.length) lines.push(`  ${color("38;5;214", fit(`경고: ${safeText(warnings[0].provider)} · ${safeText(warnings[0].message)}`, usableWidth))}`);
   else lines.push(`  ${color("38;5;245", fit(notice || "세션 상태는 자동으로 새로고침됩니다.", usableWidth))}`);
   lines.push(`  ${color("38;5;245", fit(wide ? "↑↓ 이동   Enter 열기   / 검색   Tab 제공자   r 새로고침   q 돌아가기" : "↑↓ 이동  Enter 열기  / 검색  q 복귀", usableWidth))}`);
-  lines.push(`  ${color("38;5;114", fit("네이티브 TUI: tmux prefix + 0 → overview", usableWidth))}`);
+  lines.push(`  ${color("38;5;114", fit(nativeHint, usableWidth))}`);
   if (query) lines.push(`  ${color("38;5;229", fit(`검색: ${query}`, usableWidth))}`);
   else lines.push("");
   return lines.slice(0, height).join("\n");
@@ -119,6 +119,7 @@ export async function runOverview({
   errorOutput = process.stderr,
   refreshMs = 3_000,
   listenForSignals = true,
+  nativeHint = "네이티브 TUI: tmux prefix + 0 → overview",
 } = {}) {
   if (!inputStream.isTTY || !outputStream.isTTY) {
     errorOutput.write("Interactive overview requires a TTY; use `waga list` for text output\n");
@@ -135,6 +136,7 @@ export async function runOverview({
   let refreshing = false;
   let notice = "세션을 불러오는 중입니다.";
   let closed = false;
+  let busy = false;
 
   const visible = () => selectOverviewSessions(allSessions, { query, provider });
   const render = () => {
@@ -149,11 +151,12 @@ export async function runOverview({
       warnings,
       provider,
       notice,
+      nativeHint,
     })}${ESC}J`);
   };
 
   const refresh = async () => {
-    if (refreshing || closed) return;
+    if (refreshing || closed || busy) return;
     refreshing = true;
     const before = visible()[selected]?.id ?? selectedId;
     try {
@@ -168,7 +171,7 @@ export async function runOverview({
       warnings = [{ provider: "waga", message: error.message }];
     } finally {
       refreshing = false;
-      render();
+      if (!closed) render();
     }
   };
 
@@ -177,7 +180,6 @@ export async function runOverview({
   inputStream.setRawMode(true);
   inputStream.resume();
 
-  let busy = false;
   const onKeypress = (_text, key = {}) => {
     if (busy || closed) return;
     if (searching) {
@@ -199,7 +201,8 @@ export async function runOverview({
     else if (key.name === "q" || (key.ctrl && key.name === "c")) {
       busy = true;
       void workspace.leave()
-        .catch((error) => { warnings = [{ provider: "tmux", message: error.message }]; render(); })
+        .then((result) => { if (result?.closeOverview) cleanup(); })
+        .catch((error) => { warnings = [{ provider: "waga", message: error.message }]; render(); })
         .finally(() => { busy = false; });
       return;
     }

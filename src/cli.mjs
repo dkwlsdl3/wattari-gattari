@@ -12,11 +12,12 @@ import { CLI_NAME, VERSION } from "./product.mjs";
 import { ClaudeProvider } from "./providers/claude.mjs";
 import { CodexProvider } from "./providers/codex.mjs";
 import { SessionBridge } from "./session-bridge.mjs";
-import { enterWagaDock } from "./tmux-workspace.mjs";
+import { enterSessionDock } from "./session-dock.mjs";
 
 function usage() {
   return [
-    `${CLI_NAME} [--cwd PATH]            Open the global dock, optionally filtered by workspace`,
+    `${CLI_NAME} [--cwd PATH] [--backend auto|direct|tmux]`,
+    "                                Open the global dock, optionally filtered by workspace",
     `${CLI_NAME} list [--provider claude|codex] [--cwd PATH] [--json]`,
     `${CLI_NAME} send <session-id-or-name> <message> [--cwd PATH]`,
     `${CLI_NAME} ask <session-id-or-name> <message> [--timeout SEC] [--cwd PATH]`,
@@ -46,7 +47,7 @@ export async function runCli(args = process.argv.slice(2), {
   bridge = defaultBridge(),
   doctor = runDoctor,
   launcher = openNativeAgents,
-  dock = enterWagaDock,
+  dock = enterSessionDock,
   overview = runOverview,
 } = {}) {
   let options;
@@ -63,7 +64,15 @@ export async function runCli(args = process.argv.slice(2), {
     if (options.command === "version") stdout.write(`${VERSION}\n`);
     else if (options.command === "help") stdout.write(`${usage()}\n`);
     else if (options.command === "doctor") return (await doctor({ output: stdout, cwd })).exitCode;
-    else if (options.command === "default" && stdin.isTTY && stdout.isTTY) return (await dock({ cwd, filterCwd: options.cwd ? cwd : null })).code;
+    else if (options.command === "default" && stdin.isTTY && stdout.isTTY) return (await dock({
+      cwd,
+      filterCwd: options.cwd ? cwd : null,
+      backend: options.backend,
+      bridge,
+      inputStream: stdin,
+      outputStream: stdout,
+      errorOutput: stderr,
+    })).code;
     else if (options.command === "overview") return await overview({ filterCwd: options.cwd ? cwd : null, bridge, inputStream: stdin, outputStream: stdout, errorOutput: stderr });
     else if (options.command === "list" || options.command === "default") writeList(stdout, stderr, await bridge.discover({ provider: options.provider, cwd: options.cwd ? cwd : undefined }), options.json);
     else if (options.command === "send") {

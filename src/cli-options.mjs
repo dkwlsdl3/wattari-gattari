@@ -5,7 +5,7 @@ function invalid(message) {
 }
 
 export function parseCliArgs(args) {
-  const options = { command: "default", cwd: null, provider: null, timeoutMs: 180_000, json: false };
+  const options = { command: "default", cwd: null, provider: null, backend: "auto", timeoutMs: 180_000, json: false };
   const positional = [];
   let commandSeen = false;
   for (let index = 0; index < args.length; index += 1) {
@@ -13,11 +13,12 @@ export function parseCliArgs(args) {
     if (arg === "--help" || arg === "-h") { options.command = "help"; commandSeen = true; continue; }
     if (arg === "--version" || arg === "-v") { options.command = "version"; commandSeen = true; continue; }
     if (arg === "--json") { options.json = true; continue; }
-    if (["--cwd", "--provider", "--timeout"].includes(arg)) {
+    if (["--cwd", "--provider", "--backend", "--timeout"].includes(arg)) {
       const value = args[++index];
       if (!value) throw invalid(`${arg} requires a value`);
       if (arg === "--cwd") options.cwd = value;
       if (arg === "--provider") options.provider = value;
+      if (arg === "--backend") options.backend = value;
       if (arg === "--timeout") {
         const seconds = Number(value);
         if (!Number.isFinite(seconds) || seconds <= 0) throw invalid("--timeout must be a positive number of seconds");
@@ -34,6 +35,8 @@ export function parseCliArgs(args) {
 
   if (options.command === "default" && (options.json || options.provider)) options.command = "list";
   if (options.provider && !["claude", "codex"].includes(options.provider)) throw invalid(`Unknown provider: ${options.provider}`);
+  if (!["auto", "direct", "tmux"].includes(options.backend)) throw invalid(`Unknown backend: ${options.backend}`);
+  if (options.backend !== "auto" && options.command !== "default") throw invalid("--backend is only valid for the interactive dock");
   if (["send", "ask"].includes(options.command)) {
     options.target = positional.shift();
     options.message = positional.join(" ").trim();

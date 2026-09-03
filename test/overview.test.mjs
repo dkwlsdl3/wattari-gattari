@@ -61,3 +61,51 @@ test("overview discovery is global unless a cwd filter is explicit", async () =>
     assert.deepEqual(discoveredWith, expected);
   }
 });
+
+test("overview pauses discovery while a direct native TUI owns the terminal", async () => {
+  const input = Object.assign(new EventEmitter(), {
+    isTTY: true,
+    setRawMode() {},
+    resume() {},
+  });
+  const output = Object.assign(new EventEmitter(), {
+    isTTY: true,
+    columns: 80,
+    rows: 20,
+    write() {},
+  });
+  let discoveries = 0;
+  let releaseNative;
+  const nativeClosed = new Promise((resolve) => { releaseNative = resolve; });
+  const bridge = {
+    async discover() {
+      discoveries += 1;
+      return { sessions: [sessions[0]], warnings: [] };
+    },
+  };
+  const workspace = {
+    async focusOrOpen() { return nativeClosed; },
+    async leave() { return { closeOverview: true }; },
+  };
+
+  const running = runOverview({
+    bridge,
+    workspace,
+    commandFor: async () => ({ command: "provider", args: [], cwd: "/tmp" }),
+    inputStream: input,
+    outputStream: output,
+    refreshMs: 5,
+    listenForSignals: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  input.emit("keypress", "", { name: "return" });
+  const discoveriesWhenOpened = discoveries;
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  const discoveriesWhileBusy = discoveries;
+
+  releaseNative({ code: 0 });
+  await new Promise((resolve) => setImmediate(resolve));
+  input.emit("keypress", "q", { name: "q", sequence: "q" });
+  assert.equal(await running, 0);
+  assert.equal(discoveriesWhileBusy, discoveriesWhenOpened);
+});

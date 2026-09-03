@@ -9,7 +9,8 @@ function output() { let value = ""; return { write(chunk) { value += chunk; }, g
 test("help explains that cwd filtering is optional for the global dock", async () => {
   const stdout = output();
   assert.equal(await runCli(["--help"], { stdout, stderr: output(), bridge: {} }), 0);
-  assert.match(stdout.value, /waga \[--cwd PATH\].*global dock/);
+  assert.match(stdout.value, /waga \[--cwd PATH\] \[--backend auto\|direct\|tmux\]/);
+  assert.match(stdout.value, /global dock/);
 });
 
 test("list renders provider-prefixed ids", async () => {
@@ -26,7 +27,9 @@ test("bare CLI opens the dock on an interactive terminal", async () => {
   let seen;
   const dock = async (options) => { seen = options; return { code: 4 }; };
   assert.equal(await runCli([], { stdin, stdout, stderr: output(), bridge: {}, dock }), 4);
-  assert.deepEqual(seen, { cwd: path.resolve(process.cwd()), filterCwd: null });
+  assert.equal(seen.cwd, path.resolve(process.cwd()));
+  assert.equal(seen.filterCwd, null);
+  assert.equal(seen.backend, "auto");
 });
 
 test("interactive CLI filters the dock only when cwd is explicit", async () => {
@@ -35,8 +38,10 @@ test("interactive CLI filters the dock only when cwd is explicit", async () => {
   const stdin = { isTTY: true };
   let seen;
   const dock = async (options) => { seen = options; return { code: 0 }; };
-  assert.equal(await runCli(["--cwd", "/tmp"], { stdin, stdout, stderr: output(), bridge: {}, dock }), 0);
-  assert.deepEqual(seen, { cwd: path.resolve("/tmp"), filterCwd: path.resolve("/tmp") });
+  assert.equal(await runCli(["--cwd", "/tmp", "--backend", "direct"], { stdin, stdout, stderr: output(), bridge: {}, dock }), 0);
+  assert.equal(seen.cwd, path.resolve("/tmp"));
+  assert.equal(seen.filterCwd, path.resolve("/tmp"));
+  assert.equal(seen.backend, "direct");
 });
 
 test("bare CLI keeps the text list when output is not interactive", async () => {
