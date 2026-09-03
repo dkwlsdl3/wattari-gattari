@@ -5,7 +5,7 @@
 [![CI](https://github.com/dkwlsdl3/wattari-gattari/actions/workflows/ci.yml/badge.svg)](https://github.com/dkwlsdl3/wattari-gattari/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[English](README.md) · [아키텍처](docs/adr/0004-tmux-native-session-dock.md) · [라이선스](LICENSE)
+[English](README.md) · [아키텍처](docs/adr/0005-optional-session-dock-backends.md) · [라이선스](LICENSE)
 
 Wattari Gattari(`waga`)는 Claude Code와 Codex가 각자의 세션, 터미널 UI, 도구,
 승인 체계와 업데이트를 그대로 소유하면서 서로를 찾고 메시지를 주고받게 합니다.
@@ -34,7 +34,7 @@ flowchart LR
 - Node.js 22 이상
 - `agents`, `app-server daemon`을 지원하는 Codex CLI
 - `agents`, cross-session messaging을 지원하는 Claude Code
-- 대화형 dock에 사용할 tmux(`waga list`에는 필요 없음)
+- 여러 terminal에서 화면을 공유할 때 선택적으로 사용할 tmux
 
 이번 실제 호환성 검증은 Codex CLI 0.152.1과 Claude Code 2.1.259에서 수행했습니다.
 제공자를 업데이트한 뒤에는 `waga doctor`를 실행해 주십시오.
@@ -56,6 +56,8 @@ waga doctor
 ```bash
 waga                            # 모든 프로젝트의 Claude + Codex 통합 dock
 waga --cwd ~/work/my-app        # 한 프로젝트로 제한한 dock
+waga --backend direct           # tmux 없이 실행
+waga --backend tmux             # 화면 공유 backend를 필수로 사용
 waga list --provider claude
 waga list --cwd ~/work/my-app --json
 
@@ -72,17 +74,24 @@ waga doctor
 유일하게 일치하는 네이티브 ID나 세션 이름도 사용할 수 있습니다.
 
 dock에서는 `↑`/`↓`로 세션을 고르고 `Enter`로 네이티브 TUI를 엽니다. `/`는 검색,
-`Tab`은 provider 필터, `q`는 이전 화면 복귀입니다. 네이티브 TUI에서는 사용하는 tmux
-prefix 뒤 `0`을 눌러 dock으로 돌아옵니다. Waga 격리 tmux에서는 `Alt+G`도 동작합니다.
+`Tab`은 provider 필터, `q`는 이전 화면 복귀입니다. 기본 `auto` backend는 tmux가 있으면
+사용하고, 실행 파일이 없으면 `direct` mode로 전환합니다.
+
+tmux backend의 네이티브 TUI에서는 prefix 뒤 `0`으로 dock에 돌아옵니다. Waga 격리
+server에서는 `Alt+G`도 동작합니다. direct mode에서는 Claude의 `Ctrl+Z`, Codex의
+`Ctrl+D`로 native view를 빠져나오면 같은 overview로 복귀하며 provider session은 계속
+실행됩니다.
 
 bare `waga`는 모든 프로젝트에서 살아 있는 세션을 찾습니다. `--cwd PATH`를 명시한 경우에만
-해당 프로젝트로 제한합니다. 전역 dock은 하나의 tmux session과 네이티브 세션별 window
-하나를 재사용하므로 여러 terminal client가 붙어도 같은 작업 화면을 공유합니다.
+해당 프로젝트로 제한합니다. tmux backend는 하나의 전역 session과 네이티브 세션별
+window 하나를 재사용하므로 여러 terminal client가 붙어도 같은 작업 화면을 공유합니다.
 
 tmux 밖에서 시작하면 Waga 전용 격리 server를 사용합니다. 이미 tmux 안이라면 현재
 server에 Waga session을 만들고 전환하므로 tmux 안에 tmux를 중첩하지 않습니다. Waga는
 mouse mode를 강제하지 않아 기존 tmux와 terminal의 드래그 선택 정책을 존중합니다.
 WezTerm 전용 구현도 아닙니다.
+direct mode는 terminal view를 공유하거나 보존하지 않습니다. 현재 terminal을 네이티브
+TUI에 넘긴 뒤 detach 또는 종료되면 overview를 복원하는 역할만 합니다.
 
 네이티브 세션 안에서는 각 제공자의 일반 셸 도구나 셸 모드로 같은 명령을 실행합니다.
 Waga가 별도 슬래시 명령이나 시스템 프롬프트를 주입하지는 않습니다.
@@ -129,6 +138,7 @@ npm run demo
 네이티브 브리지, terminal dock과 검증 계약은
 [ADR 0003](docs/adr/0003-native-session-bridge.md),
 [ADR 0004](docs/adr/0004-tmux-native-session-dock.md),
+[ADR 0005](docs/adr/0005-optional-session-dock-backends.md),
 [루프 엔지니어링 프로토콜](docs/adr/2026-09-02-loop-engineering-protocol.md)에 있습니다.
 
 ## 라이선스

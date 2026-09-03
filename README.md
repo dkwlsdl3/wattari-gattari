@@ -5,7 +5,7 @@
 [![CI](https://github.com/dkwlsdl3/wattari-gattari/actions/workflows/ci.yml/badge.svg)](https://github.com/dkwlsdl3/wattari-gattari/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[한국어](README.ko.md) · [Architecture](docs/adr/0004-tmux-native-session-dock.md) · [License](LICENSE)
+[한국어](README.ko.md) · [Architecture](docs/adr/0005-optional-session-dock-backends.md) · [License](LICENSE)
 
 Wattari Gattari (`waga`) lets Claude Code and Codex sessions find and message
 each other while both providers keep ownership of their sessions, terminal UI,
@@ -35,7 +35,7 @@ flowchart LR
 - Node.js 22+
 - Codex CLI with `agents` and `app-server daemon`
 - Claude Code with `agents` and cross-session messaging
-- tmux for the interactive dock (`waga list` does not require it)
+- tmux for the optional shared-window dock experience
 
 The current live compatibility pass used Codex CLI 0.152.1 and Claude Code
 2.1.259. Run `waga doctor` after provider upgrades.
@@ -57,6 +57,8 @@ waga doctor
 ```bash
 waga                            # global interactive Claude + Codex dock
 waga --cwd ~/work/my-app        # dock filtered to one project
+waga --backend direct           # run without tmux
+waga --backend tmux             # require the shared-window backend
 waga list --provider claude
 waga list --cwd ~/work/my-app --json
 
@@ -73,18 +75,23 @@ waga doctor
 targets; an exact unique native ID or session name also works.
 
 In the dock, use `↑`/`↓` to select a session, `Enter` to open its native TUI,
-`/` to search, `Tab` to filter providers, and `q` to return. From a native TUI,
-use your tmux prefix followed by `0` to return to the dock. Waga's isolated tmux
-server also provides `Alt+G`.
+`/` to search, `Tab` to filter providers, and `q` to return. The default `auto`
+backend uses tmux when available and otherwise falls back to `direct` mode.
+
+With tmux, use your prefix followed by `0` to return to the dock; Waga's isolated
+server also provides `Alt+G`. In direct mode, detach the native view with `Ctrl+Z`
+in Claude or `Ctrl+D` in Codex. The provider session keeps running.
 
 Bare `waga` discovers live sessions across all projects. A cwd filter is applied
-only when `--cwd PATH` is explicit. The global dock reuses one tmux session and
+only when `--cwd PATH` is explicit. The tmux backend reuses one global session and
 one window per native session, including when multiple terminal clients attach.
 
 When started outside tmux, Waga uses its own isolated tmux server. When started
 inside tmux, it creates a Waga session in the current server and switches to it;
 it does not nest tmux. Waga does not force mouse mode, so the current tmux and
 terminal selection policy remains in control. It does not depend on WezTerm.
+Direct mode does not share or preserve terminal views; it simply lends the current
+terminal to the native TUI and restores the overview after detach or exit.
 
 From a native session, run the same command through that provider's normal shell
 tool or shell mode. Waga does not inject custom slash commands or system prompts.
@@ -131,7 +138,8 @@ npm run demo
 
 The native bridge, terminal dock, and verification contract live in
 [ADR 0003](docs/adr/0003-native-session-bridge.md),
-[ADR 0004](docs/adr/0004-tmux-native-session-dock.md), and
+[ADR 0004](docs/adr/0004-tmux-native-session-dock.md),
+[ADR 0005](docs/adr/0005-optional-session-dock-backends.md), and
 [the loop engineering protocol](docs/adr/2026-09-02-loop-engineering-protocol.md).
 
 ## License
