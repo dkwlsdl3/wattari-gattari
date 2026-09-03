@@ -22,8 +22,15 @@ test("interactive dock backend is explicit and validated", () => {
 
 test("ask parses target, message, timeout, and cwd", () => {
   assert.deepEqual(parseCliArgs(["ask", "codex:x", "hello", "there", "--timeout", "1.5", "--cwd", "/tmp"]), {
-    command: "ask", cwd: "/tmp", provider: null, backend: "auto", timeoutMs: 1500, json: false, target: "codex:x", message: "hello there",
+    command: "ask", cwd: "/tmp", provider: null, backend: "auto", waitTimeoutMs: 1500, replyTimeoutMs: 1500, json: false, target: "codex:x", message: "hello there",
   });
+});
+
+test("ask keeps busy-wait and reply timeouts independent", () => {
+  const options = parseCliArgs(["ask", "claude:x", "review", "--wait-timeout", "600", "--reply-timeout", "90"]);
+  assert.equal(options.waitTimeoutMs, 600_000);
+  assert.equal(options.replyTimeoutMs, 90_000);
+  assert.throws(() => parseCliArgs(["ask", "claude:x", "review", "--wait-timeout", "no"]), { code: "INVALID_ARGUMENT" });
 });
 
 test("open accepts only native providers", () => {

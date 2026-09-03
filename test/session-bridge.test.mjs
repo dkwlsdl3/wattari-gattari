@@ -24,11 +24,14 @@ test("provider-prefixed target limits discovery and ask is one request", async (
   const calls = [];
   const session = { id: "codex:full", nativeId: "full", sessionId: "full", provider: "codex", name: "proof" };
   const bridge = new SessionBridge({ providers: [provider("claude", [], calls), provider("codex", [session], calls)] });
-  const result = await bridge.ask("codex:full", "hello", { timeoutMs: 1234 });
+  const onProgress = () => {};
+  const result = await bridge.ask("codex:full", "hello", { waitTimeoutMs: 12_000, replyTimeoutMs: 1234, onProgress });
   assert.equal(result.reply, "yes");
   assert.equal(calls.filter(([kind]) => kind === "list").length, 1);
   assert.equal(calls.at(-1)[0], "ask");
-  assert.equal(calls.at(-1)[3].timeoutMs, 1234);
+  assert.equal(calls.at(-1)[3].waitTimeoutMs, 12_000);
+  assert.equal(calls.at(-1)[3].replyTimeoutMs, 1234);
+  assert.equal(calls.at(-1)[3].onProgress, onProgress);
 });
 
 test("ambiguous unprefixed name fails with exact candidates", async () => {

@@ -45,10 +45,10 @@ export class SessionBridge {
     return provider.send(session, message, { requestId, expectsReply: false });
   }
 
-  async ask(target, message, { cwd, timeoutMs = 180_000 } = {}) {
+  async ask(target, message, { cwd, waitTimeoutMs = 30 * 60 * 1_000, replyTimeoutMs = 3 * 60 * 1_000, onProgress } = {}) {
     const { provider, session } = await this.#resolve(target, cwd);
     const requestId = crypto.randomUUID();
-    return provider.ask(session, message, { requestId, timeoutMs, expectsReply: true });
+    return provider.ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, onProgress, expectsReply: true });
   }
 
   async #resolve(target, cwd) {

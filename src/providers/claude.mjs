@@ -54,11 +54,15 @@ export class ClaudeProvider {
   #home;
   #run;
   #endpointFactory;
+  #wait;
+  #now;
 
-  constructor({ homeDirectory = os.homedir(), run = defaultRun, endpointFactory } = {}) {
+  constructor({ homeDirectory = os.homedir(), run = defaultRun, endpointFactory, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now } = {}) {
     this.#home = homeDirectory;
     this.#run = run;
     this.#endpointFactory = endpointFactory ?? ((options) => new ClaudePeerEndpoint(options));
+    this.#wait = wait;
+    this.#now = now;
   }
 
   async list({ cwd } = {}) {
@@ -96,22 +100,45 @@ export class ClaudeProvider {
     try {
       await endpoint.start({ socketDirectory: path.dirname(session.socketPath) });
       const messageId = await endpoint.send(session.socketPath, buildPeerEnvelope({ message, requestId, expectsReply: false }));
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      return { target: session.id, requestId, messageId, delivery: "submitted" };
+      const disposition = await endpoint.waitForDisposition(messageId, { timeoutMs: 150 });
+      return { target: session.id, requestId, messageId, delivery: disposition.state };
     } finally {
       await endpoint.stop();
     }
   }
 
-  async ask(session, message, { requestId, timeoutMs }) {
+  async ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, timeoutMs, onProgress = () => {} }) {
+    const fallbackTimeout = timeoutMs ?? 180_000;
+    const current = await this.#waitUntilIdle(session, {
+      timeoutMs: waitTimeoutMs ?? fallbackTimeout,
+      onProgress,
+    });
     const endpoint = this.#endpointFactory({ homeDirectory: this.#home, cwd: process.cwd() });
     try {
-      await endpoint.start({ socketDirectory: path.dirname(session.socketPath) });
-      const messageId = await endpoint.send(session.socketPath, buildPeerEnvelope({ message, requestId, expectsReply: true }));
-      const reply = await endpoint.waitForReply(session.socketPath, messageId, { timeoutMs });
+      await endpoint.start({ socketDirectory: path.dirname(current.socketPath) });
+      const messageId = await endpoint.send(current.socketPath, buildPeerEnvelope({ message, requestId, expectsReply: true }));
+      onProgress({ state: "submitted", target: session.id });
+      const reply = await endpoint.waitForReply(current.socketPath, messageId, { timeoutMs: replyTimeoutMs ?? fallbackTimeout });
+      onProgress({ state: "replied", target: session.id });
       return { target: session.id, requestId, messageId, reply: reply.text, exchangeCount: 1, autoForwarded: false };
     } finally {
       await endpoint.stop();
+    }
+  }
+
+  async #waitUntilIdle(session, { timeoutMs, onProgress }) {
+    const deadline = this.#now() + timeoutMs;
+    let waiting = false;
+    let pollIntervalMs = 500;
+    while (true) {
+      const sessions = await this.list({ cwd: session.projectCwd });
+      const current = sessions.find((candidate) => candidate.id === session.id || candidate.sessionId === session.sessionId);
+      if (!current) throw Object.assign(new Error(`Claude target is unavailable: ${session.id}`), { code: "TARGET_UNAVAILABLE" });
+      if (current.status !== "working") return current;
+      if (!waiting) { onProgress({ state: "waiting", target: session.id }); waiting = true; }
+      if (this.#now() >= deadline) throw Object.assign(new Error(`Claude target stayed busy for ${timeoutMs}ms`), { code: "TARGET_BUSY_TIMEOUT" });
+      await this.#wait(Math.min(pollIntervalMs, Math.max(1, deadline - this.#now())));
+      pollIntervalMs = Math.min(5_000, pollIntervalMs * 2);
     }
   }
 }

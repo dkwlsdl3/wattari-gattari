@@ -62,7 +62,7 @@ waga list --provider claude
 waga list --cwd ~/work/my-app --json
 
 waga ask claude:<session-id> "현재 API 계약을 검토해 주세요"
-waga ask codex:<thread-id> "테스트를 막는 원인이 무엇인가요?" --timeout 60
+waga ask codex:<thread-id> "테스트를 막는 원인이 무엇인가요?" --wait-timeout 600 --reply-timeout 120
 waga send codex:<thread-id> "마이그레이션 계획이 바뀌었으니 ADR을 확인해 주세요"
 
 waga open claude
@@ -111,8 +111,16 @@ Waga가 별도 슬래시 명령이나 시스템 프롬프트를 주입하지는 
 자격 증명 사용, 외부 시스템 조작에 대한 권한이나 승인이 될 수 없습니다. 수신 에이전트는
 기존 네이티브 sandbox와 승인 정책 안에서 행동 여부를 결정합니다.
 
-`waga ask`는 실제 대상 transcript에 peer turn 한 건을 기록하고 답변 한 건을 기다립니다.
-shadow 대화를 만들지 않으며 답변을 자동으로 다시 전달하지도 않습니다.
+`waga send`는 단방향 알림입니다. 성공 결과는 제출을 확인할 뿐, 수신 모델의 작업 완료를
+뜻하지 않습니다. Claude에서는 임시 송신 endpoint를 닫기 전에 즉시 돌아온 hold나
+refuse 상태도 확인합니다.
+
+`waga ask`는 작업 중인 대상이 유휴 상태가 될 때까지 기다린 뒤 실제 대상 transcript에
+peer turn 한 건을 기록하고, 그 시점부터 답변 한 건을 기다립니다. 기본 유휴 대기는 30분,
+제출 후 답변 대기는 3분입니다. `--wait-timeout`과 `--reply-timeout`으로 각각 바꿀 수 있고,
+기존 `--timeout`은 두 값을 함께 설정합니다. `waiting`, `submitted`, `replied` 상태는
+stderr에만 출력하므로 stdout에는 답변이나 JSON 결과만 남습니다. shadow 대화를 만들지
+않으며 답변을 자동으로 다시 전달하지도 않습니다.
 
 Claude가 사용자 확인 없이 답하려면 대상 세션이 inbound 메시지를 허용해야 합니다.
 
@@ -121,8 +129,9 @@ claude agents --settings '{"crossSessionInbound":"accept"}'
 ```
 
 `hold`에서는 Claude가 메시지를 사용자 검토 대상으로 보류하고 모델에 전달하지 않습니다.
-현재 Claude 버전은 이 보류 상태를 Waga에 돌려주지 않을 수 있어 `waga ask`가 `TIMEOUT`으로
-끝날 수 있지만, 보류 메시지는 Claude 기본 UI에 표시됩니다.
+Claude가 네이티브 disposition frame을 반환하면 Waga는 `MESSAGE_HELD` 또는
+`MESSAGE_REFUSED`를 보고합니다. 해당 frame이 오지 않고 답변도 없으면
+`REPLY_TIMEOUT`으로 끝나며 메시지는 Claude 기본 UI에 남습니다.
 
 Codex에는 기존 네이티브 daemon의 App Server tool-output turn으로 전달합니다. Waga는
 짧게 유지되는 자신의 연결에 들어온 승인 요청을 거절하며, 네이티브 daemon을 중지하거나

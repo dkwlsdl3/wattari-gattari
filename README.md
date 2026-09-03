@@ -63,7 +63,7 @@ waga list --provider claude
 waga list --cwd ~/work/my-app --json
 
 waga ask claude:<session-id> "Review the current API contract"
-waga ask codex:<thread-id> "What is blocking the test?" --timeout 60
+waga ask codex:<thread-id> "What is blocking the test?" --wait-timeout 600 --reply-timeout 120
 waga send codex:<thread-id> "The migration plan changed; inspect the ADR"
 
 waga open claude
@@ -113,8 +113,17 @@ permission to edit files, change settings, use credentials, or touch external
 systems. The receiving agent still decides what to do under its existing native
 sandbox and approval policy.
 
-`waga ask` writes one peer turn into the real target transcript and waits for one
-answer. It does not fork a shadow conversation and never auto-forwards an answer.
+`waga send` is a one-way notification. A successful result confirms submission,
+not that the receiving model completed work. For Claude, Waga also catches an
+immediate native hold or refusal before its temporary sender endpoint closes.
+
+`waga ask` waits for a busy target to become available before it writes one peer
+turn into the real target transcript, then waits for one answer. The default busy
+wait is 30 minutes and the fresh reply window after submission is 3 minutes.
+Override them independently with `--wait-timeout` and `--reply-timeout`; the
+legacy `--timeout` option sets both. State transitions (`waiting`, `submitted`,
+`replied`) go to stderr so stdout remains only the answer or JSON result. Waga
+does not fork a shadow conversation and never auto-forwards an answer.
 
 For unattended Claude replies, the target must allow inbound messages, for example:
 
@@ -123,8 +132,9 @@ claude agents --settings '{"crossSessionInbound":"accept"}'
 ```
 
 With `hold`, Claude visibly holds the message for user review and does not run it.
-Current Claude builds may not return that hold status to Waga, so `waga ask` can
-end as `TIMEOUT`; the held message remains visible in the native Claude UI.
+When Claude returns the native disposition frame, Waga reports `MESSAGE_HELD` or
+`MESSAGE_REFUSED`; if that frame is absent, an unanswered request ends as
+`REPLY_TIMEOUT` and remains visible in the native Claude UI.
 
 Codex messages use a standalone App Server tool-output turn on the existing native
 daemon. Waga declines any approval request addressed to its short-lived connection

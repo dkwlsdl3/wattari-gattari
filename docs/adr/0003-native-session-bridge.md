@@ -30,8 +30,11 @@ Waga는 provider가 소유한 실제 세션 사이의 얇은 메시지 브리지
   위임합니다.
 - bare `waga`의 작은 session dock은 ADR 0004와 ADR 0005가 정의합니다. transcript와 입력기는
   계속 provider TUI만 소유하고, text 목록은 `waga list`가 제공합니다.
-- `send`는 제출까지만 확인하고, `ask`는 실제 대상 transcript의 한 turn에서 답변 한 건만
-  기다립니다. 답변을 다른 세션으로 자동 전달하지 않습니다.
+- `send`는 단방향 알림이며 제출과 즉시 반환된 Claude hold/refuse까지만 확인합니다.
+- `ask`는 작업 중인 대상에 메시지를 먼저 넣지 않습니다. 유휴 상태까지의 대기와 제출
+  뒤 답변 대기에 서로 다른 제한 시간을 적용하고, `waiting`·`submitted`·`replied` 전이를
+  stderr로 알립니다. 실제 대상 transcript의 한 turn에서 답변 한 건만 기다리고 다른
+  세션으로 자동 전달하지 않습니다.
 - provider가 하나 고장 나도 다른 provider 목록은 경고와 함께 사용할 수 있습니다.
 
 ## 신뢰 경계

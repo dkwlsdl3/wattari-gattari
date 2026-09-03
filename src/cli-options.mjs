@@ -1,11 +1,21 @@
 const COMMANDS = new Set(["list", "agents", "send", "ask", "open", "overview", "doctor", "help"]);
+const DEFAULT_WAIT_TIMEOUT_MS = 30 * 60 * 1_000;
+const DEFAULT_REPLY_TIMEOUT_MS = 3 * 60 * 1_000;
 
 function invalid(message) {
   return Object.assign(new Error(message), { code: "INVALID_ARGUMENT" });
 }
 
 export function parseCliArgs(args) {
-  const options = { command: "default", cwd: null, provider: null, backend: "auto", timeoutMs: 180_000, json: false };
+  const options = {
+    command: "default",
+    cwd: null,
+    provider: null,
+    backend: "auto",
+    waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
+    replyTimeoutMs: DEFAULT_REPLY_TIMEOUT_MS,
+    json: false,
+  };
   const positional = [];
   let commandSeen = false;
   for (let index = 0; index < args.length; index += 1) {
@@ -13,16 +23,18 @@ export function parseCliArgs(args) {
     if (arg === "--help" || arg === "-h") { options.command = "help"; commandSeen = true; continue; }
     if (arg === "--version" || arg === "-v") { options.command = "version"; commandSeen = true; continue; }
     if (arg === "--json") { options.json = true; continue; }
-    if (["--cwd", "--provider", "--backend", "--timeout"].includes(arg)) {
+    if (["--cwd", "--provider", "--backend", "--timeout", "--wait-timeout", "--reply-timeout"].includes(arg)) {
       const value = args[++index];
       if (!value) throw invalid(`${arg} requires a value`);
       if (arg === "--cwd") options.cwd = value;
       if (arg === "--provider") options.provider = value;
       if (arg === "--backend") options.backend = value;
-      if (arg === "--timeout") {
+      if (["--timeout", "--wait-timeout", "--reply-timeout"].includes(arg)) {
         const seconds = Number(value);
-        if (!Number.isFinite(seconds) || seconds <= 0) throw invalid("--timeout must be a positive number of seconds");
-        options.timeoutMs = Math.ceil(seconds * 1_000);
+        if (!Number.isFinite(seconds) || seconds <= 0) throw invalid(`${arg} must be a positive number of seconds`);
+        const milliseconds = Math.ceil(seconds * 1_000);
+        if (arg === "--timeout" || arg === "--wait-timeout") options.waitTimeoutMs = milliseconds;
+        if (arg === "--timeout" || arg === "--reply-timeout") options.replyTimeoutMs = milliseconds;
       }
       continue;
     }

@@ -19,8 +19,8 @@ function usage() {
     `${CLI_NAME} [--cwd PATH] [--backend auto|direct|tmux]`,
     "                                Open the global dock, optionally filtered by workspace",
     `${CLI_NAME} list [--provider claude|codex] [--cwd PATH] [--json]`,
-    `${CLI_NAME} send <session-id-or-name> <message> [--cwd PATH]`,
-    `${CLI_NAME} ask <session-id-or-name> <message> [--timeout SEC] [--cwd PATH]`,
+    `${CLI_NAME} send <session-id-or-name> <message> [--cwd PATH]    One-way notification`,
+    `${CLI_NAME} ask <session-id-or-name> <message> [--wait-timeout SEC] [--reply-timeout SEC] [--cwd PATH]`,
     `${CLI_NAME} open <claude|codex> [--cwd PATH]`,
     `${CLI_NAME} doctor`,
     `${CLI_NAME} --version`,
@@ -79,7 +79,12 @@ export async function runCli(args = process.argv.slice(2), {
       const result = await bridge.send(options.target, options.message, { cwd: options.cwd ? cwd : undefined });
       stdout.write(options.json ? `${JSON.stringify(result)}\n` : `sent\t${result.target}\t${result.requestId}\n`);
     } else if (options.command === "ask") {
-      const result = await bridge.ask(options.target, options.message, { cwd: options.cwd ? cwd : undefined, timeoutMs: options.timeoutMs });
+      const result = await bridge.ask(options.target, options.message, {
+        cwd: options.cwd ? cwd : undefined,
+        waitTimeoutMs: options.waitTimeoutMs,
+        replyTimeoutMs: options.replyTimeoutMs,
+        onProgress: ({ state, target }) => stderr.write(`status\t${state}\t${target}\n`),
+      });
       stdout.write(options.json ? `${JSON.stringify(result)}\n` : `${result.reply}\n`);
     } else if (options.command === "open") {
       const result = await launcher(options.provider, { cwd });

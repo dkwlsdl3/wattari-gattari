@@ -84,9 +84,20 @@ test("text list keeps provider warnings off stdout", async () => {
 
 test("ask prints exactly the peer reply", async () => {
   const stdout = output();
-  const bridge = { async ask(target, message, options) { assert.equal(target, "codex:x"); assert.equal(message, "ping"); assert.equal(options.timeoutMs, 1000); return { reply: "PONG" }; } };
-  assert.equal(await runCli(["ask", "codex:x", "ping", "--timeout", "1"], { stdout, stderr: output(), bridge }), 0);
+  const stderr = output();
+  const bridge = { async ask(target, message, options) {
+    assert.equal(target, "codex:x");
+    assert.equal(message, "ping");
+    assert.equal(options.waitTimeoutMs, 1000);
+    assert.equal(options.replyTimeoutMs, 1000);
+    options.onProgress({ state: "waiting", target: "codex:x" });
+    options.onProgress({ state: "submitted", target: "codex:x" });
+    return { reply: "PONG" };
+  } };
+  assert.equal(await runCli(["ask", "codex:x", "ping", "--timeout", "1"], { stdout, stderr, bridge }), 0);
   assert.equal(stdout.value, "PONG\n");
+  assert.match(stderr.value, /status\twaiting\tcodex:x/);
+  assert.match(stderr.value, /status\tsubmitted\tcodex:x/);
 });
 
 test("open delegates to the native Agents command", async () => {

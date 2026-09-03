@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { CodexProvider, parseDaemonVersion } from "../src/providers/codex.mjs";
 
-function harness(responder) {
+function harness(responder, options = {}) {
   const calls = [];
   const client = {
     async initialize() { calls.push(["initialize"]); },
@@ -14,7 +14,7 @@ function harness(responder) {
     calls.push(["run", args]);
     return { stdout: JSON.stringify({ status: "running", socketPath: "/tmp/codex.sock" }) };
   };
-  return { calls, provider: new CodexProvider({ run, clientFactory: async () => client, wait: async () => {} }) };
+  return { calls, provider: new CodexProvider({ run, clientFactory: async () => client, wait: async () => {}, ...options }) };
 }
 
 test("daemon version parser rejects protocol drift", () => {
@@ -83,7 +83,29 @@ test("Codex ask waits for idle and returns only the matching turn answer", async
     }
     throw new Error(method);
   });
-  const result = await provider.ask({ id: "codex:t", nativeId: "t" }, "hello", { requestId: "r", timeoutMs: 2_000 });
+  const progress = [];
+  const result = await provider.ask({ id: "codex:t", nativeId: "t" }, "hello", {
+    requestId: "r",
+    waitTimeoutMs: 1_000,
+    replyTimeoutMs: 2_000,
+    onProgress: (event) => progress.push(event.state),
+  });
   assert.equal(result.reply, "CODEX_OK");
   assert.equal(result.exchangeCount, 1);
+  assert.deepEqual(progress, ["waiting", "submitted", "replied"]);
+});
+
+test("Codex ask times out before submitting work to a persistently busy target", async () => {
+  let now = 0;
+  const { provider, calls } = harness((method) => {
+    if (method === "thread/read") return { thread: { status: { type: "active" } } };
+    throw new Error(method);
+  }, {
+    now: () => now,
+    wait: async (milliseconds) => { now += milliseconds; },
+  });
+  await assert.rejects(provider.ask({ id: "codex:t", nativeId: "t" }, "hello", {
+    requestId: "r", waitTimeoutMs: 500, replyTimeoutMs: 2_000,
+  }), { code: "TARGET_BUSY_TIMEOUT" });
+  assert.equal(calls.some(([method]) => method === "turn/start"), false);
 });

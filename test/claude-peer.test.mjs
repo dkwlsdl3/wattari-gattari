@@ -80,5 +80,6 @@ test("Claude peer endpoint does not miss a hold status that arrives before waiti
   });
   const id = await endpoint.send(targetPath, "hello");
   await new Promise((resolve) => setImmediate(resolve));
+  await assert.rejects(endpoint.waitForDisposition(id, { timeoutMs: 1_000 }), { code: "MESSAGE_HELD" });
   await assert.rejects(endpoint.waitForReply(targetPath, id, { timeoutMs: 1_000 }), { code: "MESSAGE_HELD" });
 });

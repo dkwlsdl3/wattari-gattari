@@ -186,7 +186,7 @@ export class ClaudePeerEndpoint {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         unsubscribe();
-        reject(Object.assign(new Error(`Claude session did not reply within ${timeoutMs}ms`), { code: "TIMEOUT" }));
+        reject(Object.assign(new Error(`Claude session did not reply within ${timeoutMs}ms`), { code: "REPLY_TIMEOUT" }));
       }, timeoutMs);
       const unsubscribe = this.#listen((record) => {
         if (record.type === "peer_message_status" && record.originalMessageId === messageId && (record.held || record.dropped)) {
@@ -203,6 +203,24 @@ export class ClaudePeerEndpoint {
     });
   }
 
+  waitForDisposition(messageId, { timeoutMs }) {
+    const match = (record) => record.type === "peer_message_status" && record.originalMessageId === messageId;
+    const existing = this.#records.find(match);
+    if (existing) return this.#disposition(existing);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        unsubscribe();
+        resolve({ state: "submitted" });
+      }, timeoutMs);
+      const unsubscribe = this.#listen((record) => {
+        if (!match(record)) return;
+        clearTimeout(timer);
+        unsubscribe();
+        this.#disposition(record).then(resolve, reject);
+      });
+    });
+  }
+
   async stop() {
     process.removeListener("exit", this.#exitCleanup);
     const server = this.#server;
@@ -214,6 +232,16 @@ export class ClaudePeerEndpoint {
   #listen(listener) {
     this.#listeners.add(listener);
     return () => this.#listeners.delete(listener);
+  }
+
+  #disposition(record) {
+    if (record.held || record.dropped) {
+      return Promise.reject(Object.assign(
+        new Error(record.held ? "Claude held the peer message for user approval" : "Claude refused the peer message"),
+        { code: record.held ? "MESSAGE_HELD" : "MESSAGE_REFUSED" },
+      ));
+    }
+    return Promise.resolve({ state: "accepted" });
   }
 
   #accept(socket) {
