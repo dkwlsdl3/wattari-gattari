@@ -16,7 +16,7 @@ session dock만 제공하고, 세션을 열면 terminal을 각 provider의 네�
 ## 제공 기능
 
 - 두 제공자의 살아 있는 네이티브 세션 발견
-- bare `waga` 통합 dock에서 정확한 네이티브 세션으로 바로 진입
+- bare `waga` 전역 통합 dock에서 정확한 네이티브 세션으로 바로 진입
 - `waga send`로 단방향 메시지 전송
 - `waga ask`로 정확히 한 번 질문하고 답변 한 건 수신
 - `waga open`으로 각 제공자의 기본 Agents UI 실행
@@ -54,7 +54,8 @@ waga doctor
 ## 사용법
 
 ```bash
-waga                            # Claude + Codex 통합 dock
+waga                            # 모든 프로젝트의 Claude + Codex 통합 dock
+waga --cwd ~/work/my-app        # 한 프로젝트로 제한한 dock
 waga list --provider claude
 waga list --cwd ~/work/my-app --json
 
@@ -73,6 +74,10 @@ waga doctor
 dock에서는 `↑`/`↓`로 세션을 고르고 `Enter`로 네이티브 TUI를 엽니다. `/`는 검색,
 `Tab`은 provider 필터, `q`는 이전 화면 복귀입니다. 네이티브 TUI에서는 사용하는 tmux
 prefix 뒤 `0`을 눌러 dock으로 돌아옵니다. Waga 격리 tmux에서는 `Alt+G`도 동작합니다.
+
+bare `waga`는 모든 프로젝트에서 살아 있는 세션을 찾습니다. `--cwd PATH`를 명시한 경우에만
+해당 프로젝트로 제한합니다. 전역 dock은 하나의 tmux session과 네이티브 세션별 window
+하나를 재사용하므로 여러 terminal client가 붙어도 같은 작업 화면을 공유합니다.
 
 tmux 밖에서 시작하면 Waga 전용 격리 server를 사용합니다. 이미 tmux 안이라면 현재
 server에 Waga session을 만들고 전환하므로 tmux 안에 tmux를 중첩하지 않습니다. Waga는

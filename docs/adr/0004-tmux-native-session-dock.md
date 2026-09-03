@@ -20,8 +20,9 @@ tmux 안에서 다시 별도 tmux client를 attach하면 prefix, detach, mouse �
 
 ## 결정
 
-- 대화형 terminal에서 bare `waga`는 현재 workspace의 통합 session dock을 엽니다.
-  비대화형 호출과 `waga list`는 기존 text 출력을 유지합니다.
+- 대화형 terminal에서 bare `waga`는 모든 workspace의 세션을 모은 전역 통합 dock을
+  엽니다. `waga --cwd PATH`를 명시한 경우에만 해당 workspace로 제한합니다. 비대화형
+  호출과 `waga list`는 기존 text 출력을 유지합니다.
 - Waga overview는 세션 이름, provider, 상태, 검색과 선택만 그립니다. transcript, 입력,
   승인, token 표시, slash command는 그리지 않습니다.
 - 선택한 Claude 세션은 `claude attach <native-id>`, Codex 세션은 기존 native daemon의
@@ -30,9 +31,12 @@ tmux 안에서 다시 별도 tmux client를 attach하면 prefix, detach, mouse �
   같은 세션을 다시 선택하면 새 프로세스를 만들지 않고 그 window를 재사용합니다.
 - tmux 밖에서는 Waga 전용 socket과 server를 사용합니다. 사용자 기본 tmux server나
   설정 파일을 읽거나 바꾸지 않습니다.
-- tmux 안에서는 중첩 attach를 만들지 않습니다. 현재 tmux server에 workspace별 Waga
-  session을 만들고 `switch-client`로 전환합니다. `q`는 `switch-client -l`로 원래
-  session에 돌아갑니다.
+- tmux 안에서는 중첩 attach를 만들지 않습니다. 현재 tmux server에 전역 Waga session
+  하나를 만들고 `switch-client`로 전환합니다. 명시적 `--cwd` dock만 workspace별로
+  분리합니다. `q`는 `switch-client -l`로 원래 session에 돌아갑니다.
+- 같은 Waga tmux session에 여러 terminal client가 붙으면 네이티브 세션별 window를
+  중복 실행하지 않고 같은 pane을 공유합니다. 출력과 입력뿐 아니라 선택한 window도
+  tmux session 단위로 공유되는 제약을 받아들입니다.
 - 네이티브 TUI에서는 사용자의 tmux prefix 뒤 `0`으로 overview에 돌아옵니다. 격리
   server에서만 `Alt+G`도 같은 동작으로 제공합니다.
 - Waga는 mouse mode를 강제하지 않습니다. 기존 tmux의 mouse 정책과 terminal emulator의
@@ -52,7 +56,7 @@ workspace에서만 수행합니다.
 
 ## 결과
 
-- 사용자는 한 번의 `waga` 진입 후 provider 구분 없이 세션을 선택할 수 있습니다.
+- 사용자는 한 번의 `waga` 진입 후 project와 provider 구분 없이 세션을 선택할 수 있습니다.
 - 세션 내부 사용감과 업데이트는 각 provider의 네이티브 TUI를 그대로 따릅니다.
 - 기존 tmux 사용자에게 tmux-in-tmux를 만들지 않으며 WezTerm 전용 구현도 없습니다.
 - Waga가 유지할 UI는 작은 session picker와 tmux 전환 계약으로 제한됩니다.

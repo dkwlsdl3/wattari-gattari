@@ -17,7 +17,7 @@ dock, then hands the terminal to each provider's native TUI.
 ## What it does
 
 - discovers live native sessions from both providers;
-- opens a unified dock with bare `waga` and jumps directly into an exact native session;
+- opens one global dock with bare `waga` and jumps directly into an exact native session;
 - sends a one-way peer message with `waga send`;
 - asks for exactly one reply with `waga ask`;
 - opens either provider's native Agents UI with `waga open`;
@@ -55,7 +55,8 @@ waga doctor
 ## Usage
 
 ```bash
-waga                            # interactive Claude + Codex dock
+waga                            # global interactive Claude + Codex dock
+waga --cwd ~/work/my-app        # dock filtered to one project
 waga list --provider claude
 waga list --cwd ~/work/my-app --json
 
@@ -75,6 +76,10 @@ In the dock, use `↑`/`↓` to select a session, `Enter` to open its native TUI
 `/` to search, `Tab` to filter providers, and `q` to return. From a native TUI,
 use your tmux prefix followed by `0` to return to the dock. Waga's isolated tmux
 server also provides `Alt+G`.
+
+Bare `waga` discovers live sessions across all projects. A cwd filter is applied
+only when `--cwd PATH` is explicit. The global dock reuses one tmux session and
+one window per native session, including when multiple terminal clients attach.
 
 When started outside tmux, Waga uses its own isolated tmux server. When started
 inside tmux, it creates a Waga session in the current server and switches to it;
