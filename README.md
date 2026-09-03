@@ -99,6 +99,10 @@ terminal selection policy remains in control. It does not depend on WezTerm.
 Direct mode does not share or preserve terminal views; it simply lends the current
 terminal to the native TUI and restores the overview after detach or exit.
 
+When Waga's installed source changes, the next `waga` invocation automatically
+restarts only a stale overview window. Existing native session windows and the
+provider-owned sessions behind them remain intact.
+
 From a native session, run the same command through that provider's normal shell
 tool or shell mode. Waga does not inject custom slash commands or system prompts.
 

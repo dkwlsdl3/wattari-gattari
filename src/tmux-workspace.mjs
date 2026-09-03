@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -7,8 +8,32 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const DEFAULT_SOCKET = `waga-${typeof process.getuid === "function" ? process.getuid() : "user"}`;
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
+const SOURCE_DIR = fileURLToPath(new URL(".", import.meta.url));
 const CURRENT_WINDOW_FORMAT = "#[bold,fg=colour234,bg=colour117] #{?#{==:#{window_name},overview},OVERVIEW,#{window_name}} ";
 export const GLOBAL_DOCK_SESSION = "waga-global";
+
+function sourceFiles(directory, root = directory) {
+  const files = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+    const absolute = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...sourceFiles(absolute, root));
+    else if (entry.isFile() && entry.name.endsWith(".mjs")) files.push({ absolute, relative: path.relative(root, absolute) });
+  }
+  return files;
+}
+
+export function sourceRevision(directory = SOURCE_DIR) {
+  const hash = crypto.createHash("sha256");
+  for (const file of sourceFiles(directory)) {
+    hash.update(file.relative);
+    hash.update("\0");
+    hash.update(fs.readFileSync(file.absolute));
+    hash.update("\0");
+  }
+  return hash.digest("hex").slice(0, 16);
+}
+
+const CURRENT_REVISION = sourceRevision();
 
 function cleanResult(error) {
   return {
@@ -75,14 +100,16 @@ export class TmuxWorkspace {
   #cliPath;
   #nodePath;
   #socketName;
+  #revision;
 
-  constructor({ run = defaultRun, launch = defaultLaunch, env = process.env, cliPath = CLI_PATH, nodePath = process.execPath, socketName = DEFAULT_SOCKET } = {}) {
+  constructor({ run = defaultRun, launch = defaultLaunch, env = process.env, cliPath = CLI_PATH, nodePath = process.execPath, socketName = DEFAULT_SOCKET, revision = CURRENT_REVISION } = {}) {
     this.#run = run;
     this.#launch = launch;
     this.#env = env;
     this.#cliPath = cliPath;
     this.#nodePath = nodePath;
     this.#socketName = socketName;
+    this.#revision = revision;
   }
 
   async enter({ cwd = process.cwd(), filterCwd = null } = {}) {
@@ -98,13 +125,9 @@ export class TmuxWorkspace {
       throw Object.assign(new Error("tmux is required for the interactive dock; use `waga list` for text output"), { code: "TMUX_UNAVAILABLE" });
     }
 
-    if (insideTmux) {
-      const current = (await this.#call(["display-message", "-p", "#{session_name}"])).stdout.trim();
-      if (current === sessionName) {
-        await this.#call(["select-window", "-t", ":overview"]);
-        return { code: 0, mode };
-      }
-    }
+    const currentSession = insideTmux
+      ? (await this.#call(["display-message", "-p", "#{session_name}"])).stdout.trim()
+      : null;
 
     const exists = await this.#call([...prefix, "has-session", "-t", sessionName], { check: false });
     const commandArgs = [
@@ -116,18 +139,27 @@ export class TmuxWorkspace {
     ];
     if (filter) commandArgs.push("--cwd", filter);
     const command = shellCommand("env", commandArgs);
+    let replaceRevision = false;
     if (exists.code !== 0) {
       await this.#call([...prefix, "new-session", "-d", "-s", sessionName, "-n", "overview", "-c", workspace, command]);
+      replaceRevision = true;
     } else {
-      const windows = await this.#call([...prefix, "list-windows", "-t", sessionName, "-F", "#{window_name}"]);
-      if (!windows.stdout.split("\n").includes("overview")) {
+      const windows = await this.#call([...prefix, "list-windows", "-t", sessionName, "-F", "#{window_name}\t#{@waga_revision}"]);
+      const overview = windows.stdout.split("\n").find((line) => line.split("\t", 1)[0] === "overview");
+      if (!overview) {
         await this.#call([...prefix, "new-window", "-d", "-t", sessionName, "-n", "overview", "-c", workspace, command]);
+        replaceRevision = true;
+      } else if (overview.split("\t")[1] !== this.#revision) {
+        await this.#call([...prefix, "respawn-window", "-k", "-t", `${sessionName}:overview`, "-c", workspace, command]);
+        replaceRevision = true;
       }
     }
+    if (replaceRevision) await this.#call([...prefix, "set-window-option", "-t", `${sessionName}:overview`, "@waga_revision", this.#revision]);
     await this.#configure(prefix, sessionName, mode);
 
     if (insideTmux) {
-      await this.#call(["switch-client", "-t", sessionName]);
+      if (currentSession === sessionName) await this.#call(["select-window", "-t", `${sessionName}:overview`]);
+      else await this.#call(["switch-client", "-t", sessionName]);
       return { code: 0, mode };
     }
     const result = await this.#launch([...prefix, "attach-session", "-t", sessionName], { env: this.#env, stdio: "inherit" });

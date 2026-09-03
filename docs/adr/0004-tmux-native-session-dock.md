@@ -43,6 +43,10 @@ tmux 안에서 다시 별도 tmux client를 attach하면 prefix, detach, mouse �
   드래그 선택을 존중합니다.
 - overview와 네이티브 window는 detach 뒤에도 남습니다. 이는 provider 세션을 소유하기
   위해서가 아니라 terminal view를 재사용하기 위한 수명입니다.
+- 새 `waga` 진입 프로세스는 설치된 `src/**/*.mjs` 내용 지문을 overview window option과
+  비교합니다. 지문이 다르거나 없는 구 overview만 `respawn-window`로 교체하고, provider
+  네이티브 window와 세션은 유지합니다. 별도 watcher daemon이나 수동 restart 명령은
+  추가하지 않습니다.
 
 ## 경계
 

@@ -69,6 +69,80 @@ test("enter attaches an isolated server when outside tmux", async () => {
   assert.equal(launched[1].stdio, "inherit");
 });
 
+test("enter respawns only a stale overview and preserves native session windows", async () => {
+  const calls = [];
+  const run = async (args) => {
+    calls.push(args);
+    if (args.includes("has-session")) return { stdout: "", stderr: "", code: 0 };
+    if (args.includes("list-windows") && args.at(-1).includes("@waga_revision")) {
+      return { stdout: "overview\told-revision\nCodex · 작업\t\n", stderr: "", code: 0 };
+    }
+    if (args.includes("list-windows") && args.at(-1) === "#{window_name}") {
+      return { stdout: "overview\nCodex · 작업\n", stderr: "", code: 0 };
+    }
+    if (args.includes("list-windows")) return { stdout: "@0\n@1\n", stderr: "", code: 0 };
+    return { stdout: "", stderr: "", code: 0 };
+  };
+  const workspace = new TmuxWorkspace({
+    run,
+    launch: async () => ({ code: 0 }),
+    env: {},
+    cliPath: "/app/cli.mjs",
+    nodePath: "/usr/bin/node",
+    socketName: "waga-test",
+    revision: "new-revision",
+  });
+
+  await workspace.enter({ cwd: "/tmp/project" });
+
+  const respawn = calls.find((args) => args.includes("respawn-window"));
+  assert.ok(respawn);
+  assert.ok(respawn.includes("-k"));
+  assert.ok(respawn.includes(`${GLOBAL_DOCK_SESSION}:overview`));
+  assert.match(respawn.at(-1), /'overview'/);
+  assert.ok(calls.some((args) => args.includes("set-window-option") && args.includes("@waga_revision") && args.at(-1) === "new-revision"));
+  assert.ok(!calls.some((args) => args.includes("kill-session") || args.includes("kill-window")));
+});
+
+test("enter reuses an overview whose code revision is current", async () => {
+  const calls = [];
+  const run = async (args) => {
+    calls.push(args);
+    if (args.includes("has-session")) return { stdout: "", stderr: "", code: 0 };
+    if (args.includes("list-windows") && args.at(-1).includes("@waga_revision")) {
+      return { stdout: "overview\tcurrent\n", stderr: "", code: 0 };
+    }
+    if (args.includes("list-windows")) return { stdout: "@0\n", stderr: "", code: 0 };
+    return { stdout: "", stderr: "", code: 0 };
+  };
+  const workspace = new TmuxWorkspace({ run, launch: async () => ({ code: 0 }), env: {}, revision: "current", socketName: "waga-test" });
+
+  await workspace.enter({ cwd: "/tmp/project" });
+
+  assert.ok(!calls.some((args) => args.includes("respawn-window")));
+});
+
+test("enter checks and replaces a stale overview from another window in the same Waga session", async () => {
+  const calls = [];
+  const run = async (args) => {
+    calls.push(args);
+    if (args[0] === "display-message") return { stdout: `${GLOBAL_DOCK_SESSION}\n`, stderr: "", code: 0 };
+    if (args.includes("has-session")) return { stdout: "", stderr: "", code: 0 };
+    if (args.includes("list-windows") && args.at(-1).includes("@waga_revision")) {
+      return { stdout: "overview\told\nCodex · 작업\t\n", stderr: "", code: 0 };
+    }
+    if (args.includes("list-windows")) return { stdout: "@0\n@1\n", stderr: "", code: 0 };
+    return { stdout: "", stderr: "", code: 0 };
+  };
+  const workspace = new TmuxWorkspace({ run, env: { TMUX: "/tmp/tmux,1,1" }, revision: "new" });
+
+  await workspace.enter({ cwd: "/tmp/project" });
+
+  assert.ok(calls.some((args) => args.includes("respawn-window")));
+  assert.ok(calls.some((args) => args[0] === "select-window" && args.includes(`${GLOBAL_DOCK_SESSION}:overview`)));
+  assert.ok(!calls.some((args) => args[0] === "switch-client"));
+});
+
 test("enter reports a missing tmux binary as an unavailable dock", async () => {
   const workspace = new TmuxWorkspace({
     run: async () => ({ stdout: "", stderr: "tmux not found", code: 127 }),

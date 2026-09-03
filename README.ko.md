@@ -98,6 +98,9 @@ WezTerm 전용 구현도 아닙니다.
 direct mode는 terminal view를 공유하거나 보존하지 않습니다. 현재 terminal을 네이티브
 TUI에 넘긴 뒤 detach 또는 종료되면 overview를 복원하는 역할만 합니다.
 
+설치된 Waga 소스가 바뀌면 다음 `waga` 실행이 오래된 overview window만 자동으로
+재시작합니다. 기존 네이티브 session window와 provider가 소유한 실제 세션은 유지됩니다.
+
 네이티브 세션 안에서는 각 제공자의 일반 셸 도구나 셸 모드로 같은 명령을 실행합니다.
 Waga가 별도 슬래시 명령이나 시스템 프롬프트를 주입하지는 않습니다.
 
