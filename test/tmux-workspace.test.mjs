@@ -32,6 +32,7 @@ test("enter uses switch-client instead of nesting when already inside tmux", asy
   assert.ok(calls.some((args) => args[0] === "switch-client"));
   assert.ok(!calls.flat().includes("attach-session"));
   assert.ok(!calls.some((args) => args.includes("mouse")), "Waga must preserve the user's tmux mouse and terminal selection behavior");
+  assert.ok(calls.some((args) => args.includes("status-right") && args.some((value) => value.includes("prefix+0"))));
 });
 
 test("enter attaches an isolated server when outside tmux", async () => {
@@ -72,6 +73,8 @@ test("focusOrOpen reuses a mapped window and creates only missing views", async 
   assert.deepEqual(await workspace.focusOrOpen({ id: "claude:new", provider: "claude", name: "Review", cwd: "/tmp" }, { command: "claude", args: ["attach", "12345678"], cwd: "/tmp" }), { reused: false, windowId: "@3" });
   assert.equal(calls.filter((args) => args[0] === "new-window").length, 1);
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("@waga_session_id")));
+  assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("window-status-format") && args.at(-1) === ""));
+  assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("window-status-current-format") && args.at(-1).includes("#{window_name}")));
 });
 
 test("leave switches to the previous session inside tmux and detaches isolated clients", async () => {

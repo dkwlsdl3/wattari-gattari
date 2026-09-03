@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const DEFAULT_SOCKET = `waga-${typeof process.getuid === "function" ? process.getuid() : "user"}`;
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
+const CURRENT_WINDOW_FORMAT = "#[bold,fg=colour234,bg=colour117] #{?#{==:#{window_name},overview},OVERVIEW,#{window_name}} ";
 
 function cleanResult(error) {
   return {
@@ -150,6 +151,7 @@ export class TmuxWorkspace {
     if (!windowId) throw Object.assign(new Error("tmux did not return the native session window id"), { code: "TMUX_WINDOW_FAILED" });
     await this.#call(["set-window-option", "-t", windowId, "@waga_session_id", session.id]);
     await this.#call(["set-window-option", "-t", windowId, "automatic-rename", "off"]);
+    await this.#styleWindow([], windowId);
     await this.#call(["select-window", "-t", windowId]);
     return { reused: false, windowId };
   }
@@ -165,18 +167,20 @@ export class TmuxWorkspace {
       ["status-position", "top"],
       ["status-interval", "1"],
       ["status-style", "bg=colour234,fg=colour250"],
-      ["status-left", "#[bold,fg=colour117] Waga #[default] "],
+      ["status-left", "#[bold,fg=colour117] Waga #[default]│ "],
       ["status-left-length", "20"],
-      ["status-right", mode === "isolated" ? "#[fg=colour114] Alt+G overview  #[fg=colour245]prefix+0 " : "#[fg=colour114] prefix + 0  overview "],
-      ["status-right-length", "36"],
-      ["window-status-format", " #[fg=colour245]#I:#W "],
-      ["window-status-current-format", "#[bold,fg=colour234,bg=colour117] #I:#W "],
+      ["status-right", mode === "isolated"
+        ? "#{?#{==:#{window_name},overview},,#[fg=colour114]Alt+G  overview }"
+        : "#{?#{==:#{window_name},overview},,#[fg=colour114]prefix+0  overview }"],
+      ["status-right-length", "24"],
       ["base-index", "0"],
       ["renumber-windows", "on"],
     ];
     for (const [name, value] of options) await this.#call([...prefix, "set-option", "-t", sessionName, name, value]);
     await this.#call([...prefix, "move-window", "-r", "-t", sessionName]);
     await this.#call([...prefix, "set-window-option", "-t", `${sessionName}:overview`, "automatic-rename", "off"]);
+    const windows = await this.#call([...prefix, "list-windows", "-t", sessionName, "-F", "#{window_id}"]);
+    for (const windowId of windows.stdout.split("\n").filter(Boolean)) await this.#styleWindow(prefix, windowId);
     if (mode === "isolated") {
       await this.#call([...prefix, "set-option", "-g", "default-terminal", "tmux-256color"]);
       await this.#call([...prefix, "set-option", "-as", "terminal-features", ",*:RGB:extkeys"]);
@@ -185,6 +189,11 @@ export class TmuxWorkspace {
       await this.#call([...prefix, "bind-key", "-n", "M-g", "select-window", "-t", ":overview"]);
       await this.#call([...prefix, "bind-key", "-n", "S-Enter", "send-keys", "C-j"]);
     }
+  }
+
+  async #styleWindow(prefix, windowId) {
+    await this.#call([...prefix, "set-window-option", "-t", windowId, "window-status-format", ""]);
+    await this.#call([...prefix, "set-window-option", "-t", windowId, "window-status-current-format", CURRENT_WINDOW_FORMAT]);
   }
 
   async #call(args, { check = true } = {}) {
