@@ -13,10 +13,13 @@ Wattari Gattari(`waga`)는 Claude Code와 Codex가 각자의 세션, 터미널 U
 Waga 전용 daemon도, 네이티브 대화를 대체하는 채팅 UI도 없습니다. Waga는 작은 통합
 session dock만 제공하고, 세션을 열면 terminal을 각 provider의 네이티브 TUI에 넘깁니다.
 
+![Waga session dock 데모](docs/assets/wattari-gattari-demo.gif)
+
 ## 제공 기능
 
 - 두 제공자의 살아 있는 네이티브 세션 발견
 - bare `waga` 전역 통합 dock에서 정확한 네이티브 세션으로 바로 진입
+- dock에서 대화 로그를 지우지 않고 활성 세션 보관
 - `waga send`로 단방향 메시지 전송
 - `waga ask`로 정확히 한 번 질문하고 답변 한 건 수신
 - `waga open`으로 각 제공자의 기본 Agents UI 실행
@@ -80,8 +83,11 @@ dock은 세션을 접고 펼칠 수 있는 프로젝트 트리로 묶습니다. 
 TUI를 엽니다. `/`는 검색, `Tab`은 전체 → Claude → Codex 필터 순환입니다. `Ctrl+N`은
 선택한 프로젝트에서 새 세션 입력창을 열고, 입력창의 `Tab`으로 Claude/Codex를 고른 뒤
 `Enter`로 정식 background session을 생성합니다. `Ctrl+R`은 새로고침, `Alt+Q`는 Waga
-종료입니다. 기존 `Ctrl+Q`와 `Ctrl+C`도 동작합니다. 기본 `auto` backend는 tmux가 있으면
-사용하고, 실행 파일이 없으면 `direct` mode로 전환합니다.
+종료입니다. 세션에서 `Alt+X`를 두 번 누르면 활성 목록에서 보관합니다. 첫 입력은
+provider별 부작용을 안내하고 두 번째 입력만 실행합니다. Codex는 대화 JSONL을
+`archived_sessions`로 옮기며, Claude는 transcript를 남기고 background job과 관리
+worktree를 정리합니다. 기존 `Ctrl+Q`와 `Ctrl+C`도 동작합니다. 기본 `auto` backend는
+tmux가 있으면 사용하고, 실행 파일이 없으면 `direct` mode로 전환합니다.
 
 `waga`를 실행한 폴더는 활성 세션이 하나도 없어도 트리 맨 앞에 표시됩니다. 다른 폴더에서
 전역 dock을 다시 열면 overview만 새 실행 폴더 기준으로 갱신하며, 이미 열린 네이티브 세션
@@ -152,8 +158,11 @@ Codex에는 기존 네이티브 daemon의 App Server tool-output turn으로 전�
 ## 데모
 
 `npm run demo`는 모델을 호출하지 않고 가짜 로컬 provider로 브리지 계약을 실행합니다.
-[VHS](https://github.com/charmbracelet/vhs) tape도 포함되어 있으므로 VHS 설치 후
-`npm run demo:record`로 녹화할 수 있습니다.
+`npm run demo:dock`은 실제 provider나 사용자 세션 없이 가짜 세션으로 대화형 dock을
+엽니다. [VHS](https://github.com/charmbracelet/vhs) tape는 이 안전한 dock 데모를 조작해
+`docs/assets/wattari-gattari-demo.gif`를 만듭니다. VHS, `ttyd`, `ffmpeg`와
+`Noto Sans Mono CJK KR` 폰트를 설치한 뒤 `npm run demo:record`를 실행하십시오. tape가
+동작을 선언하므로 같은 데모를 반복해서 생성할 수 있습니다.
 
 ## 개발
 
@@ -163,6 +172,8 @@ npm run test:coverage
 npm run check
 npm pack --dry-run
 npm run demo
+npm run demo:dock
+npm run demo:record
 ```
 
 네이티브 브리지, terminal dock과 검증 계약은

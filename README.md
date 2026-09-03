@@ -14,10 +14,13 @@ tools, approvals, and updates.
 There is no Waga daemon and no replacement chat UI. Waga adds a small session
 dock, then hands the terminal to each provider's native TUI.
 
+![Waga session dock demo](docs/assets/wattari-gattari-demo.gif)
+
 ## What it does
 
 - discovers live native sessions from both providers;
 - opens one global dock with bare `waga` and jumps directly into an exact native session;
+- archives active sessions from the dock without deleting their conversation logs;
 - sends a one-way peer message with `waga send`;
 - asks for exactly one reply with `waga ask`;
 - opens either provider's native Agents UI with `waga open`;
@@ -82,8 +85,12 @@ open its native TUI. `/` searches and `Tab` cycles all → Claude → Codex. `Ct
 opens a new-session composer in the selected project; use `Tab` in the composer
 to choose Claude or Codex, then `Enter` to create a real background session.
 `Ctrl+R` refreshes and `Alt+Q` exits Waga. `Ctrl+Q` and `Ctrl+C` remain available
-for compatibility. The default `auto` backend uses tmux when available and
-otherwise falls back to `direct` mode.
+for compatibility. Press `Alt+X` twice on a session to archive it from the active
+list: the first press explains the provider-specific effect and only the second
+performs it. Codex moves its conversation JSONL into `archived_sessions`; Claude
+keeps the transcript while removing the background job and its managed worktree.
+The default `auto` backend uses tmux when available and otherwise falls back to
+`direct` mode.
 
 The directory where `waga` was launched appears first even when it has no active
 sessions. Re-entering the global dock from another directory refreshes only the
@@ -159,8 +166,13 @@ and never stops or replaces the native daemon.
 ## Demo
 
 `npm run demo` exercises the bridge contract with fake local providers and no
-model calls. A [VHS](https://github.com/charmbracelet/vhs) tape is included; after
-installing VHS, record it with `npm run demo:record`.
+model calls. `npm run demo:dock` opens the interactive dock with fake sessions,
+without touching a real provider or user session. The included
+[VHS](https://github.com/charmbracelet/vhs) tape drives that safe dock demo and
+writes `docs/assets/wattari-gattari-demo.gif`. Install VHS, `ttyd`, `ffmpeg`, and
+the `Noto Sans Mono CJK KR` font, then run `npm run demo:record`. Because the
+interaction is declared in the tape, the same demo can be regenerated after UI
+changes.
 
 ## Development
 
@@ -170,6 +182,8 @@ npm run test:coverage
 npm run check
 npm pack --dry-run
 npm run demo
+npm run demo:dock
+npm run demo:record
 ```
 
 The native bridge, terminal dock, and verification contract live in
