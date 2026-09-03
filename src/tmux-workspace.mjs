@@ -178,6 +178,10 @@ export class TmuxWorkspace {
     const listed = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}\t#{@waga_session_id}"]);
     const existing = parseWindows(listed.stdout).find((entry) => entry.sessionId === session.id);
     if (existing) {
+      await this.#call([
+        "respawn-window", "-k", "-t", existing.windowId, "-c", commandSpec.cwd,
+        shellCommand(commandSpec.command, commandSpec.args),
+      ]);
       await this.#call(["select-window", "-t", existing.windowId]);
       return { reused: true, windowId: existing.windowId };
     }
@@ -210,7 +214,7 @@ export class TmuxWorkspace {
       ["status-left", "#[bold,fg=#38bdf8] Waga #[default]│ "],
       ["status-left-length", "20"],
       ["status-right", mode === "isolated"
-        ? "#{?#{==:#{window_name},overview},,#[bold,fg=#4ade80]Alt+G  overview }"
+        ? "#{?#{==:#{window_name},overview},,#[bold,fg=#4ade80]Alt+G  dock }"
         : "#{?#{==:#{window_name},overview},,#[bold,fg=#4ade80]prefix+0  overview }"],
       ["status-right-length", "24"],
       ["base-index", "0"],

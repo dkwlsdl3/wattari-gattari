@@ -8,6 +8,7 @@ import {
   buildOverviewFrame,
   buildOverviewTree,
   moveOverviewSession,
+  nativeReturnHint,
   reconcileOverviewOrder,
   runOverview,
   selectOverviewSessions,
@@ -138,6 +139,11 @@ test("overview frame renders each workspace once with a tree toggle", () => {
   assert.match(frame, /\s+CLAUDE\s+UI 구현/);
 });
 
+test("native return help follows the tmux mode", () => {
+  assert.equal(nativeReturnHint("isolated"), "네이티브 TUI: Alt+G → dock");
+  assert.equal(nativeReturnHint("existing"), "네이티브 TUI: tmux prefix + 0 → dock");
+});
+
 test("overview frame distinguishes providers and keeps navigation help visible", () => {
   const frame = buildOverviewFrame({ sessions, selected: 1, width: 100, height: 20, query: "", warnings: [] });
   assert.match(frame, /WATTARI GATTARI/);
@@ -146,7 +152,7 @@ test("overview frame distinguishes providers and keeps navigation help visible",
   assert.match(frame, /Enter 열기/);
   assert.match(frame, /Ctrl\+N 새 세션/);
   assert.match(frame, /Ctrl\+R 갱신/);
-  assert.match(frame, /Ctrl\+Q 나가기/);
+  assert.match(frame, /Alt\+Q 나가기/);
   assert.match(frame, /Shift\+↑↓ 순서/);
   assert.match(frame, /tmux prefix \+ 0/);
   assert.match(frame, /\x1b\[1;38;2;56;189;248m/);
@@ -232,6 +238,27 @@ test("Escape cancels the composer without the readline default delay", async () 
     assert.ok(performance.now() - started < 200);
     input.write("\u001b[B");
     await waitFor(() => selectedSessionName(output) === "API");
+  } finally {
+    input.end();
+    await running;
+  }
+});
+
+test("Alt+Q leaves the dock", async () => {
+  const input = rawTtyInput();
+  const output = capturedOutput();
+  let leaves = 0;
+  const bridge = { async discover() { return { sessions: [], warnings: [] }; } };
+  const workspace = {
+    async focusOrOpen() {},
+    async leave() { leaves += 1; return { closeOverview: true }; },
+  };
+  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    input.write("\u001bq");
+    await waitFor(() => leaves === 1);
+    assert.equal(await running, 0);
   } finally {
     input.end();
     await running;

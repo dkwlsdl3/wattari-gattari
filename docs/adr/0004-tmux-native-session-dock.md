@@ -33,16 +33,20 @@ tmux 안에서 다시 별도 tmux client를 attach하면 prefix, detach, mouse �
   transcript를 별도 카탈로그로 복제하지 않습니다.
 - `Ctrl+N`은 새 세션 입력기를 열고 `Tab`으로 Claude/Codex를 전환합니다. Claude는 공개
   background CLI, Codex는 기존 native App Server daemon으로 생성하며 완료 후 목록을
-  새로고침합니다. 문자 명령은 IME 조합 상태에 영향받지 않도록 `Ctrl+N`, `Ctrl+R`,
-  `Ctrl+Q`를 사용합니다. 단독 `Esc` 취소는 Node key parser의 기본 500ms 대기 대신 짧은
-  escape 판별 시간을 사용합니다.
+  새로고침합니다. 문자 명령은 IME 조합 상태에 영향받지 않도록 `Ctrl+N`, `Ctrl+R`을
+  사용하고, 네이티브 TUI에서 `Alt+G`로 돌아온 흐름을 이어 Dock은 `Alt+Q`로 나갑니다.
+  기존 `Ctrl+Q`와 `Ctrl+C`도 호환 경로로 유지합니다. 단독 `Esc` 취소는 Node key
+  parser의 기본 500ms 대기 대신 짧은 escape 판별 시간을 사용합니다.
 - `waga`를 실행한 cwd는 활성 세션이 없어도 overview의 첫 workspace로 고정합니다. 전역
   dock을 다른 cwd에서 다시 열면 코드 지문이 같더라도 overview window만 새 cwd에서
   respawn하고, provider 네이티브 window와 세션은 유지합니다.
 - 선택한 Claude 세션은 `claude attach <native-id>`, Codex 세션은 기존 native daemon의
   socket을 지정한 `codex resume <native-id> --remote …`로 엽니다.
 - 각 네이티브 TUI는 tmux window 하나를 사용하며 session ID를 window option에 기록합니다.
-  같은 세션을 다시 선택하면 새 프로세스를 만들지 않고 그 window를 재사용합니다.
+  같은 세션을 다시 선택하면 window는 재사용하되 기존 frontend process를 정확한
+  `attach`/`resume` 명령으로 교체합니다. 따라서 provider 내부 Agents View에 머물렀어도
+  Dock의 세션 행은 항상 해당 세션 TUI를 엽니다. backend session은 계속 provider가
+  소유하며 재접속 과정에서 실행을 중단하거나 새 세션을 만들지 않습니다.
 - tmux 밖에서는 Waga 전용 socket과 server를 사용합니다. 사용자 기본 tmux server나
   설정 파일을 읽거나 바꾸지 않습니다.
 - tmux 안에서는 중첩 attach를 만들지 않습니다. 현재 tmux server에 전역 Waga session
@@ -51,8 +55,8 @@ tmux 안에서 다시 별도 tmux client를 attach하면 prefix, detach, mouse �
 - 같은 Waga tmux session에 여러 terminal client가 붙으면 네이티브 세션별 window를
   중복 실행하지 않고 같은 pane을 공유합니다. 출력과 입력뿐 아니라 선택한 window도
   tmux session 단위로 공유되는 제약을 받아들입니다.
-- 네이티브 TUI에서는 사용자의 tmux prefix 뒤 `0`으로 overview에 돌아옵니다. 격리
-  server에서만 `Alt+G`도 같은 동작으로 제공합니다.
+- 네이티브 TUI에서는 사용자의 tmux prefix 뒤 `0`으로 Dock에 돌아옵니다. 격리
+  server에서는 `Alt+G`도 같은 동작으로 제공하고, Dock은 `Alt+Q`로 나갑니다.
 - Waga tmux session에는 `mouse on`을 적용합니다. 자체 mouse tracking을 켠 provider
   TUI에는 휠 이벤트를 전달하고, 그렇지 않은 TUI에서는 tmux copy-mode로 scrollback을
   제공합니다. 이 옵션은 Waga session에만 적용하며 같은 server의 다른 tmux session이나

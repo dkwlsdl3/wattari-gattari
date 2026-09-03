@@ -176,7 +176,13 @@ function counts(sessions) {
   return `${count("needs-input")} need input   ${count("working")} working   ${count("idle")} ready`;
 }
 
-export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, notice = "", newTask = null, nativeHint = "네이티브 TUI: tmux prefix + 0 → overview" }) {
+export function nativeReturnHint(mode) {
+  return mode === "isolated"
+    ? "네이티브 TUI: Alt+G → dock"
+    : "네이티브 TUI: tmux prefix + 0 → dock";
+}
+
+export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, notice = "", newTask = null, nativeHint = nativeReturnHint(null) }) {
   const usableWidth = Math.max(1, width - 4);
   const visibleRows = Math.max(1, height - 9);
   const safeSelected = Math.max(0, Math.min(selected, Math.max(0, nodes.length - 1)));
@@ -211,8 +217,8 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
   }
   const helpLines = wide
-    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  / 검색  Tab 필터", "Ctrl+N 새 세션  Ctrl+R 갱신  Ctrl+Q 나가기"]
-    : ["Shift+↑↓ 순서  Ctrl+N 새 세션  Ctrl+Q 나가기"];
+    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  / 검색  Tab 필터", "Ctrl+N 새 세션  Ctrl+R 갱신  Alt+Q 나가기"]
+    : ["Shift+↑↓ 순서  Ctrl+N 새 세션  Alt+Q 나가기"];
   while (lines.length < height - helpLines.length - 4) lines.push("");
   if (newTask) {
     const providerName = newTask.provider === "claude" ? "CLAUDE" : "CODEX";
@@ -246,7 +252,7 @@ export async function runOverview({
   orderStore = null,
   refreshMs = 3_000,
   listenForSignals = true,
-  nativeHint = "네이티브 TUI: tmux prefix + 0 → overview",
+  nativeHint = nativeReturnHint(process.env.WAGA_TMUX_MODE),
 } = {}) {
   if (!inputStream.isTTY || !outputStream.isTTY) {
     errorOutput.write("Interactive overview requires a TTY; use `waga list` for text output\n");
@@ -367,7 +373,7 @@ export async function runOverview({
 
   const onKeypress = (text, key = {}) => {
     if (busy || closed) return;
-    if (key.ctrl && (key.name === "q" || key.name === "c")) {
+    if ((key.ctrl && (key.name === "q" || key.name === "c")) || (key.meta && key.name === "q")) {
       leave();
       return;
     }

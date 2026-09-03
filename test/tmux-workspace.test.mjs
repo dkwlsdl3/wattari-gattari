@@ -70,6 +70,7 @@ test("enter attaches an isolated server when outside tmux", async () => {
   const workspace = new TmuxWorkspace({ run, launch, env: {}, cliPath: "/app/cli.mjs", nodePath: "/usr/bin/node", socketName: "waga-test" });
   assert.deepEqual(await workspace.enter({ cwd: "/tmp/project" }), { code: 3, mode: "isolated" });
   assert.ok(calls.some((args) => args.includes("new-session")));
+  assert.ok(calls.some((args) => args.includes("status-right") && args.some((value) => value.includes("Alt+G  dock"))));
   assert.ok(launched[0].includes("attach-session"));
   assert.equal(launched[1].stdio, "inherit");
 });
@@ -175,9 +176,9 @@ test("enter reports a missing tmux binary as an unavailable dock", async () => {
   await assert.rejects(workspace.enter({ cwd: "/tmp/project" }), { code: "TMUX_UNAVAILABLE" });
 });
 
-test("focusOrOpen reuses a mapped window and creates only missing views", async () => {
+test("focusOrOpen reattaches mapped sessions and creates only missing views", async () => {
   const calls = [];
-  let list = "@2\tcodex:known\n";
+  let list = "@2\tcodex:known\n@4\tclaude:known\n";
   const run = async (args) => {
     calls.push(args);
     if (args[0] === "list-windows") return { stdout: list, stderr: "", code: 0 };
@@ -186,8 +187,13 @@ test("focusOrOpen reuses a mapped window and creates only missing views", async 
   };
   const workspace = new TmuxWorkspace({ run, env: { TMUX: "/tmp/tmux,1,0", WAGA_TMUX_SESSION: "waga-project-deadbeef" } });
   assert.deepEqual(await workspace.focusOrOpen({ id: "codex:known" }, { command: "codex", args: [], cwd: "/tmp" }), { reused: true, windowId: "@2" });
+  assert.deepEqual(await workspace.focusOrOpen({ id: "claude:known" }, { command: "claude", args: ["attach", "known"], cwd: "/work" }), { reused: true, windowId: "@4" });
   assert.deepEqual(await workspace.focusOrOpen({ id: "claude:new", provider: "claude", name: "Review", cwd: "/tmp" }, { command: "claude", args: ["attach", "12345678"], cwd: "/tmp" }), { reused: false, windowId: "@3" });
   assert.equal(calls.filter((args) => args[0] === "new-window").length, 1);
+  assert.deepEqual(calls.filter((args) => args[0] === "respawn-window"), [
+    ["respawn-window", "-k", "-t", "@2", "-c", "/tmp", "exec 'codex'"],
+    ["respawn-window", "-k", "-t", "@4", "-c", "/work", "exec 'claude' 'attach' 'known'"],
+  ]);
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("@waga_session_id")));
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("window-status-format") && args.at(-1) === ""));
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("window-status-current-format") && args.at(-1).includes("#{window_name}")));

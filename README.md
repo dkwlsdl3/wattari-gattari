@@ -81,8 +81,8 @@ and restarts.
 open its native TUI. `/` searches and `Tab` cycles all → Claude → Codex. `Ctrl+N`
 opens a new-session composer in the selected project; use `Tab` in the composer
 to choose Claude or Codex, then `Enter` to create a real background session.
-`Ctrl+R` refreshes and `Ctrl+Q` or `Ctrl+C` returns. Control-key commands avoid
-IME composition delays. The default `auto` backend uses tmux when available and
+`Ctrl+R` refreshes and `Alt+Q` exits Waga. `Ctrl+Q` and `Ctrl+C` remain available
+for compatibility. The default `auto` backend uses tmux when available and
 otherwise falls back to `direct` mode.
 
 The directory where `waga` was launched appears first even when it has no active
@@ -91,8 +91,11 @@ overview for that launch directory; existing native windows and provider work
 keep running.
 
 With tmux, use your prefix followed by `0` to return to the dock; Waga's isolated
-server also provides `Alt+G`. In direct mode, detach the native view with `Ctrl+Z`
-in Claude or `Ctrl+D` in Codex. The provider session keeps running.
+server also provides `Alt+G`, and `Alt+Q` exits Waga from the dock. Reopening a
+session row reconnects the existing tmux window with Claude `attach` or Codex
+`resume`, so it opens the selected session TUI rather than a provider Agents View.
+In direct mode, detach the native view with `Ctrl+Z` in Claude or `Ctrl+D` in
+Codex. The provider session keeps running.
 
 Bare `waga` discovers live sessions across all projects. A cwd filter is applied
 only when `--cwd PATH` is explicit. The tmux backend reuses one global session and
