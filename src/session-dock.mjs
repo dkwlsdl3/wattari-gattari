@@ -9,6 +9,7 @@ export async function enterDirectDock({
   inputStream = process.stdin,
   outputStream = process.stdout,
   errorOutput = process.stderr,
+  orderStore = null,
   overview = runOverview,
   workspace = new DirectWorkspace({ inputStream, outputStream, errorOutput }),
 } = {}) {
@@ -20,6 +21,7 @@ export async function enterDirectDock({
     inputStream,
     outputStream,
     errorOutput,
+    orderStore,
     nativeHint: "복귀: Claude Ctrl+Z   Codex Ctrl+D",
   });
   return { code, mode: "direct" };

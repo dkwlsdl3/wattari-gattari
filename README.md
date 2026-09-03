@@ -75,6 +75,8 @@ waga doctor
 targets; an exact unique native ID or session name also works.
 
 The dock groups sessions into collapsible project trees. Use `↑`/`↓` to move,
+and `Shift+↑`/`Shift+↓` on a session to persistently reorder it across refreshes
+and restarts.
 `←`/`→` or `Enter` to collapse and expand a project, and `Enter` on a session to
 open its native TUI. `/` searches and `Tab` cycles all → Claude → Codex. `Ctrl+N`
 opens a new-session composer in the selected project; use `Tab` in the composer

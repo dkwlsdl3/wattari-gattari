@@ -27,6 +27,10 @@ tmux 안에서 다시 별도 tmux client를 attach하면 prefix, detach, mouse �
   그립니다. 선택한 workspace에서 provider가 소유할 새 세션의 첫 요청을 작성하는 한 줄
   입력기만 추가하며 transcript, 후속 대화 입력, 승인, token 표시, slash command는
   그리지 않습니다.
+- 세션 상태 변화로 행이 움직이지 않도록 발견 순서를 안정적으로 유지합니다. 사용자는
+  `Shift+↑`/`Shift+↓`로 같은 workspace 안의 표시 순서를 바꿀 수 있고, 이 표시 순서만
+  `$XDG_STATE_HOME/wattari-gattari/dock-order.json`에 저장합니다. provider 세션이나
+  transcript를 별도 카탈로그로 복제하지 않습니다.
 - `Ctrl+N`은 새 세션 입력기를 열고 `Tab`으로 Claude/Codex를 전환합니다. Claude는 공개
   background CLI, Codex는 기존 native App Server daemon으로 생성하며 완료 후 목록을
   새로고침합니다. 문자 명령은 IME 조합 상태에 영향받지 않도록 `Ctrl+N`, `Ctrl+R`,

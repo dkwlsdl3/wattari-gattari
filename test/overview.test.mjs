@@ -3,7 +3,15 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
-import { buildOverviewFrame, buildOverviewTree, runOverview, selectOverviewSessions } from "../src/overview.mjs";
+import {
+  applyOverviewOrder,
+  buildOverviewFrame,
+  buildOverviewTree,
+  moveOverviewSession,
+  reconcileOverviewOrder,
+  runOverview,
+  selectOverviewSessions,
+} from "../src/overview.mjs";
 
 const sessions = [
   { id: "codex:1", provider: "codex", status: "idle", name: "API 검토", cwd: "/work/api", updatedAt: 20 },
@@ -56,8 +64,18 @@ function selectedSessionName(output) {
     ?.match(/(?:CODEX|CLAUDE)\s+([^\s]+)/)?.[1] ?? null;
 }
 
-test("overview prioritizes attention and working sessions before idle history", () => {
-  assert.deepEqual(selectOverviewSessions(sessions).map((session) => session.id), ["codex:3", "claude:2", "codex:1"]);
+test("overview preserves supplied session order instead of sorting by status", () => {
+  assert.deepEqual(selectOverviewSessions(sessions).map((session) => session.id), ["codex:1", "claude:2", "codex:3"]);
+});
+
+test("overview reconciles discovered sessions with manual workspace order", () => {
+  const order = reconcileOverviewOrder(new Map([["/work/api", ["codex:old", "codex:1"]]]), sessions);
+  assert.deepEqual(order.get("/work/api"), ["codex:old", "codex:1"]);
+  assert.deepEqual(order.get("/work/ui"), ["claude:2"]);
+  assert.deepEqual(applyOverviewOrder([...sessions].reverse(), order).map((session) => session.id), ["codex:1", "claude:2", "codex:3"]);
+
+  const moved = moveOverviewSession(new Map([["/work/shared", ["codex:1", "hidden", "claude:2"]]]), "/work/shared", "codex:1", "down", ["codex:1", "claude:2"]);
+  assert.deepEqual(moved.get("/work/shared"), ["claude:2", "hidden", "codex:1"]);
 });
 
 test("overview filtering is provider agnostic and searches names and paths", () => {
@@ -74,8 +92,8 @@ test("overview groups sessions into collapsible workspace trees", () => {
   const expanded = buildOverviewTree(grouped);
   assert.deepEqual(expanded.map(({ type, key }) => [type, key]), [
     ["workspace", "workspace:/work/shared"],
-    ["session", "claude:2"],
     ["session", "codex:1"],
+    ["session", "claude:2"],
     ["workspace", "workspace:/work/other"],
     ["session", "codex:3"],
   ]);
@@ -129,7 +147,55 @@ test("overview frame distinguishes providers and keeps navigation help visible",
   assert.match(frame, /Ctrl\+N 새 세션/);
   assert.match(frame, /Ctrl\+R 갱신/);
   assert.match(frame, /Ctrl\+Q 나가기/);
+  assert.match(frame, /Shift\+↑↓ 순서/);
   assert.match(frame, /tmux prefix \+ 0/);
+  assert.match(frame, /\x1b\[1;38;2;56;189;248m/);
+  assert.doesNotMatch(frame, /\x1b\[38;5;/);
+});
+
+test("Shift+Up and Shift+Down persist manual order across refreshes", async (t) => {
+  const first = [
+    { id: "codex:first", provider: "codex", status: "idle", name: "First", cwd: "/work/p", updatedAt: 2 },
+    { id: "codex:second", provider: "codex", status: "working", name: "Second", cwd: "/work/p", updatedAt: 1 },
+  ];
+  const changed = [
+    { ...first[1], status: "needs-input", updatedAt: 20 },
+    { ...first[0], status: "working", updatedAt: 10 },
+  ];
+  const input = ttyInput();
+  t.after(() => input.emit("end"));
+  const output = capturedOutput();
+  let discoveries = 0;
+  const saves = [];
+  const orderStore = {
+    load() { return new Map(); },
+    saveWorkspace(workspace, ids) { saves.push([workspace, ids]); },
+  };
+  const bridge = {
+    async discover() { return { sessions: discoveries++ === 0 ? first : changed, warnings: [] }; },
+  };
+  const workspace = {
+    async focusOrOpen() {},
+    async leave() { return { closeOverview: true }; },
+  };
+  const running = runOverview({ bridge, workspace, orderStore, defaultCwd: "/work/p", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  input.emit("keypress", "", { name: "down" });
+  assert.equal(selectedSessionName(output), "First");
+  input.emit("keypress", "", { name: "down", shift: true });
+  let frame = plain(output.writes.at(-1));
+  assert.ok(frame.indexOf("Second") < frame.indexOf("First"));
+  assert.equal(selectedSessionName(output), "First");
+  assert.deepEqual(saves, [["/work/p", ["codex:second", "codex:first"]]]);
+
+  input.emit("keypress", "\u0012", { name: "r", sequence: "\u0012", ctrl: true });
+  await waitFor(() => discoveries === 2);
+  frame = plain(output.writes.at(-1));
+  assert.ok(frame.indexOf("Second") < frame.indexOf("First"));
+
+  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  assert.equal(await running, 0);
 });
 
 test("overview frame switches to a compact layout when the terminal narrows", () => {
@@ -368,7 +434,7 @@ test("provider tabs clear stale rows and select the first matching session", asy
   const codexFrame = output.writes.at(-1);
   assert.match(codexFrame, /^\x1b\[H\x1b\[J/);
   assert.doesNotMatch(plain(codexFrame), /CLAUDE/);
-  assert.equal(selectedSessionName(output), "배포");
+  assert.equal(selectedSessionName(output), "API");
 
   input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
   assert.equal(await running, 0);

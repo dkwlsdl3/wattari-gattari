@@ -9,7 +9,7 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_SOCKET = `waga-${typeof process.getuid === "function" ? process.getuid() : "user"}`;
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 const SOURCE_DIR = fileURLToPath(new URL(".", import.meta.url));
-const CURRENT_WINDOW_FORMAT = "#[bold,fg=colour234,bg=colour117] #{?#{==:#{window_name},overview},OVERVIEW,#{window_name}} ";
+const CURRENT_WINDOW_FORMAT = "#[bold,fg=#0f172a,bg=#38bdf8] #{?#{==:#{window_name},overview},OVERVIEW,#{window_name}} ";
 export const GLOBAL_DOCK_SESSION = "waga-global";
 
 function sourceFiles(directory, root = directory) {
@@ -206,12 +206,12 @@ export class TmuxWorkspace {
       ["status", "on"],
       ["status-position", "top"],
       ["status-interval", "1"],
-      ["status-style", "bg=colour234,fg=colour250"],
-      ["status-left", "#[bold,fg=colour117] Waga #[default]│ "],
+      ["status-style", "bg=#0f172a,fg=#e2e8f0"],
+      ["status-left", "#[bold,fg=#38bdf8] Waga #[default]│ "],
       ["status-left-length", "20"],
       ["status-right", mode === "isolated"
-        ? "#{?#{==:#{window_name},overview},,#[fg=colour114]Alt+G  overview }"
-        : "#{?#{==:#{window_name},overview},,#[fg=colour114]prefix+0  overview }"],
+        ? "#{?#{==:#{window_name},overview},,#[bold,fg=#4ade80]Alt+G  overview }"
+        : "#{?#{==:#{window_name},overview},,#[bold,fg=#4ade80]prefix+0  overview }"],
       ["status-right-length", "24"],
       ["base-index", "0"],
       ["renumber-windows", "on"],

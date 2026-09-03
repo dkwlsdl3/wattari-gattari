@@ -26,10 +26,12 @@ test("bare CLI opens the dock on an interactive terminal", async () => {
   const stdin = { isTTY: true };
   let seen;
   const dock = async (options) => { seen = options; return { code: 4 }; };
-  assert.equal(await runCli([], { stdin, stdout, stderr: output(), bridge: {}, dock }), 4);
+  const orderStore = {};
+  assert.equal(await runCli([], { stdin, stdout, stderr: output(), bridge: {}, dock, orderStore }), 4);
   assert.equal(seen.cwd, path.resolve(process.cwd()));
   assert.equal(seen.filterCwd, null);
   assert.equal(seen.backend, "auto");
+  assert.equal(seen.orderStore, orderStore);
 });
 
 test("interactive CLI filters the dock only when cwd is explicit", async () => {
@@ -57,10 +59,12 @@ test("internal overview delegates to the dashboard", async () => {
   stdout.isTTY = true;
   let seen;
   const overview = async (options) => { seen = options; return 6; };
+  const orderStore = {};
   assert.equal(await runCli(["overview", "--cwd", "/tmp"], {
-    stdin, stdout, stderr: output(), bridge: {}, overview,
+    stdin, stdout, stderr: output(), bridge: {}, overview, orderStore,
   }), 6);
   assert.equal(seen.filterCwd, path.resolve("/tmp"));
+  assert.equal(seen.orderStore, orderStore);
 });
 
 test("internal overview discovers all projects without an explicit cwd", async () => {

@@ -9,6 +9,21 @@ const RESET = `${ESC}0m`;
 const ESCAPE_CODE_TIMEOUT_MS = 25;
 const color = (code, text) => `${ESC}${code}m${text}${RESET}`;
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+const THEME = {
+  title: "1;38;2;56;189;248",
+  primary: "1;38;2;226;232;240",
+  muted: "38;2;148;163;184",
+  divider: "38;2;71;85;105",
+  selected: "48;2;30;41;59",
+  cursor: "1;38;2;250;204;21",
+  claude: "1;38;2;192;132;252",
+  codex: "1;38;2;34;211;238",
+  working: "1;38;2;74;222;128",
+  idle: "1;38;2;56;189;248",
+  error: "1;38;2;251;113;133",
+  warning: "1;38;2;251;191;36",
+  hint: "1;38;2;45;212;191",
+};
 
 function safeText(value) {
   return String(value ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").replace(/\s+/g, " ").trim();
@@ -63,17 +78,54 @@ function editorLine(value, cursor, width) {
   return `› ${before}${ESC}7m${atCursor}${RESET}${after}`;
 }
 
-function statusPriority(status) {
-  if (status === "needs-input" || status === "error") return 0;
-  if (status === "working") return 1;
-  if (status === "idle") return 2;
-  return 3;
+function sessionWorkspace(session) {
+  return path.resolve(String(session.projectCwd || session.cwd || "/"));
 }
 
-function compareOverviewSessions(left, right) {
-  return statusPriority(left.status) - statusPriority(right.status)
-    || Number(right.updatedAt ?? 0) - Number(left.updatedAt ?? 0)
-    || left.id.localeCompare(right.id);
+export function reconcileOverviewOrder(orderByWorkspace, sessions) {
+  const reconciled = new Map([...orderByWorkspace].map(([workspace, ids]) => [workspace, [...ids]]));
+  for (const session of sessions) {
+    const workspace = sessionWorkspace(session);
+    if (!reconciled.has(workspace)) reconciled.set(workspace, []);
+    const order = reconciled.get(workspace);
+    if (!order.includes(session.id)) order.push(session.id);
+  }
+  return reconciled;
+}
+
+export function applyOverviewOrder(sessions, orderByWorkspace) {
+  const grouped = new Map();
+  for (const session of sessions) {
+    const workspace = sessionWorkspace(session);
+    if (!grouped.has(workspace)) grouped.set(workspace, []);
+    grouped.get(workspace).push(session);
+  }
+  const workspaceOrder = [...orderByWorkspace.keys()].filter((workspace) => grouped.has(workspace));
+  for (const workspace of grouped.keys()) if (!workspaceOrder.includes(workspace)) workspaceOrder.push(workspace);
+  return workspaceOrder.flatMap((workspace) => {
+    const rank = new Map((orderByWorkspace.get(workspace) ?? []).map((id, index) => [id, index]));
+    return grouped.get(workspace).map((session, index) => ({ session, index })).sort((left, right) => {
+      const leftRank = rank.get(left.session.id) ?? Number.MAX_SAFE_INTEGER;
+      const rightRank = rank.get(right.session.id) ?? Number.MAX_SAFE_INTEGER;
+      return leftRank - rightRank || left.index - right.index;
+    }).map(({ session }) => session);
+  });
+}
+
+export function moveOverviewSession(orderByWorkspace, workspace, sessionId, direction, visibleIds) {
+  if (direction !== "up" && direction !== "down") throw new TypeError("Direction must be up or down");
+  const visibleIndex = visibleIds.indexOf(sessionId);
+  const targetVisibleIndex = direction === "up" ? visibleIndex - 1 : visibleIndex + 1;
+  if (visibleIndex < 0 || targetVisibleIndex < 0 || targetVisibleIndex >= visibleIds.length) return null;
+  const order = [...(orderByWorkspace.get(workspace) ?? [])];
+  const targetId = visibleIds[targetVisibleIndex];
+  const index = order.indexOf(sessionId);
+  const targetIndex = order.indexOf(targetId);
+  if (index < 0 || targetIndex < 0) return null;
+  [order[index], order[targetIndex]] = [order[targetIndex], order[index]];
+  const moved = new Map(orderByWorkspace);
+  moved.set(workspace, order);
+  return moved;
 }
 
 export function selectOverviewSessions(sessions, { query = "", provider = null, limit = 40 } = {}) {
@@ -81,7 +133,6 @@ export function selectOverviewSessions(sessions, { query = "", provider = null, 
   return [...sessions]
     .filter((session) => !provider || session.provider === provider)
     .filter((session) => !needle || `${session.name} ${session.cwd} ${session.projectCwd ?? ""} ${session.id}`.toLocaleLowerCase().includes(needle))
-    .sort(compareOverviewSessions)
     .slice(0, limit);
 }
 
@@ -105,7 +156,7 @@ export function buildOverviewTree(sessions, { collapsed = new Set(), query = "",
       sessionCount: workspaceSessions.length,
     });
     if (collapsed.has(cwd) && !query) continue;
-    for (const session of [...workspaceSessions].sort(compareOverviewSessions)) {
+    for (const session of workspaceSessions) {
       nodes.push({ type: "session", key: session.id, workspaceKey, cwd, session });
     }
   }
@@ -113,11 +164,11 @@ export function buildOverviewTree(sessions, { collapsed = new Set(), query = "",
 }
 
 function statusView(status) {
-  if (status === "needs-input") return ["!", "needs input", "38;5;203"];
-  if (status === "working") return ["●", "working", "38;5;114"];
-  if (status === "error") return ["!", "error", "38;5;203"];
-  if (status === "idle") return ["○", "ready", "38;5;117"];
-  return ["·", safeText(status || "unknown"), "38;5;245"];
+  if (status === "needs-input") return ["!", "needs input", THEME.error];
+  if (status === "working") return ["●", "working", THEME.working];
+  if (status === "error") return ["!", "error", THEME.error];
+  if (status === "idle") return ["○", "ready", THEME.idle];
+  return ["·", safeText(status || "unknown"), THEME.muted];
 }
 
 function counts(sessions) {
@@ -134,47 +185,50 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
   const nameWidth = wide ? Math.max(12, usableWidth - 31) : Math.max(1, usableWidth - 21);
   const lines = [];
   const title = wide ? "WATTARI GATTARI  Claude + Codex session dock" : "WAGA · session dock";
-  lines.push(`  ${color("1;38;5;117", fit(title, usableWidth))}`);
-  lines.push(`  ${color("38;5;245", fit(`${counts(sessions)}${provider ? `   filter: ${provider}` : ""}`, usableWidth))}`);
-  lines.push(`  ${color("38;5;238", "─".repeat(Math.max(1, usableWidth)))}`);
+  lines.push(`  ${color(THEME.title, fit(title, usableWidth))}`);
+  lines.push(`  ${color(THEME.muted, fit(`${counts(sessions)}${provider ? `   filter: ${provider}` : ""}`, usableWidth))}`);
+  lines.push(`  ${color(THEME.divider, "─".repeat(Math.max(1, usableWidth)))}`);
 
-  if (!sessions.length) lines.push(`  ${color("38;5;245", query ? "검색 결과가 없습니다." : "발견된 세션이 없습니다. Ctrl+R을 눌러 새로고침하세요.")}`);
+  if (!sessions.length) lines.push(`  ${color(THEME.muted, query ? "검색 결과가 없습니다." : "발견된 세션이 없습니다. Ctrl+R을 눌러 새로고침하세요.")}`);
   for (let index = offset; index < Math.min(nodes.length, offset + visibleRows); index += 1) {
     const node = nodes[index];
     const active = index === safeSelected;
-    const marker = active ? color("1;38;5;229", "›") : " ";
+    const marker = active ? color(THEME.cursor, "›") : " ";
     if (node.type === "workspace") {
       const toggle = collapsed.has(node.cwd) && !query ? "▸" : "▾";
       const detail = wide ? `  ${node.cwd}  ·  ${node.sessionCount} session${node.sessionCount === 1 ? "" : "s"}` : `  ${node.sessionCount}`;
-      const row = `${marker} ${color("38;5;245", toggle)} ${color("1;38;5;252", fit(`${node.name}${detail}`, usableWidth - 4))}`;
-      lines.push(active ? `${ESC}48;5;236m${row}${RESET}` : row);
+      const row = `${marker} ${color(THEME.muted, toggle)} ${color(THEME.primary, fit(`${node.name}${detail}`, usableWidth - 4))}`;
+      lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
       continue;
     }
     const session = node.session;
     const [symbol, status, statusColor] = statusView(session.status);
     const providerName = wide ? (session.provider === "claude" ? "CLAUDE" : "CODEX ") : (session.provider === "claude" ? "CLAUDE" : "CODEX");
-    const providerColor = session.provider === "claude" ? "38;5;183" : "38;5;117";
+    const providerColor = session.provider === "claude" ? THEME.claude : THEME.codex;
     const row = wide
       ? `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)}  ${fit(session.name, nameWidth)}  ${color(statusColor, fit(status, 11))}`
       : `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)} ${fit(session.name, nameWidth)} ${color(statusColor, fit(status, 8))}`;
-    lines.push(active ? `${ESC}48;5;236m${row}${RESET}` : row);
+    lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
   }
-  while (lines.length < height - 5) lines.push("");
+  const helpLines = wide
+    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  / 검색  Tab 필터", "Ctrl+N 새 세션  Ctrl+R 갱신  Ctrl+Q 나가기"]
+    : ["Shift+↑↓ 순서  Ctrl+N 새 세션  Ctrl+Q 나가기"];
+  while (lines.length < height - helpLines.length - 4) lines.push("");
   if (newTask) {
     const providerName = newTask.provider === "claude" ? "CLAUDE" : "CODEX";
     const heading = newTask.error
-      ? color("38;5;203", fit(`오류: ${safeText(newTask.error)}`, usableWidth))
-      : color("1;38;5;117", fit(`새 세션 · ${providerName} · ${newTask.cwd}${newTask.submitting ? " · 생성 중" : ""}`, usableWidth));
+      ? color(THEME.error, fit(`오류: ${safeText(newTask.error)}`, usableWidth))
+      : color(THEME.title, fit(`새 세션 · ${providerName} · ${newTask.cwd}${newTask.submitting ? " · 생성 중" : ""}`, usableWidth));
     lines.push(`  ${heading}`);
-    lines.push(`  ${color("38;5;245", fit("Tab 제공자 전환   ←→ 커서   Enter 생성   Esc 취소   Ctrl+U 지우기", usableWidth))}`);
+    lines.push(`  ${color(THEME.muted, fit("Tab 제공자 전환   ←→ 커서   Enter 생성   Esc 취소   Ctrl+U 지우기", usableWidth))}`);
     lines.push(`  ${editorLine(newTask.prompt, newTask.cursor, usableWidth)}`);
     lines.push("");
   } else {
-    if (warnings.length) lines.push(`  ${color("38;5;214", fit(`경고: ${safeText(warnings[0].provider)} · ${safeText(warnings[0].message)}`, usableWidth))}`);
-    else lines.push(`  ${color("38;5;245", fit(notice || "세션 상태는 자동으로 새로고침됩니다.", usableWidth))}`);
-    lines.push(`  ${color("38;5;245", fit(wide ? "↑↓ 이동  ←→ 접기  Enter 열기  / 검색  Tab 필터  Ctrl+N 새 세션  Ctrl+R 갱신  Ctrl+Q 나가기" : "Ctrl+N 새 세션  Ctrl+Q 나가기", usableWidth))}`);
-    lines.push(`  ${color("38;5;114", fit(nativeHint, usableWidth))}`);
-    if (query) lines.push(`  ${color("38;5;229", fit(`검색: ${query}`, usableWidth))}`);
+    if (warnings.length) lines.push(`  ${color(THEME.warning, fit(`경고: ${safeText(warnings[0].provider)} · ${safeText(warnings[0].message)}`, usableWidth))}`);
+    else lines.push(`  ${color(THEME.muted, fit(notice || "세션 상태는 자동으로 새로고침됩니다.", usableWidth))}`);
+    for (const help of helpLines) lines.push(`  ${color(THEME.muted, fit(help, usableWidth))}`);
+    lines.push(`  ${color(THEME.hint, fit(nativeHint, usableWidth))}`);
+    if (query) lines.push(`  ${color(THEME.cursor, fit(`검색: ${query}`, usableWidth))}`);
     else lines.push("");
   }
   return lines.slice(0, height).join("\n");
@@ -189,6 +243,7 @@ export async function runOverview({
   inputStream = process.stdin,
   outputStream = process.stdout,
   errorOutput = process.stderr,
+  orderStore = null,
   refreshMs = 3_000,
   listenForSignals = true,
   nativeHint = "네이티브 TUI: tmux prefix + 0 → overview",
@@ -200,6 +255,12 @@ export async function runOverview({
 
   let allSessions = [];
   let warnings = [];
+  let orderWarning = null;
+  let orderByWorkspace = new Map();
+  if (orderStore) {
+    try { orderByWorkspace = orderStore.load(); }
+    catch (error) { orderWarning = { provider: "waga", message: error.message }; }
+  }
   let selected = 0;
   let selectedKey = null;
   const collapsed = new Set();
@@ -237,7 +298,7 @@ export async function runOverview({
       width: outputStream.columns || 100,
       height: outputStream.rows || 30,
       query,
-      warnings,
+      warnings: orderWarning ? [orderWarning, ...warnings] : warnings,
       provider,
       notice,
       newTask,
@@ -251,7 +312,8 @@ export async function runOverview({
     refreshing = true;
     try {
       const discovered = await bridge.discover(filterCwd ? { cwd: path.resolve(filterCwd) } : {});
-      allSessions = discovered.sessions;
+      orderByWorkspace = reconcileOverviewOrder(orderByWorkspace, discovered.sessions);
+      allSessions = applyOverviewOrder(discovered.sessions, orderByWorkspace);
       warnings = discovered.warnings;
       notice = `마지막 갱신 ${new Date().toLocaleTimeString()}`;
     } catch (error) {
@@ -349,6 +411,23 @@ export async function runOverview({
     }
     const nodes = visibleNodes();
     reconcileSelection(nodes);
+    if (key.shift && (key.name === "up" || key.name === "down") && nodes[selected]?.type === "session") {
+      const target = nodes[selected];
+      const visibleIds = nodes.filter((node) => node.type === "session" && node.workspaceKey === target.workspaceKey).map((node) => node.session.id);
+      const moved = moveOverviewSession(orderByWorkspace, target.cwd, target.session.id, key.name, visibleIds);
+      if (moved) {
+        orderByWorkspace = moved;
+        allSessions = applyOverviewOrder(allSessions, orderByWorkspace);
+        selectedKey = target.session.id;
+        if (orderStore) {
+          const liveIds = allSessions.filter((session) => sessionWorkspace(session) === target.cwd).map((session) => session.id);
+          try { orderStore.saveWorkspace(target.cwd, liveIds); orderWarning = null; }
+          catch (error) { orderWarning = { provider: "waga", message: error.message }; }
+        }
+      }
+      render();
+      return;
+    }
     if (key.name === "up") selected = Math.max(0, selected - 1);
     else if (key.name === "down") selected = Math.min(Math.max(0, nodes.length - 1), selected + 1);
     else if (key.name === "tab") {

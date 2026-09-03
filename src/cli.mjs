@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { parseCliArgs } from "./cli-options.mjs";
+import { DockOrderStore } from "./dock-order.mjs";
 import { runDoctor } from "./doctor.mjs";
 import { openNativeAgents } from "./native-launcher.mjs";
 import { runOverview } from "./overview.mjs";
@@ -49,6 +50,7 @@ export async function runCli(args = process.argv.slice(2), {
   launcher = openNativeAgents,
   dock = enterSessionDock,
   overview = runOverview,
+  orderStore = new DockOrderStore(),
 } = {}) {
   let options;
   try { options = parseCliArgs(args); }
@@ -72,8 +74,9 @@ export async function runCli(args = process.argv.slice(2), {
       inputStream: stdin,
       outputStream: stdout,
       errorOutput: stderr,
+      orderStore,
     })).code;
-    else if (options.command === "overview") return await overview({ filterCwd: options.cwd ? cwd : null, defaultCwd: cwd, bridge, inputStream: stdin, outputStream: stdout, errorOutput: stderr });
+    else if (options.command === "overview") return await overview({ filterCwd: options.cwd ? cwd : null, defaultCwd: cwd, bridge, inputStream: stdin, outputStream: stdout, errorOutput: stderr, orderStore });
     else if (options.command === "list" || options.command === "default") writeList(stdout, stderr, await bridge.discover({ provider: options.provider, cwd: options.cwd ? cwd : undefined }), options.json);
     else if (options.command === "send") {
       const result = await bridge.send(options.target, options.message, { cwd: options.cwd ? cwd : undefined });

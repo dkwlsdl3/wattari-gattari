@@ -14,10 +14,12 @@ const base = {
 
 test("direct dock composes the overview with native detach guidance", async () => {
   const workspace = {};
+  const orderStore = {};
   let seen;
   const result = await enterDirectDock({
     ...base,
     workspace,
+    orderStore,
     overview: async (options) => { seen = options; return 7; },
   });
   assert.deepEqual(result, { code: 7, mode: "direct" });
@@ -25,6 +27,7 @@ test("direct dock composes the overview with native detach guidance", async () =
   assert.equal(seen.defaultCwd, base.cwd);
   assert.equal(seen.bridge, base.bridge);
   assert.equal(seen.workspace, workspace);
+  assert.equal(seen.orderStore, orderStore);
   assert.match(seen.nativeHint, /Claude Ctrl\+Z/);
   assert.match(seen.nativeHint, /Codex Ctrl\+D/);
 });
