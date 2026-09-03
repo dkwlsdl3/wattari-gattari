@@ -6,6 +6,12 @@ import { runCli } from "../src/cli.mjs";
 
 function output() { let value = ""; return { write(chunk) { value += chunk; }, get value() { return value; } }; }
 
+test("help explains that cwd filtering is optional for the global dock", async () => {
+  const stdout = output();
+  assert.equal(await runCli(["--help"], { stdout, stderr: output(), bridge: {} }), 0);
+  assert.match(stdout.value, /waga \[--cwd PATH\].*global dock/);
+});
+
 test("list renders provider-prefixed ids", async () => {
   const stdout = output();
   const bridge = { async discover() { return { sessions: [{ id: "claude:1", status: "idle", name: "proof", cwd: "/tmp" }], warnings: [] }; } };

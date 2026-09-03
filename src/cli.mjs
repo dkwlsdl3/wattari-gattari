@@ -16,7 +16,7 @@ import { enterWagaDock } from "./tmux-workspace.mjs";
 
 function usage() {
   return [
-    `${CLI_NAME}                         Open the unified session dock`,
+    `${CLI_NAME} [--cwd PATH]            Open the global dock, optionally filtered by workspace`,
     `${CLI_NAME} list [--provider claude|codex] [--cwd PATH] [--json]`,
     `${CLI_NAME} send <session-id-or-name> <message> [--cwd PATH]`,
     `${CLI_NAME} ask <session-id-or-name> <message> [--timeout SEC] [--cwd PATH]`,
