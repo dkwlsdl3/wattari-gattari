@@ -20,9 +20,8 @@ Wattari Gattari는 Claude Agents와 Codex Agents가 소유한 네이티브 세�
 ## Context Sources
 
 - 현재 상태는 `git status`, `git diff`, `git log`에서만 확인합니다.
-- 활성 작업 명세는 `TODO.md`, 장기 결정은 `docs/adr/`를 읽습니다.
-- 제품 경계를 바꾸거나 실제 Claude/Codex 세션을 건드리는 작업은
-  `docs/adr/2026-09-02-loop-engineering-protocol.md`의 루프 계약을 적용합니다.
+- 활성 작업 명세는 `TODO.md`, 현행 제품 경계와 변경 검증 계약은
+  `docs/adr/README.md`를 읽습니다.
 - 과거 완료 상태를 문서에 다시 적지 않습니다. 완료 기록은 커밋입니다.
 
 ## Start And End

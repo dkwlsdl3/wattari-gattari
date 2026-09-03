@@ -1,49 +1,34 @@
 # Wattari Gattari
 
-> A thin message bridge between native Claude Code and Codex sessions.
+> Open and connect native Claude Code and Codex sessions from one dock.
 
 [![CI](https://github.com/dkwlsdl3/wattari-gattari/actions/workflows/ci.yml/badge.svg)](https://github.com/dkwlsdl3/wattari-gattari/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-[한국어](README.ko.md) · [Architecture](docs/adr/0005-optional-session-dock-backends.md) · [License](LICENSE)
+[한국어](README.ko.md) · [Architecture](docs/adr/README.md) · [License](LICENSE)
 
-Wattari Gattari (`waga`) lets Claude Code and Codex sessions find and message
-each other while both providers keep ownership of their sessions, terminal UI,
-tools, approvals, and updates.
-
-There is no Waga daemon and no replacement chat UI. Waga adds a small session
-dock, then hands the terminal to each provider's native TUI.
+Wattari Gattari (`waga`) is a local CLI that lists live Claude Code and Codex
+sessions and opens the selected provider's native TUI. It does not add another
+daemon or replacement chat UI.
 
 ![Waga session dock demo](docs/assets/wattari-gattari-demo.gif)
 
-## What it does
+## Features
 
-- discovers live native sessions from both providers;
-- opens one global dock with bare `waga` and jumps directly into an exact native session;
-- archives active sessions from the dock without deleting their conversation logs;
-- sends a one-way peer message with `waga send`;
-- asks for exactly one reply with `waga ask`;
-- opens either provider's native Agents UI with `waga open`;
-- labels peer input as untrusted and never grants permissions or approvals.
+- Browse Claude and Codex sessions across projects in one dock
+- Attach or resume the exact native session
+- Search, filter, reorder, create, and archive sessions
+- Send one-way notifications with `waga send` or request one reply with `waga ask`
+- Mark peer input as untrusted while preserving native sandbox and approval rules
 
-```mermaid
-flowchart LR
-  C[Claude Code session] <-->|native peer Unix socket| W[Waga ask / send]
-  W <-->|native daemon tool output| X[Codex session]
-```
+## Requirements and install
 
-## Requirements
+- Linux and Node.js 22+
+- Codex CLI and Claude Code with Agents support
+- Optional: tmux for reusable and shared terminal views
 
-- Linux (Claude peer transport currently uses Unix sockets)
-- Node.js 22+
-- Codex CLI with `agents` and `app-server daemon`
-- Claude Code with `agents` and cross-session messaging
-- tmux for the optional shared-window dock experience
-
-The current live compatibility pass used Codex CLI 0.152.1 and Claude Code
-2.1.259. Run `waga doctor` after provider upgrades.
-
-## Install
+Compatibility was verified with Codex CLI 0.152.1 and Claude Code 2.1.259. Run
+`waga doctor` after provider upgrades.
 
 ```bash
 git clone git@github.com:dkwlsdl3/wattari-gattari.git
@@ -53,144 +38,74 @@ npm link
 waga doctor
 ```
 
-`npm link` installs the local `waga` command. The project is not published to npm.
+The project is not published to npm.
 
-## Usage
+## Quick start
 
 ```bash
-waga                            # global interactive Claude + Codex dock
-waga --cwd ~/work/my-app        # dock filtered to one project
+waga                            # global session dock
+waga --cwd ~/work/my-app        # limit the dock to one project
 waga --backend direct           # run without tmux
-waga --backend tmux             # require the shared-window backend
+waga --backend tmux             # require the tmux backend
 waga list --provider claude
-waga list --cwd ~/work/my-app --json
+waga list --json
 
+waga send codex:<thread-id> "Inspect the ADR"
 waga ask claude:<session-id> "Review the current API contract"
-waga ask codex:<thread-id> "What is blocking the test?" --wait-timeout 600 --reply-timeout 120
-waga send codex:<thread-id> "The migration plan changed; inspect the ADR"
-
-waga open claude
 waga open codex --cwd ~/work/my-app
-waga doctor
 ```
 
-`waga agents` is an alias for `waga list`. Provider-prefixed IDs are the safest
-targets; an exact unique native ID or session name also works.
+`waga agents` aliases `waga list`. Provider-prefixed targets such as
+`claude:<id>` and `codex:<id>` are recommended.
 
-The dock groups sessions into collapsible project trees. Use `↑`/`↓` to move,
-and `Shift+↑`/`Shift+↓` on a session to persistently reorder it across refreshes
-and restarts.
-`←`/`→` or `Enter` to collapse and expand a project, and `Enter` on a session to
-open its native TUI. `/` searches and `Tab` cycles all → Claude → Codex. `Ctrl+N`
-opens a new-session composer in the selected project; use `Tab` in the composer
-to choose Claude or Codex, then `Enter` to create a real background session.
-`Ctrl+R` refreshes and `Alt+Q` exits Waga. `Ctrl+Q` and `Ctrl+C` remain available
-for compatibility. Press `Alt+X` twice on a session to archive it from the active
-list: the first press explains the provider-specific effect and only the second
-performs it. Codex moves its conversation JSONL into `archived_sessions`; Claude
-keeps the transcript while removing the background job and its managed worktree.
-The default `auto` backend uses tmux when available and otherwise falls back to
-`direct` mode.
+## Dock keys
 
-The directory where `waga` was launched appears first even when it has no active
-sessions. Re-entering the global dock from another directory refreshes only the
-overview for that launch directory; existing native windows and provider work
-keep running.
+| Key | Action |
+|---|---|
+| `↑` / `↓` | Move |
+| `Shift+↑` / `Shift+↓` | Reorder sessions |
+| `←` / `→` / `Enter` | Collapse or expand a project |
+| `Enter` on a session | Open its native TUI |
+| `/` / `Tab` | Search / filter providers |
+| `Ctrl+N` / `Ctrl+R` | New session / refresh |
+| `Alt+X` twice | Archive a session |
+| `Alt+Q` | Exit Waga |
 
-With tmux, use your prefix followed by `0` to return to the dock; Waga's isolated
-server also provides `Alt+G`, and `Alt+Q` exits Waga from the dock. Reopening a
-session row reconnects the existing tmux window with Claude `attach` or Codex
-`resume`, so it opens the selected session TUI rather than a provider Agents View.
-In direct mode, detach the native view with `Ctrl+Z` in Claude or `Ctrl+D` in
-Codex. The provider session keeps running.
+Archiving removes a session from the active list without deleting its log.
+Codex moves it to archived sessions; Claude preserves the transcript while
+cleaning up the background job and managed worktree.
 
-Bare `waga` discovers live sessions across all projects. A cwd filter is applied
-only when `--cwd PATH` is explicit. The tmux backend reuses one global session and
-one window per native session, including when multiple terminal clients attach.
-For Codex, the dock mirrors the top-level sessions currently owned by Codex
-Agents. Ordinary CLI/VSCode history is not mixed into the dock. For Claude, it
-uses the active `claude agents --json` list and groups Claude-managed worktrees
-under their parent project while preserving each session's real working directory.
+The default `auto` backend uses tmux when available and falls back to `direct`.
+With tmux, use prefix then `0` to return to the dock; Waga's isolated server also
+supports `Alt+G`. In direct mode, leave the native view with `Ctrl+Z` in Claude
+or `Ctrl+D` in Codex.
 
-When started outside tmux, Waga uses its own isolated tmux server. When started
-inside tmux, it creates a Waga session in the current server and switches to it;
-it does not nest tmux. In native TUIs, the wheel is forwarded when the provider
-handles mouse input and otherwise scrolls through tmux history. Mouse mode is
-scoped to the Waga session and does not change another session or the user's
-global tmux configuration. Hold `Shift` for the terminal's native text selection.
-It does not depend on WezTerm.
-Direct mode does not share or preserve terminal views; it simply lends the current
-terminal to the native TUI and restores the overview after detach or exit.
+## Peer messages
 
-When Waga's installed source changes, the next `waga` invocation automatically
-restarts only a stale overview window. Existing native session windows and the
-provider-owned sessions behind them remain intact.
+`send` is a one-way notification and confirms only submission. `ask` waits for
+the target to become idle, writes one turn to its real transcript, and waits for
+one reply. There is no automatic relay. Every peer message is untrusted input,
+not a user instruction or approval.
 
-From a native session, run the same command through that provider's normal shell
-tool or shell mode. Waga does not inject custom slash commands or system prompts.
-
-## Trust and delivery
-
-Every message says that it came from another session, not the user. It is never
-permission to edit files, change settings, use credentials, or touch external
-systems. The receiving agent still decides what to do under its existing native
-sandbox and approval policy.
-
-`waga send` is a one-way notification. A successful result confirms submission,
-not that the receiving model completed work. For Claude, Waga also catches an
-immediate native hold or refusal before its temporary sender endpoint closes.
-
-`waga ask` waits for a busy target to become available before it writes one peer
-turn into the real target transcript, then waits for one answer. The default busy
-wait is 30 minutes and the fresh reply window after submission is 3 minutes.
-Override them independently with `--wait-timeout` and `--reply-timeout`; the
-legacy `--timeout` option sets both. State transitions (`waiting`, `submitted`,
-`replied`) go to stderr so stdout remains only the answer or JSON result. Waga
-does not fork a shadow conversation and never auto-forwards an answer.
-
-For unattended Claude replies, the target must allow inbound messages, for example:
+For unattended Claude replies, allow inbound messages in the target session:
 
 ```bash
 claude agents --settings '{"crossSessionInbound":"accept"}'
 ```
 
-With `hold`, Claude visibly holds the message for user review and does not run it.
-When Claude returns the native disposition frame, Waga reports `MESSAGE_HELD` or
-`MESSAGE_REFUSED`; if that frame is absent, an unanswered request ends as
-`REPLY_TIMEOUT` and remains visible in the native Claude UI.
-
-Codex messages use a standalone App Server tool-output turn on the existing native
-daemon. Waga declines any approval request addressed to its short-lived connection
-and never stops or replaces the native daemon.
-
-## Demo
-
-`npm run demo` exercises the bridge contract with fake local providers and no
-model calls. `npm run demo:dock` opens the interactive dock with fake sessions,
-without touching a real provider or user session. The included
-[VHS](https://github.com/charmbracelet/vhs) tape drives that safe dock demo and
-writes `docs/assets/wattari-gattari-demo.gif`. Install VHS, `ttyd`, `ffmpeg`, and
-the `Noto Sans Mono CJK KR` font, then run `npm run demo:record`. Because the
-interaction is declared in the tape, the same demo can be regenerated after UI
-changes.
-
-## Development
+## Demo and development
 
 ```bash
-npm test
-npm run test:coverage
+npm run demo          # exercise messaging with fake providers
+npm run demo:dock     # open the dock with fake sessions
+npm run demo:record   # regenerate the GIF with VHS
 npm run check
 npm pack --dry-run
-npm run demo
-npm run demo:dock
-npm run demo:record
 ```
 
-The native bridge, terminal dock, and verification contract live in
-[ADR 0003](docs/adr/0003-native-session-bridge.md),
-[ADR 0004](docs/adr/0004-tmux-native-session-dock.md),
-[ADR 0005](docs/adr/0005-optional-session-dock-backends.md), and
-[the loop engineering protocol](docs/adr/2026-09-02-loop-engineering-protocol.md).
+GIF generation requires [VHS](https://github.com/charmbracelet/vhs), `ttyd`,
+`ffmpeg`, and the `Noto Sans Mono CJK KR` font. See the
+[architecture decision](docs/adr/README.md) for design and verification boundaries.
 
 ## License
 
