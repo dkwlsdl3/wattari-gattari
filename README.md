@@ -74,9 +74,11 @@ waga doctor
 `waga agents` is an alias for `waga list`. Provider-prefixed IDs are the safest
 targets; an exact unique native ID or session name also works.
 
-In the dock, use `↑`/`↓` to select a session, `Enter` to open its native TUI,
-`/` to search, `Tab` to filter providers, and `q` to return. The default `auto`
-backend uses tmux when available and otherwise falls back to `direct` mode.
+The dock groups sessions into collapsible project trees. Use `↑`/`↓` to move,
+`←`/`→` or `Enter` to collapse and expand a project, and `Enter` on a session to
+open its native TUI. `/` searches, `Tab` cycles all → Claude → Codex, and `q`
+returns. The default `auto` backend uses tmux when available and otherwise falls
+back to `direct` mode.
 
 With tmux, use your prefix followed by `0` to return to the dock; Waga's isolated
 server also provides `Alt+G`. In direct mode, detach the native view with `Ctrl+Z`
@@ -85,6 +87,10 @@ in Claude or `Ctrl+D` in Codex. The provider session keeps running.
 Bare `waga` discovers live sessions across all projects. A cwd filter is applied
 only when `--cwd PATH` is explicit. The tmux backend reuses one global session and
 one window per native session, including when multiple terminal clients attach.
+For Codex, the dock includes loaded top-level sessions plus the 20 most recent
+interactive CLI/VSCode sessions. Historical `exec` and App Server automation
+threads are omitted; a currently loaded automation thread remains visible while
+it is active.
 
 When started outside tmux, Waga uses its own isolated tmux server. When started
 inside tmux, it creates a Waga session in the current server and switches to it;

@@ -6,7 +6,8 @@ import { buildPeerEnvelope } from "../bridge/envelope.mjs";
 import { CodexAppServerClient } from "../codex-app-server.mjs";
 
 const execFileAsync = promisify(execFile);
-const SOURCE_KINDS = ["cli", "vscode", "exec", "appServer"];
+const INTERACTIVE_SOURCE_KINDS = ["cli", "vscode"];
+const RECENT_LIMIT = 20;
 
 async function defaultRun(args) {
   return execFileAsync("codex", args, { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 30_000 });
@@ -31,6 +32,23 @@ function answerIn(items, turnId) {
   return items.find((entry) => entry.turnId === turnId && entry.item?.type === "agentMessage" && entry.item.text)?.item.text ?? null;
 }
 
+function isRootSession(thread) {
+  return !thread.ephemeral && !thread.parentThreadId;
+}
+
+function toSession(thread) {
+  return {
+    id: `codex:${thread.id}`,
+    nativeId: thread.id,
+    sessionId: thread.sessionId ?? thread.id,
+    provider: "codex",
+    name: thread.name ?? thread.preview?.split("\n", 1)[0] ?? thread.id,
+    cwd: thread.cwd,
+    status: publicStatus(thread.status),
+    updatedAt: Number(thread.updatedAt ?? 0) * 1_000,
+  };
+}
+
 export class CodexProvider {
   name = "codex";
   #run;
@@ -45,32 +63,38 @@ export class CodexProvider {
 
   async list({ cwd } = {}) {
     return this.#withClient(async (client) => {
-      const sessions = [];
+      const loaded = [];
       let cursor = null;
       do {
-        const page = await client.request("thread/list", {
-          archived: false,
-          cursor,
-          cwd: cwd ? path.resolve(cwd) : undefined,
-          limit: 100,
-          sortDirection: "desc",
-          sortKey: "updated_at",
-          sourceKinds: SOURCE_KINDS,
-          useStateDbOnly: true,
-        });
-        for (const thread of page.data) sessions.push({
-          id: `codex:${thread.id}`,
-          nativeId: thread.id,
-          sessionId: thread.sessionId ?? thread.id,
-          provider: this.name,
-          name: thread.name ?? thread.preview?.split("\n", 1)[0] ?? thread.id,
-          cwd: thread.cwd,
-          status: publicStatus(thread.status),
-          updatedAt: Number(thread.updatedAt ?? 0) * 1_000,
-        });
+        const page = await client.request("thread/loaded/list", { cursor, limit: 100 });
+        loaded.push(...page.data);
         cursor = page.nextCursor;
       } while (cursor);
-      return sessions;
+
+      const recent = await client.request("thread/list", {
+        archived: false,
+        cwd: cwd ? path.resolve(cwd) : undefined,
+        limit: RECENT_LIMIT,
+        parentThreadId: null,
+        sortDirection: "desc",
+        sortKey: "updated_at",
+        sourceKinds: INTERACTIVE_SOURCE_KINDS,
+        useStateDbOnly: true,
+      });
+
+      const requestedCwd = cwd ? path.resolve(cwd) : null;
+      const roots = [
+        ...loaded.filter((thread) => !requestedCwd || (thread.cwd && path.resolve(thread.cwd) === requestedCwd)),
+        ...recent.data.filter((thread) => INTERACTIVE_SOURCE_KINDS.includes(thread.source)),
+      ].filter(isRootSession);
+      const seen = new Set();
+      return roots
+        .filter((thread) => {
+          if (seen.has(thread.id)) return false;
+          seen.add(thread.id);
+          return true;
+        })
+        .map(toSession);
     });
   }
 

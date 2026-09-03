@@ -21,6 +21,9 @@ Waga는 provider가 소유한 실제 세션 사이의 얇은 메시지 브리지
   사용합니다. 송신 중에만 임시 peer endpoint를 등록하고 반드시 정리합니다.
 - `CodexProvider`는 설치된 Codex의 기존 native App Server daemon에 직접 WebSocket으로
   연결합니다. 별도 App Server를 띄우거나 native daemon을 교체하지 않습니다.
+- Codex 발견 목록은 현재 로드된 최상위 세션과 최근 대화형 CLI/VSCode 세션 20개를
+  합칩니다. 과거 `exec`·App Server 자동화 기록은 제외하되 현재 로드된 항목은 실행
+  가시성을 위해 유지합니다.
 - `NativeLauncher`는 provider의 Agents 화면과 정확한 native session attach 명령만
   위임합니다.
 - bare `waga`의 작은 session dock은 ADR 0004와 ADR 0005가 정의합니다. transcript와 입력기는

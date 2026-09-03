@@ -22,16 +22,48 @@ test("daemon version parser rejects protocol drift", () => {
   assert.throws(() => parseDaemonVersion("no"), { code: "CODEX_DAEMON_INVALID" });
 });
 
-test("Codex provider lists only native top-level source kinds", async () => {
+test("Codex provider combines loaded sessions with recent interactive roots", async () => {
   const { provider, calls } = harness((method) => {
-    if (method === "thread/list") return { data: [{ id: "thread-1", cwd: "/work", name: "proof", status: { type: "idle" }, updatedAt: 5 }], nextCursor: null };
+    if (method === "thread/loaded/list") return {
+      data: [
+        { id: "agent-task", cwd: "/work", name: "active agent", source: "appServer", status: { type: "active" }, updatedAt: 6 },
+        { id: "child", cwd: "/work", name: "child", source: "appServer", parentThreadId: "agent-task", status: { type: "idle" }, updatedAt: 5 },
+      ],
+      nextCursor: null,
+    };
+    if (method === "thread/list") return {
+      data: [
+        { id: "thread-1", cwd: "/work", name: "proof", source: "cli", status: { type: "idle" }, updatedAt: 5 },
+        { id: "mcp-proof", cwd: "/work", name: "MCP validation", source: "appServer", status: { type: "idle" }, updatedAt: 4 },
+        { id: "exec-proof", cwd: "/work", name: "exec validation", source: "exec", status: { type: "idle" }, updatedAt: 3 },
+      ],
+      nextCursor: null,
+    };
     throw new Error(method);
   });
   const rows = await provider.list({ cwd: "/work" });
-  assert.equal(rows[0].id, "codex:thread-1");
+  assert.deepEqual(rows.map(({ id }) => id), ["codex:agent-task", "codex:thread-1"]);
+  assert.equal(rows[0].status, "working");
   const params = calls.find(([method]) => method === "thread/list")[1];
-  assert.deepEqual(params.sourceKinds, ["cli", "vscode", "exec", "appServer"]);
+  assert.deepEqual(params.sourceKinds, ["cli", "vscode"]);
+  assert.equal(params.limit, 20);
+  assert.equal(params.parentThreadId, null);
   assert.equal(params.cwd, "/work");
+});
+
+test("Codex provider de-duplicates loaded interactive sessions and drops ephemeral roots", async () => {
+  const shared = { id: "shared", cwd: "/work", name: "shared", source: "cli", status: { type: "active" }, updatedAt: 7 };
+  const { provider } = harness((method) => {
+    if (method === "thread/loaded/list") return {
+      data: [shared, { id: "ephemeral", cwd: "/work", source: "appServer", ephemeral: true, status: { type: "idle" }, updatedAt: 8 }],
+      nextCursor: null,
+    };
+    if (method === "thread/list") return { data: [{ ...shared, status: { type: "idle" } }], nextCursor: null };
+    throw new Error(method);
+  });
+  const rows = await provider.list();
+  assert.deepEqual(rows.map(({ id }) => id), ["codex:shared"]);
+  assert.equal(rows[0].status, "working");
 });
 
 test("Codex send uses standalone tool output, not a user message", async () => {

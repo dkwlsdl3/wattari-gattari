@@ -2,13 +2,43 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 
-import { buildOverviewFrame, runOverview, selectOverviewSessions } from "../src/overview.mjs";
+import { buildOverviewFrame, buildOverviewTree, runOverview, selectOverviewSessions } from "../src/overview.mjs";
 
 const sessions = [
   { id: "codex:1", provider: "codex", status: "idle", name: "API 검토", cwd: "/work/api", updatedAt: 20 },
   { id: "claude:2", provider: "claude", status: "working", name: "UI 구현", cwd: "/work/ui", updatedAt: 10 },
   { id: "codex:3", provider: "codex", status: "needs-input", name: "배포 확인", cwd: "/work/ops", updatedAt: 5 },
 ];
+
+function ttyInput() {
+  return Object.assign(new EventEmitter(), {
+    isTTY: true,
+    setRawMode() {},
+    resume() {},
+    pause() {},
+  });
+}
+
+function capturedOutput() {
+  const writes = [];
+  return Object.assign(new EventEmitter(), {
+    isTTY: true,
+    columns: 100,
+    rows: 20,
+    writes,
+    write(chunk) { writes.push(String(chunk)); },
+  });
+}
+
+function plain(value) {
+  return String(value).replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "");
+}
+
+function selectedSessionName(output) {
+  const frame = plain(output.writes.at(-1));
+  return frame.split("\n").find((line) => line.includes("›") && /CODEX|CLAUDE/.test(line))
+    ?.match(/(?:CODEX|CLAUDE)\s+([^\s]+)/)?.[1] ?? null;
+}
 
 test("overview prioritizes attention and working sessions before idle history", () => {
   assert.deepEqual(selectOverviewSessions(sessions).map((session) => session.id), ["codex:3", "claude:2", "codex:1"]);
@@ -17,6 +47,37 @@ test("overview prioritizes attention and working sessions before idle history", 
 test("overview filtering is provider agnostic and searches names and paths", () => {
   assert.deepEqual(selectOverviewSessions(sessions, { query: "ui" }).map((session) => session.id), ["claude:2"]);
   assert.deepEqual(selectOverviewSessions(sessions, { query: "API 검토" }).map((session) => session.id), ["codex:1"]);
+});
+
+test("overview groups sessions into collapsible workspace trees", () => {
+  const grouped = [
+    { ...sessions[0], cwd: "/work/shared" },
+    { ...sessions[1], cwd: "/work/shared" },
+    { ...sessions[2], cwd: "/work/other" },
+  ];
+  const expanded = buildOverviewTree(grouped);
+  assert.deepEqual(expanded.map(({ type, key }) => [type, key]), [
+    ["workspace", "workspace:/work/shared"],
+    ["session", "claude:2"],
+    ["session", "codex:1"],
+    ["workspace", "workspace:/work/other"],
+    ["session", "codex:3"],
+  ]);
+  const collapsed = buildOverviewTree(grouped, { collapsed: new Set(["/work/shared"]) });
+  assert.deepEqual(collapsed.map(({ type, key }) => [type, key]), [
+    ["workspace", "workspace:/work/shared"],
+    ["workspace", "workspace:/work/other"],
+    ["session", "codex:3"],
+  ]);
+});
+
+test("overview frame renders each workspace once with a tree toggle", () => {
+  const grouped = sessions.slice(0, 2).map((session) => ({ ...session, cwd: "/work/shared" }));
+  const frame = plain(buildOverviewFrame({ sessions: grouped, selected: 0, width: 100, height: 20, query: "", warnings: [] }));
+  assert.equal(frame.match(/\/work\/shared/g)?.length, 1);
+  assert.match(frame, /▾\s+shared/);
+  assert.match(frame, /\s+CODEX\s+API 검토/);
+  assert.match(frame, /\s+CLAUDE\s+UI 구현/);
 });
 
 test("overview frame distinguishes providers and keeps navigation help visible", () => {
@@ -34,6 +95,32 @@ test("overview frame switches to a compact layout when the terminal narrows", ()
   assert.match(frame, /CLAUDE/);
   assert.match(frame, /검색/);
   assert.doesNotMatch(frame, /\/work\/ui/);
+});
+
+test("Enter collapses and expands a workspace without opening a native session", async () => {
+  const input = ttyInput();
+  const output = capturedOutput();
+  let nativeOpens = 0;
+  const bridge = {
+    async discover() { return { sessions: [sessions[0]], warnings: [] }; },
+  };
+  const workspace = {
+    async focusOrOpen() { nativeOpens += 1; },
+    async leave() { return { closeOverview: true }; },
+  };
+  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  input.emit("keypress", "", { name: "return" });
+  assert.match(plain(output.writes.at(-1)), /›\s+▸\s+api/);
+  assert.doesNotMatch(plain(output.writes.at(-1)), /CODEX/);
+  input.emit("keypress", "", { name: "return" });
+  assert.match(plain(output.writes.at(-1)), /›\s+▾\s+api/);
+  assert.match(plain(output.writes.at(-1)), /CODEX/);
+  assert.equal(nativeOpens, 0);
+
+  input.emit("keypress", "q", { name: "q", sequence: "q" });
+  assert.equal(await running, 0);
 });
 
 test("overview discovery is global unless a cwd filter is explicit", async () => {
@@ -98,6 +185,7 @@ test("overview pauses discovery while a direct native TUI owns the terminal", as
     listenForSignals: false,
   });
   await new Promise((resolve) => setImmediate(resolve));
+  input.emit("keypress", "", { name: "down" });
   input.emit("keypress", "", { name: "return" });
   const discoveriesWhenOpened = discoveries;
   await new Promise((resolve) => setTimeout(resolve, 20));
@@ -108,4 +196,104 @@ test("overview pauses discovery while a direct native TUI owns the terminal", as
   input.emit("keypress", "q", { name: "q", sequence: "q" });
   assert.equal(await running, 0);
   assert.equal(discoveriesWhileBusy, discoveriesWhenOpened);
+});
+
+test("overview keeps newer keyboard selection when an older refresh completes", async () => {
+  const stable = [
+    { id: "codex:a", provider: "codex", status: "idle", name: "A", cwd: "/work/p", updatedAt: 3 },
+    { id: "codex:b", provider: "codex", status: "idle", name: "B", cwd: "/work/p", updatedAt: 2 },
+    { id: "codex:c", provider: "codex", status: "idle", name: "C", cwd: "/work/p", updatedAt: 1 },
+  ];
+  const input = ttyInput();
+  const output = capturedOutput();
+  let calls = 0;
+  let releaseRefresh;
+  let markRefreshStarted;
+  const refreshStarted = new Promise((resolve) => { markRefreshStarted = resolve; });
+  const bridge = {
+    async discover() {
+      calls += 1;
+      if (calls === 1) return { sessions: stable, warnings: [] };
+      if (calls === 2) {
+        markRefreshStarted();
+        return await new Promise((resolve) => { releaseRefresh = resolve; });
+      }
+      return { sessions: stable, warnings: [] };
+    },
+  };
+  const workspace = {
+    async focusOrOpen() {},
+    async leave() { return { closeOverview: true }; },
+  };
+
+  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 5, listenForSignals: false });
+  await refreshStarted;
+  input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", "", { name: "down" });
+  assert.equal(selectedSessionName(output), "C");
+
+  releaseRefresh({ sessions: stable, warnings: [] });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(selectedSessionName(output), "C");
+
+  input.emit("keypress", "q", { name: "q", sequence: "q" });
+  assert.equal(await running, 0);
+});
+
+test("overview navigation stops at tree boundaries instead of wrapping", async () => {
+  const stable = [
+    { id: "codex:a", provider: "codex", status: "idle", name: "A", cwd: "/work/p", updatedAt: 2 },
+    { id: "codex:b", provider: "codex", status: "idle", name: "B", cwd: "/work/p", updatedAt: 1 },
+  ];
+  const input = ttyInput();
+  const output = capturedOutput();
+  const bridge = {
+    async discover() { return { sessions: stable, warnings: [] }; },
+  };
+  const workspace = {
+    async focusOrOpen() {},
+    async leave() { return { closeOverview: true }; },
+  };
+  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  input.emit("keypress", "", { name: "up" });
+  assert.match(plain(output.writes.at(-1)), /›\s+▾\s+p/);
+  input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", "", { name: "down" });
+  assert.equal(selectedSessionName(output), "B");
+
+  input.emit("keypress", "q", { name: "q", sequence: "q" });
+  assert.equal(await running, 0);
+});
+
+test("provider tabs clear stale rows and select the first matching session", async () => {
+  const input = ttyInput();
+  const output = capturedOutput();
+  const bridge = {
+    async discover() { return { sessions, warnings: [] }; },
+  };
+  const workspace = {
+    async focusOrOpen() {},
+    async leave() { return { closeOverview: true }; },
+  };
+  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  input.emit("keypress", "", { name: "tab" });
+  const claudeFrame = output.writes.at(-1);
+  assert.match(claudeFrame, /^\x1b\[H\x1b\[J/);
+  assert.doesNotMatch(plain(claudeFrame), /CODEX/);
+  assert.equal(selectedSessionName(output), "UI");
+
+  input.emit("keypress", "", { name: "tab" });
+  const codexFrame = output.writes.at(-1);
+  assert.match(codexFrame, /^\x1b\[H\x1b\[J/);
+  assert.doesNotMatch(plain(codexFrame), /CLAUDE/);
+  assert.equal(selectedSessionName(output), "배포");
+
+  input.emit("keypress", "q", { name: "q", sequence: "q" });
+  assert.equal(await running, 0);
 });

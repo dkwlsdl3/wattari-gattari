@@ -23,8 +23,8 @@ tmux 안에서 다시 별도 tmux client를 attach하면 prefix, detach, mouse �
 - 대화형 terminal에서 bare `waga`는 모든 workspace의 세션을 모은 전역 통합 dock을
   엽니다. `waga --cwd PATH`를 명시한 경우에만 해당 workspace로 제한합니다. 비대화형
   호출과 `waga list`는 기존 text 출력을 유지합니다.
-- Waga overview는 세션 이름, provider, 상태, 검색과 선택만 그립니다. transcript, 입력,
-  승인, token 표시, slash command는 그리지 않습니다.
+- Waga overview는 workspace별 접이식 트리에 세션 이름, provider, 상태, 검색과 선택만
+  그립니다. transcript, 입력, 승인, token 표시, slash command는 그리지 않습니다.
 - 선택한 Claude 세션은 `claude attach <native-id>`, Codex 세션은 기존 native daemon의
   socket을 지정한 `codex resume <native-id> --remote …`로 엽니다.
 - 각 네이티브 TUI는 tmux window 하나를 사용하며 session ID를 window option에 기록합니다.
