@@ -67,7 +67,7 @@ waga open codex --cwd ~/work/my-app
 | `←` / `→` / `Enter` | Collapse or expand a project |
 | `Enter` on a session | Open its native TUI |
 | `/` / `Tab` | Search / filter providers |
-| `Ctrl+N` / `Ctrl+R` | New session / refresh |
+| `Alt+N` / `Alt+R` | New session / refresh |
 | `Alt+X` twice | Archive a session |
 | `Alt+Q` | Exit Waga |
 

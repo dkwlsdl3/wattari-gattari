@@ -10,6 +10,7 @@ const DEFAULT_SOCKET = `waga-${typeof process.getuid === "function" ? process.ge
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
 const SOURCE_DIR = fileURLToPath(new URL(".", import.meta.url));
 const CURRENT_WINDOW_FORMAT = "#[bold,fg=#0f172a,bg=#38bdf8] #{?#{==:#{window_name},overview},OVERVIEW,#{window_name}} ";
+const EXIT_COMMAND = "printf '%s\\n' 'Waga frontend를 종료했습니다. Claude/Codex 세션과 로그는 유지됩니다.'";
 export const GLOBAL_DOCK_SESSION = "waga-global";
 
 function sourceFiles(directory, root = directory) {
@@ -239,9 +240,9 @@ export class TmuxWorkspace {
     const sessionName = await this.#currentSessionName();
     if (this.#env.WAGA_TMUX_MODE === "existing") {
       const switched = await this.#call(["switch-client", "-l"], { check: false });
-      if (switched.code !== 0) await this.#call(["detach-client"], { check: false });
+      if (switched.code !== 0) await this.#call(["detach-client", "-E", EXIT_COMMAND], { check: false });
     } else {
-      await this.#call(["detach-client"], { check: false });
+      await this.#call(["detach-client", "-E", EXIT_COMMAND], { check: false });
     }
     await this.#call(["kill-session", "-t", sessionName]);
     return { closeOverview: true };

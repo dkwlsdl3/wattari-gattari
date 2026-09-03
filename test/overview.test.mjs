@@ -65,6 +65,10 @@ function selectedSessionName(output) {
     ?.match(/(?:CODEX|CLAUDE)\s+([^\s]+)/)?.[1] ?? null;
 }
 
+function pressAlt(input, name) {
+  input.emit("keypress", "", { name, meta: true });
+}
+
 test("overview preserves supplied session order instead of sorting by status", () => {
   assert.deepEqual(selectOverviewSessions(sessions).map((session) => session.id), ["codex:1", "claude:2", "codex:3"]);
 });
@@ -150,8 +154,8 @@ test("overview frame distinguishes providers and keeps navigation help visible",
   assert.match(frame, /CODEX/);
   assert.match(frame, /CLAUDE/);
   assert.match(frame, /Enter 열기/);
-  assert.match(frame, /Ctrl\+N 새 세션/);
-  assert.match(frame, /Ctrl\+R 갱신/);
+  assert.match(frame, /Alt\+N 새 세션/);
+  assert.match(frame, /Alt\+R 갱신/);
   assert.match(frame, /Alt\+Q 나가기/);
   assert.match(frame, /Shift\+↑↓ 순서/);
   assert.match(frame, /tmux prefix \+ 0/);
@@ -195,12 +199,12 @@ test("Shift+Up and Shift+Down persist manual order across refreshes", async (t) 
   assert.equal(selectedSessionName(output), "First");
   assert.deepEqual(saves, [["/work/p", ["codex:second", "codex:first"]]]);
 
-  input.emit("keypress", "\u0012", { name: "r", sequence: "\u0012", ctrl: true });
+  pressAlt(input, "r");
   await waitFor(() => discoveries === 2);
   frame = plain(output.writes.at(-1));
   assert.ok(frame.indexOf("Second") < frame.indexOf("First"));
 
-  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  pressAlt(input, "q");
   assert.equal(await running, 0);
 });
 
@@ -212,9 +216,9 @@ test("overview frame switches to a compact layout when the terminal narrows", ()
   assert.doesNotMatch(frame, /\/work\/ui/);
 });
 
-test("empty overview points to the control-key refresh command", () => {
+test("empty overview points to the Alt refresh command", () => {
   const frame = plain(buildOverviewFrame({ sessions: [], width: 100, height: 20 }));
-  assert.match(frame, /Ctrl\+R을 눌러 새로고침하세요/);
+  assert.match(frame, /Alt\+R을 눌러 새로고침하세요/);
   assert.doesNotMatch(frame, /(^|\s)r을 눌러/);
 });
 
@@ -230,7 +234,7 @@ test("Escape cancels the composer without the readline default delay", async () 
   try {
     await new Promise((resolve) => setImmediate(resolve));
     assert.match(plain(output.writes.at(-1)), /current/);
-    input.write("\u000e");
+    input.write("\u001bn");
     await waitFor(() => /새 세션 ·/.test(plain(output.writes.at(-1))));
     const started = performance.now();
     input.write("\u001b");
@@ -296,7 +300,7 @@ test("Alt+X twice archives the selected session and closes its retained view", a
   assert.deepEqual(closedViews, ["codex:archive-me"]);
   await waitFor(() => /0 need input\s+0 working\s+0 ready/.test(plain(output.writes.at(-1))));
 
-  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  pressAlt(input, "q");
   assert.equal(await running, 0);
 });
 
@@ -325,7 +329,7 @@ test("failed Alt+X archive keeps the session and its retained view", async (t) =
   assert.equal(closeCalls, 0);
   assert.match(plain(output.writes.at(-1)), /Keep me/);
 
-  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  pressAlt(input, "q");
   assert.equal(await running, 0);
 });
 
@@ -351,7 +355,7 @@ test("Enter collapses and expands a workspace without opening a native session",
   assert.match(plain(output.writes.at(-1)), /CODEX/);
   assert.equal(nativeOpens, 0);
 
-  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  pressAlt(input, "q");
   assert.equal(await running, 0);
 });
 
@@ -426,7 +430,7 @@ test("overview pauses discovery while a direct native TUI owns the terminal", as
 
   releaseNative({ code: 0 });
   await new Promise((resolve) => setImmediate(resolve));
-  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  pressAlt(input, "q");
   assert.equal(await running, 0);
   assert.equal(discoveriesWhileBusy, discoveriesWhenOpened);
 });
@@ -456,7 +460,7 @@ test("overview stops provider polling while its tmux window is hidden", async ()
 
   visible = true;
   await waitFor(() => discoveries >= 2);
-  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  pressAlt(input, "q");
   assert.equal(await running, 0);
 });
 
@@ -483,7 +487,7 @@ test("overview reconciles retained tmux views with healthy provider results", as
   const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
   await waitFor(() => reconciled.length === 1);
   assert.deepEqual(reconciled[0], [[sessions[0]], { availableProviders: ["claude", "codex"] }]);
-  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  pressAlt(input, "q");
   assert.equal(await running, 0);
 });
 
@@ -526,7 +530,7 @@ test("overview keeps newer keyboard selection when an older refresh completes", 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(selectedSessionName(output), "C");
 
-  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  pressAlt(input, "q");
   assert.equal(await running, 0);
 });
 
@@ -554,7 +558,7 @@ test("overview navigation stops at tree boundaries instead of wrapping", async (
   input.emit("keypress", "", { name: "down" });
   assert.equal(selectedSessionName(output), "B");
 
-  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  pressAlt(input, "q");
   assert.equal(await running, 0);
 });
 
@@ -583,11 +587,11 @@ test("provider tabs clear stale rows and select the first matching session", asy
   assert.doesNotMatch(plain(codexFrame), /CLAUDE/);
   assert.equal(selectedSessionName(output), "API");
 
-  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  pressAlt(input, "q");
   assert.equal(await running, 0);
 });
 
-test("overview uses IME-independent control shortcuts for commands", async (t) => {
+test("overview uses Alt shortcuts consistently for commands", async (t) => {
   const stable = [
     { id: "codex:a", provider: "codex", status: "idle", name: "A", cwd: "/work/p", updatedAt: 2 },
     { id: "codex:b", provider: "codex", status: "idle", name: "B", cwd: "/work/p", updatedAt: 1 },
@@ -626,9 +630,17 @@ test("overview uses IME-independent control shortcuts for commands", async (t) =
   assert.equal(leaves, 0);
 
   input.emit("keypress", "\u0012", { name: "r", sequence: "\u0012", ctrl: true });
+  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  input.emit("keypress", "\u000e", { name: "n", sequence: "\u000e", ctrl: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(discoveries, discoveriesBeforeRefresh);
+  assert.equal(leaves, 0);
+  assert.doesNotMatch(plain(output.writes.at(-1)), /새 세션 ·/);
+
+  pressAlt(input, "r");
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(discoveries, discoveriesBeforeRefresh + 1);
-  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  pressAlt(input, "q");
   assert.equal(await running, 0);
   assert.equal(leaves, 1);
 });
@@ -660,7 +672,7 @@ test("overview creates a provider-owned session from its one-line composer", asy
 
   input.emit("keypress", "n", { name: "n", sequence: "n" });
   assert.doesNotMatch(plain(output.writes.at(-1)), /새 세션 ·/);
-  input.emit("keypress", "\u000e", { name: "n", sequence: "\u000e", ctrl: true });
+  pressAlt(input, "n");
   assert.match(plain(output.writes.at(-1)), /새 세션 · CLAUDE · \/work\/new/);
   input.emit("keypress", "", { name: "tab" });
   assert.match(plain(output.writes.at(-1)), /새 세션 · CODEX · \/work\/new/);
@@ -674,7 +686,7 @@ test("overview creates a provider-owned session from its one-line composer", asy
 
   assert.deepEqual(created, { provider: "codex", prompt: "작새업", options: { cwd: "/work/new" } });
   assert.equal(selectedSessionName(output), "작새업");
-  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  pressAlt(input, "q");
   assert.equal(await running, 0);
 });
 
@@ -697,7 +709,7 @@ test("new-session composer keeps a failed prompt editable and Escape cancels it"
   const running = runOverview({ bridge, workspace, defaultCwd: "/work/new", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
   await new Promise((resolve) => setImmediate(resolve));
 
-  input.emit("keypress", "\u000e", { name: "n", sequence: "\u000e", ctrl: true });
+  pressAlt(input, "n");
   input.emit("keypress", "", { name: "return" });
   assert.match(plain(output.writes.at(-1)), /프롬프트를 입력하세요/);
   assert.equal(creates, 0);
@@ -711,6 +723,6 @@ test("new-session composer keeps a failed prompt editable and Escape cancels it"
 
   input.emit("keypress", "", { name: "escape" });
   assert.doesNotMatch(plain(output.writes.at(-1)), /새 세션 ·|provider unavailable|실패해도 유지/);
-  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  pressAlt(input, "q");
   assert.equal(await running, 0);
 });

@@ -23,7 +23,7 @@ Wait+Screen /transcript는 보존합니다/
 Sleep 2s
 Alt+X
 Sleep 2s
-Ctrl+N
+Alt+N
 Type "Document archive flow"
 Tab
 Sleep 1s

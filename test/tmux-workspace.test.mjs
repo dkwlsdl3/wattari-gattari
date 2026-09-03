@@ -256,5 +256,8 @@ test("leave switches or detaches clients and then destroys the Waga frontend ses
   const isolatedCalls = [];
   const isolated = new TmuxWorkspace({ run: async (args) => { isolatedCalls.push(args); return { stdout: "", stderr: "", code: 0 }; }, env: { TMUX: "yes", WAGA_TMUX_MODE: "isolated", WAGA_TMUX_SESSION: "waga-project-deadbeef" } });
   assert.deepEqual(await isolated.leave(), { closeOverview: true });
-  assert.deepEqual(isolatedCalls, [["detach-client"], ["kill-session", "-t", "waga-project-deadbeef"]]);
+  assert.deepEqual(isolatedCalls.map((args) => args.slice(0, 2)), [["detach-client", "-E"], ["kill-session", "-t"]]);
+  assert.match(isolatedCalls[0][2], /Waga frontend를 종료했습니다/);
+  assert.match(isolatedCalls[0][2], /세션과 로그는 유지됩니다/);
+  assert.equal(isolatedCalls[1][2], "waga-project-deadbeef");
 });

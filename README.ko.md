@@ -67,7 +67,7 @@ waga open codex --cwd ~/work/my-app
 | `←` / `→` / `Enter` | 프로젝트 접기·펼치기 |
 | 세션에서 `Enter` | 네이티브 TUI 열기 |
 | `/` / `Tab` | 검색 / provider 필터 |
-| `Ctrl+N` / `Ctrl+R` | 새 세션 / 새로고침 |
+| `Alt+N` / `Alt+R` | 새 세션 / 새로고침 |
 | `Alt+X` 두 번 | 세션 보관 |
 | `Alt+Q` | Waga 종료 |
 

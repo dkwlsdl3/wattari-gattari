@@ -195,7 +195,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
   lines.push(`  ${color(THEME.muted, fit(`${counts(sessions)}${provider ? `   filter: ${provider}` : ""}`, usableWidth))}`);
   lines.push(`  ${color(THEME.divider, "─".repeat(Math.max(1, usableWidth)))}`);
 
-  if (!sessions.length) lines.push(`  ${color(THEME.muted, query ? "검색 결과가 없습니다." : "발견된 세션이 없습니다. Ctrl+R을 눌러 새로고침하세요.")}`);
+  if (!sessions.length) lines.push(`  ${color(THEME.muted, query ? "검색 결과가 없습니다." : "발견된 세션이 없습니다. Alt+R을 눌러 새로고침하세요.")}`);
   for (let index = offset; index < Math.min(nodes.length, offset + visibleRows); index += 1) {
     const node = nodes[index];
     const active = index === safeSelected;
@@ -217,8 +217,8 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
   }
   const helpLines = wide
-    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  / 검색  Tab 필터", "Ctrl+N 새 세션  Ctrl+R 갱신  Alt+X 보관  Alt+Q 나가기"]
-    : ["Shift+↑↓ 순서  Ctrl+N 새 세션  Alt+X 보관  Alt+Q 나가기"];
+    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  / 검색  Tab 필터", "Alt+N 새 세션  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기"]
+    : ["Shift+↑↓ 순서  Alt+N 새 세션  Alt+X 보관  Alt+Q 나가기"];
   while (lines.length < height - helpLines.length - 4) lines.push("");
   if (newTask) {
     const providerName = newTask.provider === "claude" ? "CLAUDE" : "CODEX";
@@ -423,7 +423,7 @@ export async function runOverview({
 
   const onKeypress = (text, key = {}) => {
     if (busy || closed) return;
-    if ((key.ctrl && (key.name === "q" || key.name === "c")) || (key.meta && key.name === "q")) {
+    if ((key.ctrl && key.name === "c") || (key.meta && key.name === "q")) {
       leave();
       return;
     }
@@ -498,7 +498,7 @@ export async function runOverview({
       selectFirstSession();
     }
     else if (key.sequence === "/") searching = true;
-    else if (key.ctrl && key.name === "n") {
+    else if (key.meta && key.name === "n") {
       const node = nodes[selected];
       newTask = {
         provider: node?.type === "session" ? node.session.provider : provider ?? "claude",
@@ -509,7 +509,7 @@ export async function runOverview({
         submitting: false,
       };
     }
-    else if (key.ctrl && key.name === "r") { notice = "새로고침 중입니다."; render(); void refresh({ force: true }); return; }
+    else if (key.meta && key.name === "r") { notice = "새로고침 중입니다."; render(); void refresh({ force: true }); return; }
     else if (key.name === "left" && nodes[selected]?.type === "workspace") collapsed.add(nodes[selected].cwd);
     else if (key.name === "left" && nodes[selected]?.type === "session") {
       const parentIndex = nodes.findIndex((node) => node.key === nodes[selected].workspaceKey);
