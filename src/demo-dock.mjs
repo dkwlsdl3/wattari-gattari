@@ -3,7 +3,7 @@ import { runOverview } from "./overview.mjs";
 let sessions = [
   { id: "claude:demo-api", nativeId: "demo-api", provider: "claude", status: "idle", name: "API contract", cwd: "/demo/wattari-gattari", updatedAt: 3 },
   { id: "codex:demo-dock", nativeId: "demo-dock", provider: "codex", status: "working", name: "Dock polish", cwd: "/demo/wattari-gattari", updatedAt: 2 },
-  { id: "codex:demo-tests", nativeId: "demo-tests", provider: "codex", status: "needs-input", name: "Regression tests", cwd: "/demo/keeper", updatedAt: 1 },
+  { id: "codex:demo-tests", nativeId: "demo-tests", provider: "codex", status: "needs-input", name: "Regression tests", cwd: "/demo/sample-app", updatedAt: 1 },
 ];
 
 const bridge = {

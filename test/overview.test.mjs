@@ -117,7 +117,7 @@ test("overview tree includes the launch workspace even when it has no sessions",
 });
 
 test("overview groups provider worktrees by their owning project", () => {
-  const project = "/work/keeper";
+  const project = "/work/sample-app";
   const grouped = [
     { ...sessions[0], cwd: project, projectCwd: project },
     { ...sessions[1], cwd: `${project}/.claude/worktrees/issue-1`, projectCwd: project },
