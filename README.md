@@ -104,8 +104,11 @@ under their parent project while preserving each session's real working director
 
 When started outside tmux, Waga uses its own isolated tmux server. When started
 inside tmux, it creates a Waga session in the current server and switches to it;
-it does not nest tmux. Waga does not force mouse mode, so the current tmux and
-terminal selection policy remains in control. It does not depend on WezTerm.
+it does not nest tmux. In native TUIs, the wheel is forwarded when the provider
+handles mouse input and otherwise scrolls through tmux history. Mouse mode is
+scoped to the Waga session and does not change another session or the user's
+global tmux configuration. Hold `Shift` for the terminal's native text selection.
+It does not depend on WezTerm.
 Direct mode does not share or preserve terminal views; it simply lends the current
 terminal to the native TUI and restores the overview after detach or exit.
 

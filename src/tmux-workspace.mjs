@@ -215,6 +215,7 @@ export class TmuxWorkspace {
       ["status-right-length", "24"],
       ["base-index", "0"],
       ["renumber-windows", "on"],
+      ["mouse", "on"],
     ];
     for (const [name, value] of options) await this.#call([...prefix, "set-option", "-t", sessionName, name, value]);
     await this.#call([...prefix, "move-window", "-r", "-t", sessionName]);

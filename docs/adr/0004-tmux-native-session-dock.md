@@ -53,8 +53,11 @@ tmux 안에서 다시 별도 tmux client를 attach하면 prefix, detach, mouse �
   tmux session 단위로 공유되는 제약을 받아들입니다.
 - 네이티브 TUI에서는 사용자의 tmux prefix 뒤 `0`으로 overview에 돌아옵니다. 격리
   server에서만 `Alt+G`도 같은 동작으로 제공합니다.
-- Waga는 mouse mode를 강제하지 않습니다. 기존 tmux의 mouse 정책과 terminal emulator의
-  드래그 선택을 존중합니다.
+- Waga tmux session에는 `mouse on`을 적용합니다. 자체 mouse tracking을 켠 provider
+  TUI에는 휠 이벤트를 전달하고, 그렇지 않은 TUI에서는 tmux copy-mode로 scrollback을
+  제공합니다. 이 옵션은 Waga session에만 적용하며 같은 server의 다른 tmux session이나
+  사용자 전역 설정은 바꾸지 않습니다. terminal의 원래 드래그 선택은 `Shift`를 누른 채
+  사용합니다.
 - overview와 네이티브 window는 detach 뒤에도 남습니다. 이는 provider 세션을 소유하기
   위해서가 아니라 terminal view를 재사용하기 위한 수명입니다.
 - 새 `waga` 진입 프로세스는 설치된 `src/**/*.mjs` 내용 지문과 launch cwd를 overview

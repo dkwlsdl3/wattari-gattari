@@ -35,7 +35,11 @@ test("enter uses switch-client instead of nesting when already inside tmux", asy
   assert.doesNotMatch(created.at(-1), /--cwd/);
   assert.ok(calls.some((args) => args[0] === "switch-client"));
   assert.ok(!calls.flat().includes("attach-session"));
-  assert.ok(!calls.some((args) => args.includes("mouse")), "Waga must preserve the user's tmux mouse and terminal selection behavior");
+  assert.deepEqual(
+    calls.filter((args) => args.includes("mouse")),
+    [["set-option", "-t", GLOBAL_DOCK_SESSION, "mouse", "on"]],
+    "Waga must enable tmux mouse handling only for its own session",
+  );
   assert.ok(calls.some((args) => args.includes("status-right") && args.some((value) => value.includes("prefix+0"))));
   assert.ok(calls.some((args) => args.includes("status-style") && args.includes("bg=#0f172a,fg=#e2e8f0")));
 });

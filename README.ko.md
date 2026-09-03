@@ -102,9 +102,11 @@ Claude가 만든 worktree는 각 세션의 실제 작업 디렉터리를 유지�
 트리 아래에 묶습니다.
 
 tmux 밖에서 시작하면 Waga 전용 격리 server를 사용합니다. 이미 tmux 안이라면 현재
-server에 Waga session을 만들고 전환하므로 tmux 안에 tmux를 중첩하지 않습니다. Waga는
-mouse mode를 강제하지 않아 기존 tmux와 terminal의 드래그 선택 정책을 존중합니다.
-WezTerm 전용 구현도 아닙니다.
+server에 Waga session을 만들고 전환하므로 tmux 안에 tmux를 중첩하지 않습니다. 네이티브
+TUI에서 휠은 provider가 mouse를 처리하면 그대로 전달하고, 그렇지 않으면 tmux
+scrollback으로 동작합니다. mouse mode는 Waga session에만 적용하며 같은 server의 다른
+session이나 사용자 전역 설정은 바꾸지 않습니다. terminal의 원래 드래그 선택은
+`Shift`를 누른 채 사용할 수 있습니다. WezTerm 전용 구현도 아닙니다.
 direct mode는 terminal view를 공유하거나 보존하지 않습니다. 현재 terminal을 네이티브
 TUI에 넘긴 뒤 detach 또는 종료되면 overview를 복원하는 역할만 합니다.
 
