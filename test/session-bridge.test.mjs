@@ -20,6 +20,7 @@ test("discovery keeps healthy provider results and exposes warnings", async () =
   const result = await new SessionBridge({ providers: [claude, codex] }).discover();
   assert.deepEqual(result.sessions.map((row) => row.id), ["claude:1"]);
   assert.deepEqual(result.warnings, [{ provider: "codex", code: "DOWN", message: "offline" }]);
+  assert.deepEqual(result.availableProviders, ["claude"]);
 });
 
 test("provider-prefixed target limits discovery and ask is one request", async () => {

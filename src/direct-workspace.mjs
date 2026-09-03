@@ -60,6 +60,14 @@ export class DirectWorkspace {
     return { closed: false };
   }
 
+  async reconcileSessionViews() {
+    return { closed: [] };
+  }
+
+  async shouldRefreshOverview() {
+    return true;
+  }
+
   async leave() {
     return { closeOverview: true };
   }

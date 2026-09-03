@@ -126,6 +126,7 @@ test("enter reuses an overview whose code revision is current", async () => {
   await workspace.enter({ cwd: "/tmp/project" });
 
   assert.ok(!calls.some((args) => args.includes("respawn-window")));
+  assert.ok(!calls.some((args) => args[0] === "set-option" || args[0] === "set-window-option"), "current docks must not rewrite unchanged tmux configuration");
 });
 
 test("enter respawns the overview when the launch workspace changes", async () => {
@@ -212,14 +213,48 @@ test("closeSessionView removes only the window mapped to the archived session", 
   assert.equal(calls.some((args) => args.includes("@2") && args[0] === "kill-window"), false);
 });
 
-test("leave switches to the previous session inside tmux and detaches isolated clients", async () => {
+test("reconcileSessionViews closes only stale windows from healthy providers", async () => {
+  const calls = [];
+  const run = async (args) => {
+    calls.push(args);
+    if (args[0] === "list-windows") {
+      return {
+        stdout: "@1\t\n@2\tclaude:active\n@3\tclaude:stale\n@4\tcodex:preserve\n@5\tother:unknown\n",
+        stderr: "",
+        code: 0,
+      };
+    }
+    return { stdout: "", stderr: "", code: 0 };
+  };
+  const workspace = new TmuxWorkspace({ run, env: { TMUX: "yes", WAGA_TMUX_SESSION: "waga-project-deadbeef" } });
+
+  assert.deepEqual(await workspace.reconcileSessionViews(
+    [{ id: "claude:active", provider: "claude" }],
+    { availableProviders: ["claude"] },
+  ), { closed: ["claude:stale"] });
+  assert.deepEqual(calls.filter((args) => args[0] === "kill-window"), [["kill-window", "-t", "@3"]]);
+});
+
+test("shouldRefreshOverview reports whether the dock is attached and selected", async () => {
+  for (const [stdout, expected] of [["1\t1\n", true], ["0\t1\n", false], ["1\t0\n", false]]) {
+    const calls = [];
+    const workspace = new TmuxWorkspace({
+      run: async (args) => { calls.push(args); return { stdout, stderr: "", code: 0 }; },
+      env: { TMUX: "yes", WAGA_TMUX_SESSION: "waga-project-deadbeef" },
+    });
+    assert.equal(await workspace.shouldRefreshOverview(), expected);
+    assert.deepEqual(calls[0], ["display-message", "-p", "-t", "waga-project-deadbeef:overview", "#{window_active}\t#{session_attached}"]);
+  }
+});
+
+test("leave switches or detaches clients and then destroys the Waga frontend session", async () => {
   const existingCalls = [];
-  const existing = new TmuxWorkspace({ run: async (args) => { existingCalls.push(args); return { stdout: "", stderr: "", code: 0 }; }, env: { TMUX: "yes", WAGA_TMUX_MODE: "existing" } });
-  await existing.leave();
-  assert.deepEqual(existingCalls[0], ["switch-client", "-l"]);
+  const existing = new TmuxWorkspace({ run: async (args) => { existingCalls.push(args); return { stdout: "", stderr: "", code: 0 }; }, env: { TMUX: "yes", WAGA_TMUX_MODE: "existing", WAGA_TMUX_SESSION: "waga-global" } });
+  assert.deepEqual(await existing.leave(), { closeOverview: true });
+  assert.deepEqual(existingCalls, [["switch-client", "-l"], ["kill-session", "-t", "waga-global"]]);
 
   const isolatedCalls = [];
-  const isolated = new TmuxWorkspace({ run: async (args) => { isolatedCalls.push(args); return { stdout: "", stderr: "", code: 0 }; }, env: { TMUX: "yes", WAGA_TMUX_MODE: "isolated" } });
-  await isolated.leave();
-  assert.deepEqual(isolatedCalls[0], ["detach-client"]);
+  const isolated = new TmuxWorkspace({ run: async (args) => { isolatedCalls.push(args); return { stdout: "", stderr: "", code: 0 }; }, env: { TMUX: "yes", WAGA_TMUX_MODE: "isolated", WAGA_TMUX_SESSION: "waga-project-deadbeef" } });
+  assert.deepEqual(await isolated.leave(), { closeOverview: true });
+  assert.deepEqual(isolatedCalls, [["detach-client"], ["kill-session", "-t", "waga-project-deadbeef"]]);
 });

@@ -6,6 +6,7 @@ import { buildPeerEnvelope } from "../bridge/envelope.mjs";
 import { CodexAppServerClient } from "../codex-app-server.mjs";
 
 const execFileAsync = promisify(execFile);
+const THREAD_READ_CONCURRENCY = 8;
 
 async function defaultRun(args) {
   return execFileAsync("codex", args, { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 30_000 });
@@ -28,6 +29,24 @@ function publicStatus(status) {
 
 function answerIn(items, turnId) {
   return items.find((entry) => entry.turnId === turnId && entry.item?.type === "agentMessage" && entry.item.text)?.item.text ?? null;
+}
+
+async function mapSettled(values, concurrency, operation) {
+  const results = new Array(values.length);
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      try {
+        results[index] = { status: "fulfilled", value: await operation(values[index]) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, worker));
+  return results;
 }
 
 function isRootSession(thread) {
@@ -53,12 +72,15 @@ export class CodexProvider {
   #clientFactory;
   #wait;
   #now;
+  #daemonCacheMs;
+  #daemonCache = null;
 
-  constructor({ run = defaultRun, clientFactory, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now } = {}) {
+  constructor({ run = defaultRun, clientFactory, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now, daemonCacheMs = 30_000 } = {}) {
     this.#run = run;
     this.#clientFactory = clientFactory ?? ((socketPath) => CodexAppServerClient.connectUnixWebSocket({ socketPath }));
     this.#wait = wait;
     this.#now = now;
+    this.#daemonCacheMs = daemonCacheMs;
   }
 
   async list({ cwd } = {}) {
@@ -72,13 +94,13 @@ export class CodexProvider {
       } while (cursor);
 
       const uniqueIds = [...new Set(loadedIds)];
-      const reads = await Promise.allSettled(uniqueIds.map(async (threadId) => {
+      const reads = await mapSettled(uniqueIds, THREAD_READ_CONCURRENCY, async (threadId) => {
         const result = await client.request("thread/read", { threadId, includeTurns: false });
         if (!result?.thread || result.thread.id !== threadId) {
           throw Object.assign(new Error(`Codex thread/read response does not match ${threadId}`), { code: "CODEX_THREAD_READ_INVALID" });
         }
         return result.thread;
-      }));
+      });
       const loaded = reads.filter((result) => result.status === "fulfilled").map((result) => result.value);
       if (uniqueIds.length && !loaded.length) throw reads.find((result) => result.status === "rejected").reason;
 
@@ -186,26 +208,46 @@ export class CodexProvider {
     });
   }
 
-  async daemonInfo({ start = false } = {}) {
+  async daemonInfo({ start = false, fresh = false } = {}) {
+    if (!fresh && this.#daemonCache && this.#now() - this.#daemonCache.observedAt < this.#daemonCacheMs) {
+      return this.#daemonCache.value;
+    }
     let result = parseDaemonVersion((await this.#run(["app-server", "daemon", "version"])).stdout);
     if (result.status !== "running" && start) {
       await this.#run(["app-server", "daemon", "start"]);
       result = parseDaemonVersion((await this.#run(["app-server", "daemon", "version"])).stdout);
     }
+    if (result.status === "running" && typeof result.socketPath === "string" && path.isAbsolute(result.socketPath)) {
+      this.#daemonCache = { value: result, observedAt: this.#now() };
+    } else {
+      this.#daemonCache = null;
+    }
     return result;
   }
 
   async #withClient(operation) {
-    const daemon = await this.daemonInfo({ start: true });
-    if (daemon.status !== "running" || typeof daemon.socketPath !== "string" || !path.isAbsolute(daemon.socketPath)) {
-      throw Object.assign(new Error("Codex native app-server daemon is unavailable"), { code: "CODEX_DAEMON_UNAVAILABLE" });
+    let daemon = await this.daemonInfo({ start: true });
+    this.#assertDaemonAvailable(daemon);
+    let client;
+    try {
+      client = await this.#clientFactory(daemon.socketPath);
+    } catch {
+      this.#daemonCache = null;
+      daemon = await this.daemonInfo({ start: true, fresh: true });
+      this.#assertDaemonAvailable(daemon);
+      client = await this.#clientFactory(daemon.socketPath);
     }
-    const client = await this.#clientFactory(daemon.socketPath);
     try {
       await client.initialize();
       return await operation(client);
     } finally {
       await client.close();
+    }
+  }
+
+  #assertDaemonAvailable(daemon) {
+    if (daemon.status !== "running" || typeof daemon.socketPath !== "string" || !path.isAbsolute(daemon.socketPath)) {
+      throw Object.assign(new Error("Codex native app-server daemon is unavailable"), { code: "CODEX_DAEMON_UNAVAILABLE" });
     }
   }
 }

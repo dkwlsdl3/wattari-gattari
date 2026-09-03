@@ -42,6 +42,39 @@ test("Codex provider lists only top-level sessions owned by Agents view", async 
   assert.equal(calls.some(([method]) => method === "thread/list"), false);
 });
 
+test("Codex provider reuses fresh daemon discovery across overview refreshes", async () => {
+  let now = 1_000;
+  const { provider, calls } = harness((method) => {
+    if (method === "thread/loaded/list") return { data: [], nextCursor: null };
+    throw new Error(method);
+  }, { now: () => now, daemonCacheMs: 30_000 });
+
+  await provider.list();
+  now += 3_000;
+  await provider.list();
+  assert.equal(calls.filter(([kind, args]) => kind === "run" && args[2] === "version").length, 1);
+});
+
+test("Codex provider bounds concurrent thread reads", async () => {
+  const ids = Array.from({ length: 25 }, (_, index) => `thread-${index}`);
+  let activeReads = 0;
+  let maxActiveReads = 0;
+  const { provider } = harness(async (method, params) => {
+    if (method === "thread/loaded/list") return { data: ids, nextCursor: null };
+    if (method === "thread/read") {
+      activeReads += 1;
+      maxActiveReads = Math.max(maxActiveReads, activeReads);
+      await new Promise((resolve) => setImmediate(resolve));
+      activeReads -= 1;
+      return { thread: { id: params.threadId, cwd: "/work", status: { type: "idle" } } };
+    }
+    throw new Error(method);
+  });
+
+  assert.equal((await provider.list()).length, ids.length);
+  assert.equal(maxActiveReads, 8);
+});
+
 test("Codex provider drops ephemeral roots and filters loaded sessions by cwd", async () => {
   const shared = { id: "shared", cwd: "/work", name: "shared", source: "cli", status: { type: "active" }, updatedAt: 7 };
   const threads = new Map([

@@ -315,21 +315,32 @@ export async function runOverview({
     })}`);
   };
 
-  const refresh = async ({ whileBusy = false } = {}) => {
+  const refresh = async ({ whileBusy = false, force = false } = {}) => {
     if (refreshing || closed || (busy && !whileBusy)) return;
     refreshing = true;
+    let renderAfter = false;
     try {
+      if (!force && workspace.shouldRefreshOverview && !await workspace.shouldRefreshOverview()) return;
+      renderAfter = true;
       const discovered = await bridge.discover(filterCwd ? { cwd: path.resolve(filterCwd) } : {});
       const activeSessions = discovered.sessions.filter((session) => !archivedSessionIds.has(session.id));
       orderByWorkspace = reconcileOverviewOrder(orderByWorkspace, activeSessions);
       allSessions = applyOverviewOrder(activeSessions, orderByWorkspace);
-      warnings = discovered.warnings;
+      let reconcileWarning = null;
+      if (workspace.reconcileSessionViews && Array.isArray(discovered.availableProviders)) {
+        try {
+          await workspace.reconcileSessionViews(activeSessions, { availableProviders: discovered.availableProviders });
+        } catch (error) {
+          reconcileWarning = { provider: "waga", message: `비활성 세션 창을 정리하지 못했습니다: ${error.message}` };
+        }
+      }
+      warnings = reconcileWarning ? [reconcileWarning, ...discovered.warnings] : discovered.warnings;
       notice = `마지막 갱신 ${new Date().toLocaleTimeString()}`;
     } catch (error) {
       warnings = [{ provider: "waga", message: error.message }];
     } finally {
       refreshing = false;
-      if (!closed) render();
+      if (!closed && renderAfter) render();
     }
   };
 
@@ -362,7 +373,7 @@ export async function runOverview({
         const created = await bridge.create(draft.provider, draft.prompt, { cwd: draft.cwd });
         newTask = null;
         notice = `${draft.provider === "claude" ? "Claude" : "Codex"} 새 세션을 생성했습니다.`;
-        await refresh({ whileBusy: true });
+        await refresh({ whileBusy: true, force: true });
         const session = allSessions.find((candidate) => candidate.provider === created.provider && candidate.nativeId === created.nativeId);
         if (session) selectedKey = session.id;
       } catch (error) {
@@ -398,7 +409,7 @@ export async function runOverview({
         try { await workspace.closeSessionView?.(target); }
         catch (error) { closeWarning = { provider: "waga", message: `보관된 세션 창을 닫지 못했습니다: ${error.message}` }; }
         selectedKey = null;
-        await refresh({ whileBusy: true });
+        await refresh({ whileBusy: true, force: true });
         notice = `${target.name} 세션을 보관했습니다. 대화 로그는 유지됩니다.`;
         if (closeWarning) warnings = [closeWarning, ...warnings];
       } catch (error) {
@@ -498,7 +509,7 @@ export async function runOverview({
         submitting: false,
       };
     }
-    else if (key.ctrl && key.name === "r") { notice = "새로고침 중입니다."; render(); void refresh(); return; }
+    else if (key.ctrl && key.name === "r") { notice = "새로고침 중입니다."; render(); void refresh({ force: true }); return; }
     else if (key.name === "left" && nodes[selected]?.type === "workspace") collapsed.add(nodes[selected].cwd);
     else if (key.name === "left" && nodes[selected]?.type === "session") {
       const parentIndex = nodes.findIndex((node) => node.key === nodes[selected].workspaceKey);
@@ -546,7 +557,7 @@ export async function runOverview({
     process.once("SIGHUP", cleanup);
   }
   inputStream.once("end", cleanup);
-  await refresh();
+  await refresh({ force: true });
   inputStream.once("close", cleanup);
   return await completed;
 }

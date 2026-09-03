@@ -431,6 +431,62 @@ test("overview pauses discovery while a direct native TUI owns the terminal", as
   assert.equal(discoveriesWhileBusy, discoveriesWhenOpened);
 });
 
+test("overview stops provider polling while its tmux window is hidden", async () => {
+  const input = ttyInput();
+  const output = capturedOutput();
+  let visible = false;
+  let discoveries = 0;
+  const bridge = {
+    async discover() {
+      discoveries += 1;
+      return { sessions: [], warnings: [], availableProviders: ["claude", "codex"] };
+    },
+  };
+  const workspace = {
+    async shouldRefreshOverview() { return visible; },
+    async reconcileSessionViews() {},
+    async focusOrOpen() {},
+    async leave() { return { closeOverview: true }; },
+  };
+
+  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 5, listenForSignals: false });
+  await waitFor(() => discoveries === 1);
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  assert.equal(discoveries, 1, "only the forced initial discovery may run while hidden");
+
+  visible = true;
+  await waitFor(() => discoveries >= 2);
+  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  assert.equal(await running, 0);
+});
+
+test("overview reconciles retained tmux views with healthy provider results", async (t) => {
+  const input = ttyInput();
+  t.after(() => input.emit("end"));
+  const output = capturedOutput();
+  const reconciled = [];
+  const bridge = {
+    async discover() {
+      return {
+        sessions: [sessions[0]],
+        warnings: [{ provider: "codex-secondary", message: "offline" }],
+        availableProviders: ["claude", "codex"],
+      };
+    },
+  };
+  const workspace = {
+    async reconcileSessionViews(active, options) { reconciled.push([active, options]); },
+    async focusOrOpen() {},
+    async leave() { return { closeOverview: true }; },
+  };
+
+  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await waitFor(() => reconciled.length === 1);
+  assert.deepEqual(reconciled[0], [[sessions[0]], { availableProviders: ["claude", "codex"] }]);
+  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  assert.equal(await running, 0);
+});
+
 test("overview keeps newer keyboard selection when an older refresh completes", async () => {
   const stable = [
     { id: "codex:a", provider: "codex", status: "idle", name: "A", cwd: "/work/p", updatedAt: 3 },

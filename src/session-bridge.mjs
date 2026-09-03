@@ -27,16 +27,20 @@ export class SessionBridge {
     const results = await Promise.allSettled(selected.map((adapter) => adapter.list({ cwd })));
     const sessions = [];
     const warnings = [];
+    const availableProviders = [];
     for (let index = 0; index < results.length; index += 1) {
       const result = results[index];
       const adapter = selected[index];
-      if (result.status === "fulfilled") sessions.push(...result.value);
+      if (result.status === "fulfilled") {
+        sessions.push(...result.value);
+        availableProviders.push(adapter.name);
+      }
       else warnings.push({ provider: adapter.name, code: result.reason?.code ?? "PROVIDER_ERROR", message: result.reason?.message ?? String(result.reason) });
     }
     if (sessions.length === 0 && warnings.length === selected.length) {
       throw new BridgeError("DISCOVERY_FAILED", warnings.map((warning) => `${warning.provider}: ${warning.message}`).join("; "));
     }
-    return { sessions: sessions.sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0)), warnings };
+    return { sessions: sessions.sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0)), warnings, availableProviders };
   }
 
   async create(provider, prompt, { cwd } = {}) {

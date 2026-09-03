@@ -161,7 +161,7 @@ export class TmuxWorkspace {
       await this.#call([...prefix, "set-window-option", "-t", `${sessionName}:overview`, "@waga_revision", this.#revision]);
       await this.#call([...prefix, "set-window-option", "-t", `${sessionName}:overview`, "@waga_cwd", workspace]);
     }
-    await this.#configure(prefix, sessionName, mode);
+    if (replaceOverview) await this.#configure(prefix, sessionName, mode);
 
     if (insideTmux) {
       if (currentSession === sessionName) await this.#call(["select-window", "-t", `${sessionName}:overview`]);
@@ -210,9 +210,47 @@ export class TmuxWorkspace {
     return { closed: true, windowId: existing.windowId };
   }
 
+  async reconcileSessionViews(sessions, { availableProviders = [] } = {}) {
+    const sessionName = await this.#currentSessionName();
+    const activeIds = new Set(sessions.map((session) => session.id));
+    const healthy = new Set(availableProviders);
+    const listed = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}\t#{@waga_session_id}"]);
+    const stale = parseWindows(listed.stdout).filter(({ sessionId }) => {
+      const separator = sessionId.indexOf(":");
+      const provider = separator > 0 ? sessionId.slice(0, separator) : null;
+      return provider && healthy.has(provider) && !activeIds.has(sessionId);
+    });
+    for (const entry of stale) await this.#call(["kill-window", "-t", entry.windowId]);
+    return { closed: stale.map((entry) => entry.sessionId) };
+  }
+
+  async shouldRefreshOverview() {
+    const sessionName = await this.#currentSessionName();
+    const result = await this.#call([
+      "display-message", "-p", "-t", `${sessionName}:overview`,
+      "#{window_active}\t#{session_attached}",
+    ], { check: false });
+    if (result.code !== 0) return true;
+    const [active, attached] = result.stdout.trim().split("\t");
+    return active === "1" && Number(attached) > 0;
+  }
+
   async leave() {
-    if (this.#env.WAGA_TMUX_MODE === "existing") await this.#call(["switch-client", "-l"]);
-    else await this.#call(["detach-client"]);
+    const sessionName = await this.#currentSessionName();
+    if (this.#env.WAGA_TMUX_MODE === "existing") {
+      const switched = await this.#call(["switch-client", "-l"], { check: false });
+      if (switched.code !== 0) await this.#call(["detach-client"], { check: false });
+    } else {
+      await this.#call(["detach-client"], { check: false });
+    }
+    await this.#call(["kill-session", "-t", sessionName]);
+    return { closeOverview: true };
+  }
+
+  async #currentSessionName() {
+    const sessionName = this.#env.WAGA_TMUX_SESSION || (await this.#call(["display-message", "-p", "#{session_name}"])).stdout.trim();
+    if (!sessionName) throw Object.assign(new Error("Waga tmux session is unavailable"), { code: "TMUX_SESSION_UNAVAILABLE" });
+    return sessionName;
   }
 
   async #configure(prefix, sessionName, mode) {
