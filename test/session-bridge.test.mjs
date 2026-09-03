@@ -9,6 +9,7 @@ function provider(name, sessions, calls = []) {
     async list(options) { calls.push(["list", options]); return sessions; },
     async create(message, options) { calls.push(["create", message, options]); return { provider: name, nativeId: `${name}-new` }; },
     async archive(session) { calls.push(["archive", session]); return { target: session.id, archived: true }; },
+    async rename(session, name) { calls.push(["rename", session, name]); return { target: session.id, renamed: true, name }; },
     async send(session, message, options) { calls.push(["send", session, message, options]); return { target: session.id, requestId: options.requestId }; },
     async ask(session, message, options) { calls.push(["ask", session, message, options]); return { target: session.id, requestId: options.requestId, reply: "yes" }; },
   };
@@ -63,4 +64,13 @@ test("archive resolves one live target and delegates to its native provider", as
     ["list", { cwd: "/work/project" }],
     ["archive", session],
   ]);
+});
+
+test("rename resolves one live target and validates the new name", async () => {
+  const calls = [];
+  const session = { id: "codex:full", nativeId: "full", provider: "codex", name: "before" };
+  const bridge = new SessionBridge({ providers: [provider("codex", [session], calls)] });
+  assert.deepEqual(await bridge.rename("codex:full", "  after  "), { target: "codex:full", renamed: true, name: "after" });
+  assert.deepEqual(calls, [["list", { cwd: undefined }], ["rename", session, "after"]]);
+  await assert.rejects(bridge.rename("codex:full", "  "), { code: "NAME_REQUIRED" });
 });

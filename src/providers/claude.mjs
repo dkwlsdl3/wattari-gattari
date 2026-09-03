@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { buildPeerEnvelope } from "../bridge/envelope.mjs";
+import { defaultClaudeAliasPath, SessionAliasCatalog } from "../session-alias-catalog.mjs";
 import { ClaudePeerEndpoint } from "./claude-peer.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -60,19 +61,22 @@ export class ClaudeProvider {
   #home;
   #run;
   #endpointFactory;
+  #aliases;
   #wait;
   #now;
 
-  constructor({ homeDirectory = os.homedir(), run = defaultRun, endpointFactory, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now } = {}) {
+  constructor({ homeDirectory = os.homedir(), run = defaultRun, endpointFactory, aliasCatalog = null, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now } = {}) {
     this.#home = homeDirectory;
     this.#run = run;
     this.#endpointFactory = endpointFactory ?? ((options) => new ClaudePeerEndpoint(options));
+    this.#aliases = aliasCatalog ?? new SessionAliasCatalog(defaultClaudeAliasPath(process.env, homeDirectory));
     this.#wait = wait;
     this.#now = now;
   }
 
   async list({ cwd } = {}) {
     const expectedCwd = cwd ? canonical(cwd) : null;
+    const aliases = this.#aliases.load();
     const args = ["agents", "--json"];
     if (expectedCwd) args.push("--cwd", expectedCwd);
     const { stdout } = await this.#run(args, { cwd: expectedCwd ?? undefined });
@@ -90,7 +94,7 @@ export class ClaudeProvider {
         nativeId: row.id,
         sessionId: row.sessionId,
         provider: this.name,
-        name: row.name ?? registry.name ?? row.id,
+        name: aliases.get(`claude:${row.sessionId}`) ?? row.name ?? registry.name ?? row.id,
         cwd: sessionCwd,
         projectCwd: expectedCwd ?? claudeProjectCwd(sessionCwd),
         status: statusOf(row),
@@ -114,6 +118,12 @@ export class ClaudeProvider {
     const cwd = canonical(session.projectCwd ?? session.cwd ?? process.cwd());
     await this.#run(["rm", session.nativeId], { cwd });
     return { target: session.id, archived: true };
+  }
+
+  async rename(session, name) {
+    const renamed = name.trim();
+    this.#aliases.set(session.id, renamed);
+    return { target: session.id, renamed: true, name: renamed };
   }
 
   async send(session, message, { requestId }) {

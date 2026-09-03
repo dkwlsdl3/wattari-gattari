@@ -17,7 +17,7 @@ Wattari Gattari(`waga`)는 Claude Code와 Codex의 활성 세션을 보여 주�
 
 - 모든 프로젝트의 Claude·Codex 세션을 하나의 dock에서 탐색
 - 정확한 네이티브 세션으로 attach/resume
-- 검색, provider 필터, 수동 정렬, 새 세션 생성과 보관
+- 검색, provider 필터, 수동 정렬, 이름 변경, 새 세션 생성과 보관
 - `waga send` 단방향 알림과 `waga ask` 단일 응답 요청
 - peer 입력을 불신 입력으로 표시하고 기존 sandbox와 승인 정책 유지
 
@@ -67,6 +67,7 @@ waga open codex --cwd ~/work/my-app
 | `←` / `→` / `Enter` | 프로젝트 접기·펼치기 |
 | 세션에서 `Enter` | 네이티브 TUI 열기 |
 | `/` / `Tab` | 검색 / provider 필터 |
+| `F2` | 선택한 세션 이름 변경 |
 | `Alt+N` / `Alt+R` | 새 세션 / 새로고침 |
 | `Alt+X` 두 번 | 세션 보관 |
 | `Alt+Q` | Waga 종료 |

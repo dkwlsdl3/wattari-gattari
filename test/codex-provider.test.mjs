@@ -121,6 +121,16 @@ test("Codex archive uses the App Server archive boundary and keeps delete separa
   assert.equal(calls.some(([method]) => method === "thread/delete"), false);
 });
 
+test("Codex rename updates the native user-facing thread name", async () => {
+  const { provider, calls } = harness((method) => {
+    if (method === "thread/name/set") return {};
+    throw new Error(method);
+  });
+  const result = await provider.rename({ id: "codex:thread-1", nativeId: "thread-1" }, "  review parser  ");
+  assert.deepEqual(result, { target: "codex:thread-1", renamed: true, name: "review parser" });
+  assert.deepEqual(calls.find(([method]) => method === "thread/name/set"), ["thread/name/set", { threadId: "thread-1", name: "review parser" }]);
+});
+
 test("Codex send uses standalone tool output, not a user message", async () => {
   const { provider, calls } = harness((method) => {
     if (method === "turn/start") return { turn: { id: "turn-1" } };

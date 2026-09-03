@@ -17,7 +17,7 @@ daemon or replacement chat UI.
 
 - Browse Claude and Codex sessions across projects in one dock
 - Attach or resume the exact native session
-- Search, filter, reorder, create, and archive sessions
+- Search, filter, reorder, rename, create, and archive sessions
 - Send one-way notifications with `waga send` or request one reply with `waga ask`
 - Mark peer input as untrusted while preserving native sandbox and approval rules
 
@@ -67,6 +67,7 @@ waga open codex --cwd ~/work/my-app
 | `←` / `→` / `Enter` | Collapse or expand a project |
 | `Enter` on a session | Open its native TUI |
 | `/` / `Tab` | Search / filter providers |
+| `F2` | Rename the selected session |
 | `Alt+N` / `Alt+R` | New session / refresh |
 | `Alt+X` twice | Archive a session |
 | `Alt+Q` | Exit Waga |

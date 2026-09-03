@@ -146,6 +146,13 @@ export class CodexProvider {
     });
   }
 
+  async rename(session, name) {
+    return this.#withClient(async (client) => {
+      await client.request("thread/name/set", { threadId: session.nativeId, name: name.trim() });
+      return { target: session.id, renamed: true, name: name.trim() };
+    });
+  }
+
   async send(session, message, { requestId }) {
     return this.#withClient(async (client) => {
       const started = await client.request("turn/start", {

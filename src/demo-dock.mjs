@@ -27,6 +27,10 @@ const bridge = {
     sessions = sessions.filter((session) => session.id !== target);
     return { target, archived: true };
   },
+  async rename(target, name) {
+    sessions = sessions.map((session) => session.id === target ? { ...session, name } : session);
+    return { target, renamed: true, name };
+  },
 };
 
 const workspace = {

@@ -182,7 +182,7 @@ export function nativeReturnHint(mode) {
     : "네이티브 TUI: tmux prefix + 0 → dock";
 }
 
-export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, notice = "", newTask = null, nativeHint = nativeReturnHint(null) }) {
+export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, notice = "", newTask = null, renameTask = null, nativeHint = nativeReturnHint(null) }) {
   const usableWidth = Math.max(1, width - 4);
   const visibleRows = Math.max(1, height - 9);
   const safeSelected = Math.max(0, Math.min(selected, Math.max(0, nodes.length - 1)));
@@ -217,17 +217,36 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
   }
   const helpLines = wide
-    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  / 검색  Tab 필터", "Alt+N 새 세션  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기"]
-    : ["Shift+↑↓ 순서  Alt+N 새 세션  Alt+X 보관  Alt+Q 나가기"];
+    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  / 검색  Tab 필터", "F2 이름 변경  Alt+N 새 세션  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기"]
+    : ["Shift+↑↓ 순서  F2 이름  Alt+N 새 세션  Alt+X 보관  Alt+Q 나가기"];
   while (lines.length < height - helpLines.length - 4) lines.push("");
   if (newTask) {
     const providerName = newTask.provider === "claude" ? "CLAUDE" : "CODEX";
-    const heading = newTask.error
-      ? color(THEME.error, fit(`오류: ${safeText(newTask.error)}`, usableWidth))
-      : color(THEME.title, fit(`새 세션 · ${providerName} · ${newTask.cwd}${newTask.submitting ? " · 생성 중" : ""}`, usableWidth));
+    const providerSymbol = newTask.provider === "claude" ? "◆" : "■";
+    const providerColor = newTask.provider === "claude" ? THEME.claude : THEME.codex;
+    const alternateProvider = newTask.provider === "claude" ? "CODEX" : "CLAUDE";
+    const headingPrefix = "새 세션 생성   ";
+    const providerBadge = `${providerSymbol}  ${providerName}  ${providerSymbol}`;
+    const headingSuffix = `${newTask.cwd}${newTask.submitting ? " · 생성 중" : ""}`;
+    const suffixWidth = Math.max(0, usableWidth - widthOf(headingPrefix) - widthOf(providerBadge) - 3);
+    const heading = `${color(THEME.title, headingPrefix)}${color(providerColor, providerBadge)}${suffixWidth ? `   ${color(THEME.muted, fit(headingSuffix, suffixWidth))}` : ""}`;
     lines.push(`  ${heading}`);
-    lines.push(`  ${color(THEME.muted, fit("Tab 제공자 전환   ←→ 커서   Enter 생성   Esc 취소   Ctrl+U 지우기", usableWidth))}`);
+    const composerHint = newTask.error
+      ? `오류: ${safeText(newTask.error)}`
+      : `Tab → ${alternateProvider} 전환   ←→ 커서   Enter 생성   Esc 취소   Ctrl+U 지우기`;
+    lines.push(`  ${color(newTask.error ? THEME.error : providerColor, fit(composerHint, usableWidth))}`);
     lines.push(`  ${editorLine(newTask.prompt, newTask.cursor, usableWidth)}`);
+    lines.push("");
+  } else if (renameTask) {
+    const providerName = renameTask.session.provider === "claude" ? "CLAUDE" : "CODEX";
+    const providerSymbol = renameTask.session.provider === "claude" ? "◆" : "■";
+    const providerColor = renameTask.session.provider === "claude" ? THEME.claude : THEME.codex;
+    lines.push(`  ${color(THEME.title, "세션 이름 변경   ")}${color(providerColor, `${providerSymbol}  ${providerName}  ${providerSymbol}`)}`);
+    const renameHint = renameTask.error
+      ? `오류: ${safeText(renameTask.error)}`
+      : `현재: ${safeText(renameTask.session.name)}   Enter 저장   Esc 취소   Ctrl+U 지우기`;
+    lines.push(`  ${color(renameTask.error ? THEME.error : THEME.muted, fit(renameHint, usableWidth))}`);
+    lines.push(`  ${editorLine(renameTask.name, renameTask.cursor, usableWidth)}`);
     lines.push("");
   } else {
     if (warnings.length) lines.push(`  ${color(THEME.warning, fit(`경고: ${safeText(warnings[0].provider)} · ${safeText(warnings[0].message)}`, usableWidth))}`);
@@ -273,6 +292,7 @@ export async function runOverview({
   let query = "";
   let searching = false;
   let newTask = null;
+  let renameTask = null;
   let provider = null;
   let refreshing = false;
   let notice = "세션을 불러오는 중입니다.";
@@ -310,6 +330,7 @@ export async function runOverview({
       provider,
       notice,
       newTask,
+      renameTask,
       rootCwd: defaultCwd,
       nativeHint,
     })}`);
@@ -421,6 +442,34 @@ export async function runOverview({
     })();
   };
 
+  const submitRename = () => {
+    const name = renameTask.name.trim();
+    if (!name) {
+      renameTask.error = "새 이름을 입력하세요.";
+      render();
+      return;
+    }
+    const draft = { ...renameTask, name, submitting: true, error: "" };
+    renameTask = draft;
+    busy = true;
+    render();
+    const scope = filterCwd ? { cwd: path.resolve(filterCwd) } : {};
+    void (async () => {
+      try {
+        await bridge.rename(draft.session.id, draft.name, scope);
+        renameTask = null;
+        selectedKey = draft.session.id;
+        await refresh({ whileBusy: true, force: true });
+        notice = `세션 이름을 '${draft.name}'(으)로 변경했습니다.`;
+      } catch (error) {
+        renameTask = { ...draft, submitting: false, error: error.message };
+      } finally {
+        busy = false;
+        if (!closed) render();
+      }
+    })();
+  };
+
   const onKeypress = (text, key = {}) => {
     if (busy || closed) return;
     if ((key.ctrl && key.name === "c") || (key.meta && key.name === "q")) {
@@ -428,6 +477,32 @@ export async function runOverview({
       return;
     }
     if (!(key.meta && key.name === "x")) pendingArchiveId = null;
+    if (renameTask) {
+      const cells = graphemes(renameTask.name);
+      if (key.name === "escape") renameTask = null;
+      else if (key.name === "return") { submitRename(); return; }
+      else if (key.name === "left") renameTask.cursor = Math.max(0, renameTask.cursor - 1);
+      else if (key.name === "right") renameTask.cursor = Math.min(cells.length, renameTask.cursor + 1);
+      else if (key.name === "home") renameTask.cursor = 0;
+      else if (key.name === "end") renameTask.cursor = cells.length;
+      else if (key.name === "backspace" && renameTask.cursor > 0) {
+        cells.splice(renameTask.cursor - 1, 1);
+        renameTask = { ...renameTask, name: cells.join(""), cursor: renameTask.cursor - 1, error: "" };
+      } else if (key.name === "delete" && renameTask.cursor < cells.length) {
+        cells.splice(renameTask.cursor, 1);
+        renameTask = { ...renameTask, name: cells.join(""), error: "" };
+      } else if (key.ctrl && key.name === "u") renameTask = { ...renameTask, name: "", cursor: 0, error: "" };
+      else if (!key.ctrl && !key.meta) {
+        const inserted = String(key.sequence ?? text ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
+        if (inserted) {
+          const added = graphemes(inserted);
+          cells.splice(renameTask.cursor, 0, ...added);
+          renameTask = { ...renameTask, name: cells.join(""), cursor: renameTask.cursor + added.length, error: "" };
+        }
+      }
+      render();
+      return;
+    }
     if (newTask) {
       const cells = graphemes(newTask.prompt);
       if (key.name === "escape") newTask = null;
@@ -470,6 +545,11 @@ export async function runOverview({
     reconcileSelection(nodes);
     if (key.meta && key.name === "x" && nodes[selected]?.type === "session") {
       archiveSession(nodes[selected].session);
+      return;
+    }
+    if (key.name === "f2" && nodes[selected]?.type === "session") {
+      renameTask = { session: nodes[selected].session, name: "", cursor: 0, error: "", submitting: false };
+      render();
       return;
     }
     if (key.shift && (key.name === "up" || key.name === "down") && nodes[selected]?.type === "session") {

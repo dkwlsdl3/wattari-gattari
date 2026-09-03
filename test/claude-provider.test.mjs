@@ -55,6 +55,18 @@ test("Claude archive removes only the Agents background job through the native C
   });
 });
 
+test("Claude rename stores a Waga display alias", async () => {
+  const calls = [];
+  const aliasCatalog = {
+    load() { return new Map(); },
+    set(id, name) { calls.push([id, name]); },
+  };
+  const provider = new ClaudeProvider({ aliasCatalog });
+  const result = await provider.rename({ id: "claude:full-id" }, "  review UI  ");
+  assert.deepEqual(result, { target: "claude:full-id", renamed: true, name: "review UI" });
+  assert.deepEqual(calls, [["claude:full-id", "review UI"]]);
+});
+
 test("Claude provider joins agents JSON to the live peer registry", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-claude-provider-"));
   const sessions = path.join(root, ".claude", "sessions");
@@ -67,9 +79,15 @@ test("Claude provider joins agents JSON to the live peer registry", async (t) =>
   fs.writeFileSync(path.join(sessions, `${process.pid}.json`), JSON.stringify({ ...row, peerProtocol: 1, messagingSocketPath: socketPath }));
   const endpointCalls = [];
   const endpoint = { async start(value) { endpointCalls.push(["start", value]); }, async send(_socket, text) { endpointCalls.push(["send", text]); return "message-1"; }, async waitForReply() { return { text: "OK" }; }, async stop() { endpointCalls.push(["stop"]); } };
-  const provider = new ClaudeProvider({ homeDirectory: root, run: async () => ({ stdout: JSON.stringify([row]) }), endpointFactory: () => endpoint });
+  const provider = new ClaudeProvider({
+    homeDirectory: root,
+    run: async () => ({ stdout: JSON.stringify([row]) }),
+    endpointFactory: () => endpoint,
+    aliasCatalog: { load: () => new Map([["claude:full-id", "renamed target"]]) },
+  });
   const listed = await provider.list({ cwd: process.cwd() });
   assert.equal(listed[0].id, "claude:full-id");
+  assert.equal(listed[0].name, "renamed target");
   assert.equal(listed[0].nativeId, "1234abcd");
   const answer = await provider.ask(listed[0], "hello", { requestId: "r", timeoutMs: 9 });
   assert.equal(answer.reply, "OK");

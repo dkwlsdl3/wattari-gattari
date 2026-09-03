@@ -53,6 +53,12 @@ export class SessionBridge {
     return provider.archive(session);
   }
 
+  async rename(target, name, { cwd } = {}) {
+    if (typeof name !== "string" || !name.trim()) throw new BridgeError("NAME_REQUIRED", "Session name is required");
+    const { provider, session } = await this.#resolve(target, cwd);
+    return provider.rename(session, name.trim());
+  }
+
   async send(target, message, { cwd } = {}) {
     const { provider, session } = await this.#resolve(target, cwd);
     const requestId = crypto.randomUUID();

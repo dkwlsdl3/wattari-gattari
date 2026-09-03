@@ -156,6 +156,7 @@ test("overview frame distinguishes providers and keeps navigation help visible",
   assert.match(frame, /Enter 열기/);
   assert.match(frame, /Alt\+N 새 세션/);
   assert.match(frame, /Alt\+R 갱신/);
+  assert.match(frame, /F2 이름 변경/);
   assert.match(frame, /Alt\+Q 나가기/);
   assert.match(frame, /Shift\+↑↓ 순서/);
   assert.match(frame, /tmux prefix \+ 0/);
@@ -235,10 +236,10 @@ test("Escape cancels the composer without the readline default delay", async () 
     await new Promise((resolve) => setImmediate(resolve));
     assert.match(plain(output.writes.at(-1)), /current/);
     input.write("\u001bn");
-    await waitFor(() => /새 세션 ·/.test(plain(output.writes.at(-1))));
+    await waitFor(() => /새 세션 생성/.test(plain(output.writes.at(-1))));
     const started = performance.now();
     input.write("\u001b");
-    await waitFor(() => !/새 세션 ·/.test(plain(output.writes.at(-1))));
+    await waitFor(() => !/새 세션 생성/.test(plain(output.writes.at(-1))));
     assert.ok(performance.now() - started < 200);
     input.write("\u001b[B");
     await waitFor(() => selectedSessionName(output) === "API");
@@ -635,7 +636,7 @@ test("overview uses Alt shortcuts consistently for commands", async (t) => {
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(discoveries, discoveriesBeforeRefresh);
   assert.equal(leaves, 0);
-  assert.doesNotMatch(plain(output.writes.at(-1)), /새 세션 ·/);
+  assert.doesNotMatch(plain(output.writes.at(-1)), /새 세션 생성/);
 
   pressAlt(input, "r");
   await new Promise((resolve) => setImmediate(resolve));
@@ -671,11 +672,15 @@ test("overview creates a provider-owned session from its one-line composer", asy
   assert.match(plain(output.writes.at(-1)), /▾\s+new.*0 sessions/);
 
   input.emit("keypress", "n", { name: "n", sequence: "n" });
-  assert.doesNotMatch(plain(output.writes.at(-1)), /새 세션 ·/);
+  assert.doesNotMatch(plain(output.writes.at(-1)), /새 세션 생성/);
   pressAlt(input, "n");
-  assert.match(plain(output.writes.at(-1)), /새 세션 · CLAUDE · \/work\/new/);
+  assert.match(plain(output.writes.at(-1)), /새 세션 생성\s+◆\s+CLAUDE\s+◆\s+\/work\/new/);
+  assert.match(plain(output.writes.at(-1)), /Tab → CODEX 전환/);
+  assert.match(output.writes.at(-1), /\x1b\[1;38;2;192;132;252m◆  CLAUDE  ◆/);
   input.emit("keypress", "", { name: "tab" });
-  assert.match(plain(output.writes.at(-1)), /새 세션 · CODEX · \/work\/new/);
+  assert.match(plain(output.writes.at(-1)), /새 세션 생성\s+■\s+CODEX\s+■\s+\/work\/new/);
+  assert.match(plain(output.writes.at(-1)), /Tab → CLAUDE 전환/);
+  assert.match(output.writes.at(-1), /\x1b\[1;38;2;34;211;238m■  CODEX  ■/);
   input.emit("keypress", "작업", { sequence: "작업" });
   input.emit("keypress", "", { name: "left" });
   input.emit("keypress", "새", { sequence: "새" });
@@ -686,6 +691,46 @@ test("overview creates a provider-owned session from its one-line composer", asy
 
   assert.deepEqual(created, { provider: "codex", prompt: "작새업", options: { cwd: "/work/new" } });
   assert.equal(selectedSessionName(output), "작새업");
+  pressAlt(input, "q");
+  assert.equal(await running, 0);
+});
+
+test("F2 renames the selected session and keeps provider identity visible", async (t) => {
+  const input = ttyInput();
+  t.after(() => input.emit("end"));
+  const output = capturedOutput();
+  let discovered = [{ id: "claude:full-id", nativeId: "1234abcd", provider: "claude", status: "idle", name: "before", cwd: "/work/new", updatedAt: 1 }];
+  let renamed = null;
+  let resolveRename;
+  const renameCalled = new Promise((resolve) => { resolveRename = resolve; });
+  const bridge = {
+    async discover() { return { sessions: discovered, warnings: [] }; },
+    async rename(target, name, options) {
+      renamed = { target, name, options };
+      discovered = discovered.map((session) => session.id === target ? { ...session, name } : session);
+      resolveRename();
+      return { target, renamed: true, name };
+    },
+  };
+  const workspace = {
+    async focusOrOpen() {},
+    async leave() { return { closeOverview: true }; },
+  };
+  const running = runOverview({ bridge, workspace, defaultCwd: "/work/new", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", "", { name: "f2" });
+  assert.match(plain(output.writes.at(-1)), /세션 이름 변경\s+◆\s+CLAUDE\s+◆/);
+  assert.match(plain(output.writes.at(-1)), /현재: before/);
+  input.emit("keypress", "검토 세션", { sequence: "검토 세션" });
+  input.emit("keypress", "", { name: "return" });
+  await renameCalled;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(renamed, { target: "claude:full-id", name: "검토 세션", options: {} });
+  assert.equal(selectedSessionName(output), "검토");
+  assert.match(plain(output.writes.at(-1)), /이름을 '검토 세션'\(으\)로 변경했습니다/);
   pressAlt(input, "q");
   assert.equal(await running, 0);
 });
@@ -722,7 +767,7 @@ test("new-session composer keeps a failed prompt editable and Escape cancels it"
   assert.match(plain(output.writes.at(-1)), /› 실패해도 유지/);
 
   input.emit("keypress", "", { name: "escape" });
-  assert.doesNotMatch(plain(output.writes.at(-1)), /새 세션 ·|provider unavailable|실패해도 유지/);
+  assert.doesNotMatch(plain(output.writes.at(-1)), /새 세션 생성|provider unavailable|실패해도 유지/);
   pressAlt(input, "q");
   assert.equal(await running, 0);
 });
