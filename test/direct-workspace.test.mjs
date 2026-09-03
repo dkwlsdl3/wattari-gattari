@@ -67,3 +67,8 @@ test("direct workspace closes its overview instead of switching a multiplexer", 
   const workspace = new DirectWorkspace({ inputStream: terminalStream(), outputStream: terminalStream() });
   assert.deepEqual(await workspace.leave(), { closeOverview: true });
 });
+
+test("direct workspace has no retained session view to close after archive", async () => {
+  const workspace = new DirectWorkspace({ inputStream: terminalStream(), outputStream: terminalStream() });
+  assert.deepEqual(await workspace.closeSessionView({ id: "codex:proof" }), { closed: false });
+});

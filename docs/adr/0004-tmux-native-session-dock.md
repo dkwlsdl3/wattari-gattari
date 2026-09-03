@@ -37,6 +37,10 @@ tmux 안에서 다시 별도 tmux client를 attach하면 prefix, detach, mouse �
   사용하고, 네이티브 TUI에서 `Alt+G`로 돌아온 흐름을 이어 Dock은 `Alt+Q`로 나갑니다.
   기존 `Ctrl+Q`와 `Ctrl+C`도 호환 경로로 유지합니다. 단독 `Esc` 취소는 Node key
   parser의 기본 500ms 대기 대신 짧은 escape 판별 시간을 사용합니다.
+- 세션 행에서 `Alt+X`를 두 번 누르면 provider의 보관 동작을 실행합니다. 첫 입력은
+  provider별 차이와 로그 보존 여부를 알리고, 두 번째 입력만 실제 동작을 수행합니다.
+  성공하면 활성 목록에서 행을 제거하고 그 세션 ID에 정확히 매핑된 tmux window만
+  닫습니다. 실패하면 행과 window를 그대로 유지합니다.
 - `waga`를 실행한 cwd는 활성 세션이 없어도 overview의 첫 workspace로 고정합니다. 전역
   dock을 다른 cwd에서 다시 열면 코드 지문이 같더라도 overview window만 새 cwd에서
   respawn하고, provider 네이티브 window와 세션은 유지합니다.
@@ -76,9 +80,9 @@ tmux는 화면 배치와 전환만 소유합니다. provider daemon, 세션 상�
 발견 결과를 정확한 attach 명령으로 바꾸고 첫 요청으로 native session을 생성하는
 부분까지입니다.
 
-기존 사용자 tmux session, provider session, native daemon에는 입력하거나 종료 신호를
-보내지 않습니다. 실제 통합 검증은 `waga-proof-*` 이름의 별도 tmux socket과 임시
-workspace에서만 수행합니다.
+사용자가 명시적으로 두 번 확인한 `Alt+X` 보관 외에는 기존 사용자 tmux session,
+provider session, native daemon에 입력하거나 종료 신호를 보내지 않습니다. 실제 통합
+검증은 `waga-proof-*` 이름의 별도 tmux socket과 임시 workspace에서만 수행합니다.
 
 ## 결과
 

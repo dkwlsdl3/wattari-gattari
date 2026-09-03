@@ -200,6 +200,16 @@ export class TmuxWorkspace {
     return { reused: false, windowId };
   }
 
+  async closeSessionView(session) {
+    const sessionName = this.#env.WAGA_TMUX_SESSION || (await this.#call(["display-message", "-p", "#{session_name}"])).stdout.trim();
+    if (!sessionName) throw Object.assign(new Error("Waga tmux session is unavailable"), { code: "TMUX_SESSION_UNAVAILABLE" });
+    const listed = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}\t#{@waga_session_id}"]);
+    const existing = parseWindows(listed.stdout).find((entry) => entry.sessionId === session.id);
+    if (!existing) return { closed: false };
+    await this.#call(["kill-window", "-t", existing.windowId]);
+    return { closed: true, windowId: existing.windowId };
+  }
+
   async leave() {
     if (this.#env.WAGA_TMUX_MODE === "existing") await this.#call(["switch-client", "-l"]);
     else await this.#call(["detach-client"]);

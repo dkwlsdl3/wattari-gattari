@@ -117,6 +117,13 @@ export class CodexProvider {
     });
   }
 
+  async archive(session) {
+    return this.#withClient(async (client) => {
+      await client.request("thread/archive", { threadId: session.nativeId });
+      return { target: session.id, archived: true };
+    });
+  }
+
   async send(session, message, { requestId }) {
     return this.#withClient(async (client) => {
       const started = await client.request("turn/start", {

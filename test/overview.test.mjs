@@ -265,6 +265,70 @@ test("Alt+Q leaves the dock", async () => {
   }
 });
 
+test("Alt+X twice archives the selected session and closes its retained view", async (t) => {
+  const input = ttyInput();
+  t.after(() => input.emit("end"));
+  const output = capturedOutput();
+  const active = { id: "codex:archive-me", nativeId: "archive-me", provider: "codex", status: "idle", name: "Archive me", cwd: "/work/p", updatedAt: 1 };
+  let archived = false;
+  const archiveCalls = [];
+  const closedViews = [];
+  const bridge = {
+    async discover() { return { sessions: archived ? [] : [active], warnings: [] }; },
+    async archive(target, options) { archiveCalls.push([target, options]); archived = true; return { target, archived: true }; },
+  };
+  const workspace = {
+    async focusOrOpen() {},
+    async closeSessionView(session) { closedViews.push(session.id); return { closed: true }; },
+    async leave() { return { closeOverview: true }; },
+  };
+  const running = runOverview({ bridge, workspace, defaultCwd: "/work/p", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  input.emit("keypress", "", { name: "down" });
+
+  input.emit("keypress", "", { name: "x", meta: true });
+  assert.equal(archiveCalls.length, 0);
+  assert.match(plain(output.writes.at(-1)), /Alt\+X를 다시 누르면/);
+
+  input.emit("keypress", "", { name: "x", meta: true });
+  await waitFor(() => archiveCalls.length === 1 && closedViews.length === 1);
+  assert.deepEqual(archiveCalls, [["codex:archive-me", {}]]);
+  assert.deepEqual(closedViews, ["codex:archive-me"]);
+  await waitFor(() => /0 need input\s+0 working\s+0 ready/.test(plain(output.writes.at(-1))));
+
+  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  assert.equal(await running, 0);
+});
+
+test("failed Alt+X archive keeps the session and its retained view", async (t) => {
+  const input = ttyInput();
+  t.after(() => input.emit("end"));
+  const output = capturedOutput();
+  const active = { id: "claude:keep-me", nativeId: "keep-me", provider: "claude", status: "idle", name: "Keep me", cwd: "/work/p", updatedAt: 1 };
+  let closeCalls = 0;
+  const bridge = {
+    async discover() { return { sessions: [active], warnings: [] }; },
+    async archive() { throw new Error("provider refused archive"); },
+  };
+  const workspace = {
+    async focusOrOpen() {},
+    async closeSessionView() { closeCalls += 1; },
+    async leave() { return { closeOverview: true }; },
+  };
+  const running = runOverview({ bridge, workspace, defaultCwd: "/work/p", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  input.emit("keypress", "", { name: "down" });
+
+  input.emit("keypress", "", { name: "x", meta: true });
+  input.emit("keypress", "", { name: "x", meta: true });
+  await waitFor(() => /provider refused archive/.test(plain(output.writes.at(-1))));
+  assert.equal(closeCalls, 0);
+  assert.match(plain(output.writes.at(-1)), /Keep me/);
+
+  input.emit("keypress", "\u0011", { name: "q", sequence: "\u0011", ctrl: true });
+  assert.equal(await running, 0);
+});
+
 test("Enter collapses and expands a workspace without opening a native session", async () => {
   const input = ttyInput();
   const output = capturedOutput();

@@ -77,6 +77,17 @@ test("Codex create starts a native daemon thread and dispatches its first turn",
   });
 });
 
+test("Codex archive uses the App Server archive boundary and keeps delete separate", async () => {
+  const { provider, calls } = harness((method) => {
+    if (method === "thread/archive") return {};
+    throw new Error(method);
+  });
+  const result = await provider.archive({ id: "codex:thread-1", nativeId: "thread-1" });
+  assert.deepEqual(result, { target: "codex:thread-1", archived: true });
+  assert.deepEqual(calls.find(([method]) => method === "thread/archive"), ["thread/archive", { threadId: "thread-1" }]);
+  assert.equal(calls.some(([method]) => method === "thread/delete"), false);
+});
+
 test("Codex send uses standalone tool output, not a user message", async () => {
   const { provider, calls } = harness((method) => {
     if (method === "turn/start") return { turn: { id: "turn-1" } };

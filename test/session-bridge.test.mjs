@@ -8,6 +8,7 @@ function provider(name, sessions, calls = []) {
     name,
     async list(options) { calls.push(["list", options]); return sessions; },
     async create(message, options) { calls.push(["create", message, options]); return { provider: name, nativeId: `${name}-new` }; },
+    async archive(session) { calls.push(["archive", session]); return { target: session.id, archived: true }; },
     async send(session, message, options) { calls.push(["send", session, message, options]); return { target: session.id, requestId: options.requestId }; },
     async ask(session, message, options) { calls.push(["ask", session, message, options]); return { target: session.id, requestId: options.requestId, reply: "yes" }; },
   };
@@ -50,4 +51,15 @@ test("create delegates one prompt to the selected native provider", async () => 
   assert.deepEqual(result, { provider: "codex", nativeId: "codex-new" });
   assert.deepEqual(calls, [["create", "implement the parser", { cwd: "/work/project" }]]);
   await assert.rejects(bridge.create("codex", "   ", { cwd: "/work/project" }), { code: "PROMPT_REQUIRED" });
+});
+
+test("archive resolves one live target and delegates to its native provider", async () => {
+  const calls = [];
+  const session = { id: "claude:full", nativeId: "1234abcd", sessionId: "full", provider: "claude", name: "proof" };
+  const bridge = new SessionBridge({ providers: [provider("claude", [session], calls), provider("codex", [], calls)] });
+  assert.deepEqual(await bridge.archive("claude:full", { cwd: "/work/project" }), { target: "claude:full", archived: true });
+  assert.deepEqual(calls, [
+    ["list", { cwd: "/work/project" }],
+    ["archive", session],
+  ]);
 });

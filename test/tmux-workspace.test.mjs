@@ -199,6 +199,19 @@ test("focusOrOpen reattaches mapped sessions and creates only missing views", as
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("window-status-current-format") && args.at(-1).includes("#{window_name}")));
 });
 
+test("closeSessionView removes only the window mapped to the archived session", async () => {
+  const calls = [];
+  const run = async (args) => {
+    calls.push(args);
+    if (args[0] === "list-windows") return { stdout: "@2\tcodex:keep\n@4\tclaude:archive\n", stderr: "", code: 0 };
+    return { stdout: "", stderr: "", code: 0 };
+  };
+  const workspace = new TmuxWorkspace({ run, env: { TMUX: "/tmp/tmux,1,0", WAGA_TMUX_SESSION: "waga-project-deadbeef" } });
+  assert.deepEqual(await workspace.closeSessionView({ id: "claude:archive" }), { closed: true, windowId: "@4" });
+  assert.deepEqual(calls.at(-1), ["kill-window", "-t", "@4"]);
+  assert.equal(calls.some((args) => args.includes("@2") && args[0] === "kill-window"), false);
+});
+
 test("leave switches to the previous session inside tmux and detaches isolated clients", async () => {
   const existingCalls = [];
   const existing = new TmuxWorkspace({ run: async (args) => { existingCalls.push(args); return { stdout: "", stderr: "", code: 0 }; }, env: { TMUX: "yes", WAGA_TMUX_MODE: "existing" } });

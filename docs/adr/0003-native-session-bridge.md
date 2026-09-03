@@ -34,6 +34,10 @@ Waga는 provider가 소유한 실제 세션 사이의 얇은 메시지 브리지
 - 새 Claude 세션은 공개 `claude --bg <prompt>` 경계로 만들고, 새 Codex 세션은 이미 연결한
   native App Server daemon의 `thread/start`와 `turn/start`로 만듭니다. 둘 다 provider의
   Agents 목록과 세션 수명에 속하며 Waga 자체 세션을 만들지 않습니다.
+- Dock에서 사용자가 두 번 확인한 보관 요청은 provider 수명 경계에 위임합니다. Codex는
+  App Server의 `thread/archive`로 JSONL을 보관 디렉터리로 옮기고, Claude는 공개
+  `claude rm <id>`로 background job과 관리 worktree를 정리합니다. Claude transcript와
+  Codex archived session 로그는 삭제하지 않으며 영구 삭제 API는 사용하지 않습니다.
 - `send`는 단방향 알림이며 제출과 즉시 반환된 Claude hold/refuse까지만 확인합니다.
 - `ask`는 작업 중인 대상에 메시지를 먼저 넣지 않습니다. 유휴 상태까지의 대기와 제출
   뒤 답변 대기에 서로 다른 제한 시간을 적용하고, `waiting`·`submitted`·`replied` 전이를

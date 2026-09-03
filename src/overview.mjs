@@ -217,8 +217,8 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
   }
   const helpLines = wide
-    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  / 검색  Tab 필터", "Ctrl+N 새 세션  Ctrl+R 갱신  Alt+Q 나가기"]
-    : ["Shift+↑↓ 순서  Ctrl+N 새 세션  Alt+Q 나가기"];
+    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  / 검색  Tab 필터", "Ctrl+N 새 세션  Ctrl+R 갱신  Alt+X 보관  Alt+Q 나가기"]
+    : ["Shift+↑↓ 순서  Ctrl+N 새 세션  Alt+X 보관  Alt+Q 나가기"];
   while (lines.length < height - helpLines.length - 4) lines.push("");
   if (newTask) {
     const providerName = newTask.provider === "claude" ? "CLAUDE" : "CODEX";
@@ -278,6 +278,8 @@ export async function runOverview({
   let notice = "세션을 불러오는 중입니다.";
   let closed = false;
   let busy = false;
+  let pendingArchiveId = null;
+  const archivedSessionIds = new Set();
 
   const visibleSessions = () => selectOverviewSessions(allSessions, { query, provider });
   const visibleNodes = () => buildOverviewTree(visibleSessions(), { collapsed, query, rootCwd: defaultCwd });
@@ -318,8 +320,9 @@ export async function runOverview({
     refreshing = true;
     try {
       const discovered = await bridge.discover(filterCwd ? { cwd: path.resolve(filterCwd) } : {});
-      orderByWorkspace = reconcileOverviewOrder(orderByWorkspace, discovered.sessions);
-      allSessions = applyOverviewOrder(discovered.sessions, orderByWorkspace);
+      const activeSessions = discovered.sessions.filter((session) => !archivedSessionIds.has(session.id));
+      orderByWorkspace = reconcileOverviewOrder(orderByWorkspace, activeSessions);
+      allSessions = applyOverviewOrder(activeSessions, orderByWorkspace);
       warnings = discovered.warnings;
       notice = `마지막 갱신 ${new Date().toLocaleTimeString()}`;
     } catch (error) {
@@ -371,12 +374,49 @@ export async function runOverview({
     })();
   };
 
+  const archiveSession = (target) => {
+    if (pendingArchiveId !== target.id) {
+      pendingArchiveId = target.id;
+      notice = target.provider === "claude"
+        ? `${target.name}: Agent View 작업과 worktree를 정리하고 transcript는 보존합니다. Alt+X를 다시 누르면 실행합니다.`
+        : `${target.name}: 로그를 archived_sessions로 옮겨 보존합니다. Alt+X를 다시 누르면 실행합니다.`;
+      render();
+      return;
+    }
+
+    pendingArchiveId = null;
+    busy = true;
+    notice = `${target.name} 세션을 보관하는 중입니다.`;
+    render();
+    const scope = filterCwd ? { cwd: path.resolve(filterCwd) } : {};
+    void (async () => {
+      try {
+        await bridge.archive(target.id, scope);
+        archivedSessionIds.add(target.id);
+        allSessions = allSessions.filter((session) => session.id !== target.id);
+        let closeWarning = null;
+        try { await workspace.closeSessionView?.(target); }
+        catch (error) { closeWarning = { provider: "waga", message: `보관된 세션 창을 닫지 못했습니다: ${error.message}` }; }
+        selectedKey = null;
+        await refresh({ whileBusy: true });
+        notice = `${target.name} 세션을 보관했습니다. 대화 로그는 유지됩니다.`;
+        if (closeWarning) warnings = [closeWarning, ...warnings];
+      } catch (error) {
+        warnings = [{ provider: target.provider, message: error.message }];
+      } finally {
+        busy = false;
+        if (!closed) render();
+      }
+    })();
+  };
+
   const onKeypress = (text, key = {}) => {
     if (busy || closed) return;
     if ((key.ctrl && (key.name === "q" || key.name === "c")) || (key.meta && key.name === "q")) {
       leave();
       return;
     }
+    if (!(key.meta && key.name === "x")) pendingArchiveId = null;
     if (newTask) {
       const cells = graphemes(newTask.prompt);
       if (key.name === "escape") newTask = null;
@@ -417,6 +457,10 @@ export async function runOverview({
     }
     const nodes = visibleNodes();
     reconcileSelection(nodes);
+    if (key.meta && key.name === "x" && nodes[selected]?.type === "session") {
+      archiveSession(nodes[selected].session);
+      return;
+    }
     if (key.shift && (key.name === "up" || key.name === "down") && nodes[selected]?.type === "session") {
       const target = nodes[selected];
       const visibleIds = nodes.filter((node) => node.type === "session" && node.workspaceKey === target.workspaceKey).map((node) => node.session.id);

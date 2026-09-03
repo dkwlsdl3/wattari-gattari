@@ -56,6 +56,10 @@ export class DirectWorkspace {
     }
   }
 
+  async closeSessionView() {
+    return { closed: false };
+  }
+
   async leave() {
     return { closeOverview: true };
   }

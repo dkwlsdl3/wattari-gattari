@@ -44,6 +44,11 @@ export class SessionBridge {
     return this.#provider(provider).create(prompt.trim(), { cwd });
   }
 
+  async archive(target, { cwd } = {}) {
+    const { provider, session } = await this.#resolve(target, cwd);
+    return provider.archive(session);
+  }
+
   async send(target, message, { cwd } = {}) {
     const { provider, session } = await this.#resolve(target, cwd);
     const requestId = crypto.randomUUID();

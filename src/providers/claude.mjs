@@ -107,6 +107,15 @@ export class ClaudeProvider {
     return { provider: this.name, nativeId: parseClaudeBackgroundId(stdout) };
   }
 
+  async archive(session) {
+    if (!SHORT_ID.test(session.nativeId)) {
+      throw Object.assign(new Error(`Claude background id is invalid: ${session.nativeId}`), { code: "CLAUDE_BACKGROUND_INVALID" });
+    }
+    const cwd = canonical(session.projectCwd ?? session.cwd ?? process.cwd());
+    await this.#run(["rm", session.nativeId], { cwd });
+    return { target: session.id, archived: true };
+  }
+
   async send(session, message, { requestId }) {
     const endpoint = this.#endpointFactory({ homeDirectory: this.#home, cwd: process.cwd() });
     try {

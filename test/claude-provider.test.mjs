@@ -39,6 +39,22 @@ test("Claude create starts an official background agent in the requested workspa
   });
 });
 
+test("Claude archive removes only the Agents background job through the native CLI", async () => {
+  let invocation;
+  const provider = new ClaudeProvider({
+    run: async (args, options) => {
+      invocation = { args, options };
+      return { stdout: "" };
+    },
+  });
+  const result = await provider.archive({ id: "claude:full-id", nativeId: "1234abcd", projectCwd: "/work/project" });
+  assert.deepEqual(result, { target: "claude:full-id", archived: true });
+  assert.deepEqual(invocation, {
+    args: ["rm", "1234abcd"],
+    options: { cwd: "/work/project" },
+  });
+});
+
 test("Claude provider joins agents JSON to the live peer registry", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-claude-provider-"));
   const sessions = path.join(root, ".claude", "sessions");
