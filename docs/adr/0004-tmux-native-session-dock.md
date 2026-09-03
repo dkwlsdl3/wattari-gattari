@@ -30,7 +30,11 @@ tmux 안에서 다시 별도 tmux client를 attach하면 prefix, detach, mouse �
 - `Ctrl+N`은 새 세션 입력기를 열고 `Tab`으로 Claude/Codex를 전환합니다. Claude는 공개
   background CLI, Codex는 기존 native App Server daemon으로 생성하며 완료 후 목록을
   새로고침합니다. 문자 명령은 IME 조합 상태에 영향받지 않도록 `Ctrl+N`, `Ctrl+R`,
-  `Ctrl+Q`를 사용합니다.
+  `Ctrl+Q`를 사용합니다. 단독 `Esc` 취소는 Node key parser의 기본 500ms 대기 대신 짧은
+  escape 판별 시간을 사용합니다.
+- `waga`를 실행한 cwd는 활성 세션이 없어도 overview의 첫 workspace로 고정합니다. 전역
+  dock을 다른 cwd에서 다시 열면 코드 지문이 같더라도 overview window만 새 cwd에서
+  respawn하고, provider 네이티브 window와 세션은 유지합니다.
 - 선택한 Claude 세션은 `claude attach <native-id>`, Codex 세션은 기존 native daemon의
   socket을 지정한 `codex resume <native-id> --remote …`로 엽니다.
 - 각 네이티브 TUI는 tmux window 하나를 사용하며 session ID를 window option에 기록합니다.
@@ -49,10 +53,10 @@ tmux 안에서 다시 별도 tmux client를 attach하면 prefix, detach, mouse �
   드래그 선택을 존중합니다.
 - overview와 네이티브 window는 detach 뒤에도 남습니다. 이는 provider 세션을 소유하기
   위해서가 아니라 terminal view를 재사용하기 위한 수명입니다.
-- 새 `waga` 진입 프로세스는 설치된 `src/**/*.mjs` 내용 지문을 overview window option과
-  비교합니다. 지문이 다르거나 없는 구 overview만 `respawn-window`로 교체하고, provider
-  네이티브 window와 세션은 유지합니다. 별도 watcher daemon이나 수동 restart 명령은
-  추가하지 않습니다.
+- 새 `waga` 진입 프로세스는 설치된 `src/**/*.mjs` 내용 지문과 launch cwd를 overview
+  window option과 비교합니다. 둘 중 하나가 다르거나 없는 구 overview만
+  `respawn-window`로 교체하고, provider 네이티브 window와 세션은 유지합니다. 별도
+  watcher daemon이나 수동 restart 명령은 추가하지 않습니다.
 
 ## 경계
 

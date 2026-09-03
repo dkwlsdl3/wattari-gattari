@@ -82,6 +82,10 @@ TUI를 엽니다. `/`는 검색, `Tab`은 전체 → Claude → Codex 필터 순
 조합 대기 없이 동작합니다. 기본 `auto` backend는 tmux가 있으면 사용하고, 실행 파일이
 없으면 `direct` mode로 전환합니다.
 
+`waga`를 실행한 폴더는 활성 세션이 하나도 없어도 트리 맨 앞에 표시됩니다. 다른 폴더에서
+전역 dock을 다시 열면 overview만 새 실행 폴더 기준으로 갱신하며, 이미 열린 네이티브 세션
+window와 provider 작업은 그대로 유지합니다.
+
 tmux backend의 네이티브 TUI에서는 prefix 뒤 `0`으로 dock에 돌아옵니다. Waga 격리
 server에서는 `Alt+G`도 동작합니다. direct mode에서는 Claude의 `Ctrl+Z`, Codex의
 `Ctrl+D`로 native view를 빠져나오면 같은 overview로 복귀하며 provider session은 계속

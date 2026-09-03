@@ -83,6 +83,11 @@ to choose Claude or Codex, then `Enter` to create a real background session.
 IME composition delays. The default `auto` backend uses tmux when available and
 otherwise falls back to `direct` mode.
 
+The directory where `waga` was launched appears first even when it has no active
+sessions. Re-entering the global dock from another directory refreshes only the
+overview for that launch directory; existing native windows and provider work
+keep running.
+
 With tmux, use your prefix followed by `0` to return to the dock; Waga's isolated
 server also provides `Alt+G`. In direct mode, detach the native view with `Ctrl+Z`
 in Claude or `Ctrl+D` in Codex. The provider session keeps running.

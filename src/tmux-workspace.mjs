@@ -139,22 +139,28 @@ export class TmuxWorkspace {
     ];
     if (filter) commandArgs.push("--cwd", filter);
     const command = shellCommand("env", commandArgs);
-    let replaceRevision = false;
+    let replaceOverview = false;
     if (exists.code !== 0) {
       await this.#call([...prefix, "new-session", "-d", "-s", sessionName, "-n", "overview", "-c", workspace, command]);
-      replaceRevision = true;
+      replaceOverview = true;
     } else {
-      const windows = await this.#call([...prefix, "list-windows", "-t", sessionName, "-F", "#{window_name}\t#{@waga_revision}"]);
+      const windows = await this.#call([...prefix, "list-windows", "-t", sessionName, "-F", "#{window_name}\t#{@waga_revision}\t#{@waga_cwd}"]);
       const overview = windows.stdout.split("\n").find((line) => line.split("\t", 1)[0] === "overview");
       if (!overview) {
         await this.#call([...prefix, "new-window", "-d", "-t", sessionName, "-n", "overview", "-c", workspace, command]);
-        replaceRevision = true;
-      } else if (overview.split("\t")[1] !== this.#revision) {
-        await this.#call([...prefix, "respawn-window", "-k", "-t", `${sessionName}:overview`, "-c", workspace, command]);
-        replaceRevision = true;
+        replaceOverview = true;
+      } else {
+        const [, revision, launchCwd] = overview.split("\t");
+        if (revision !== this.#revision || launchCwd !== workspace) {
+          await this.#call([...prefix, "respawn-window", "-k", "-t", `${sessionName}:overview`, "-c", workspace, command]);
+          replaceOverview = true;
+        }
       }
     }
-    if (replaceRevision) await this.#call([...prefix, "set-window-option", "-t", `${sessionName}:overview`, "@waga_revision", this.#revision]);
+    if (replaceOverview) {
+      await this.#call([...prefix, "set-window-option", "-t", `${sessionName}:overview`, "@waga_revision", this.#revision]);
+      await this.#call([...prefix, "set-window-option", "-t", `${sessionName}:overview`, "@waga_cwd", workspace]);
+    }
     await this.#configure(prefix, sessionName, mode);
 
     if (insideTmux) {

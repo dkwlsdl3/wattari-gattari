@@ -3,6 +3,7 @@ import { runOverview } from "./overview.mjs";
 import { enterWagaDock } from "./tmux-workspace.mjs";
 
 export async function enterDirectDock({
+  cwd = process.cwd(),
   filterCwd = null,
   bridge,
   inputStream = process.stdin,
@@ -13,6 +14,7 @@ export async function enterDirectDock({
 } = {}) {
   const code = await overview({
     filterCwd,
+    defaultCwd: cwd,
     bridge,
     workspace,
     inputStream,

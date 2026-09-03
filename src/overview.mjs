@@ -6,6 +6,7 @@ import { TmuxWorkspace } from "./tmux-workspace.mjs";
 
 const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
+const ESCAPE_CODE_TIMEOUT_MS = 25;
 const color = (code, text) => `${ESC}${code}m${text}${RESET}`;
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
@@ -84,8 +85,9 @@ export function selectOverviewSessions(sessions, { query = "", provider = null, 
     .slice(0, limit);
 }
 
-export function buildOverviewTree(sessions, { collapsed = new Set(), query = "" } = {}) {
+export function buildOverviewTree(sessions, { collapsed = new Set(), query = "", rootCwd = null } = {}) {
   const workspaces = new Map();
+  if (rootCwd && !query) workspaces.set(path.resolve(rootCwd), []);
   for (const session of sessions) {
     const cwd = String(session.projectCwd || session.cwd || "/");
     if (!workspaces.has(cwd)) workspaces.set(cwd, []);
@@ -123,7 +125,7 @@ function counts(sessions) {
   return `${count("needs-input")} need input   ${count("working")} working   ${count("idle")} ready`;
 }
 
-export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", nodes = buildOverviewTree(sessions, { collapsed, query }), selected = 0, width = 100, height = 30, warnings = [], provider = null, notice = "", newTask = null, nativeHint = "네이티브 TUI: tmux prefix + 0 → overview" }) {
+export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, notice = "", newTask = null, nativeHint = "네이티브 TUI: tmux prefix + 0 → overview" }) {
   const usableWidth = Math.max(1, width - 4);
   const visibleRows = Math.max(1, height - 9);
   const safeSelected = Math.max(0, Math.min(selected, Math.max(0, nodes.length - 1)));
@@ -211,7 +213,7 @@ export async function runOverview({
   let busy = false;
 
   const visibleSessions = () => selectOverviewSessions(allSessions, { query, provider });
-  const visibleNodes = () => buildOverviewTree(visibleSessions(), { collapsed, query });
+  const visibleNodes = () => buildOverviewTree(visibleSessions(), { collapsed, query, rootCwd: defaultCwd });
   const reconcileSelection = (nodes) => {
     const keyedIndex = selectedKey === null ? -1 : nodes.findIndex((node) => node.key === selectedKey);
     selected = keyedIndex >= 0 ? keyedIndex : Math.max(0, Math.min(selected, Math.max(0, nodes.length - 1)));
@@ -225,7 +227,7 @@ export async function runOverview({
   };
   const render = () => {
     const sessions = visibleSessions();
-    const nodes = buildOverviewTree(sessions, { collapsed, query });
+    const nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd: defaultCwd });
     reconcileSelection(nodes);
     outputStream.write(`${ESC}H${ESC}J${buildOverviewFrame({
       sessions,
@@ -239,6 +241,7 @@ export async function runOverview({
       provider,
       notice,
       newTask,
+      rootCwd: defaultCwd,
       nativeHint,
     })}`);
   };
@@ -260,7 +263,7 @@ export async function runOverview({
   };
 
   outputStream.write(`${ESC}?1049h${ESC}?25l${ESC}2J`);
-  readline.emitKeypressEvents(inputStream);
+  readline.emitKeypressEvents(inputStream, { escapeCodeTimeout: ESCAPE_CODE_TIMEOUT_MS });
   inputStream.setRawMode(true);
   inputStream.resume();
 

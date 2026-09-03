@@ -73,7 +73,7 @@ export async function runCli(args = process.argv.slice(2), {
       outputStream: stdout,
       errorOutput: stderr,
     })).code;
-    else if (options.command === "overview") return await overview({ filterCwd: options.cwd ? cwd : null, bridge, inputStream: stdin, outputStream: stdout, errorOutput: stderr });
+    else if (options.command === "overview") return await overview({ filterCwd: options.cwd ? cwd : null, defaultCwd: cwd, bridge, inputStream: stdin, outputStream: stdout, errorOutput: stderr });
     else if (options.command === "list" || options.command === "default") writeList(stdout, stderr, await bridge.discover({ provider: options.provider, cwd: options.cwd ? cwd : undefined }), options.json);
     else if (options.command === "send") {
       const result = await bridge.send(options.target, options.message, { cwd: options.cwd ? cwd : undefined });

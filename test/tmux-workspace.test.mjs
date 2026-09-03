@@ -110,7 +110,7 @@ test("enter reuses an overview whose code revision is current", async () => {
     calls.push(args);
     if (args.includes("has-session")) return { stdout: "", stderr: "", code: 0 };
     if (args.includes("list-windows") && args.at(-1).includes("@waga_revision")) {
-      return { stdout: "overview\tcurrent\n", stderr: "", code: 0 };
+      return { stdout: "overview\tcurrent\t/tmp/project\n", stderr: "", code: 0 };
     }
     if (args.includes("list-windows")) return { stdout: "@0\n", stderr: "", code: 0 };
     return { stdout: "", stderr: "", code: 0 };
@@ -120,6 +120,25 @@ test("enter reuses an overview whose code revision is current", async () => {
   await workspace.enter({ cwd: "/tmp/project" });
 
   assert.ok(!calls.some((args) => args.includes("respawn-window")));
+});
+
+test("enter respawns the overview when the launch workspace changes", async () => {
+  const calls = [];
+  const run = async (args) => {
+    calls.push(args);
+    if (args.includes("has-session")) return { stdout: "", stderr: "", code: 0 };
+    if (args.includes("list-windows") && args.at(-1).includes("@waga_revision")) {
+      return { stdout: "overview\tcurrent\t/tmp/old-project\n", stderr: "", code: 0 };
+    }
+    if (args.includes("list-windows")) return { stdout: "@0\n", stderr: "", code: 0 };
+    return { stdout: "", stderr: "", code: 0 };
+  };
+  const workspace = new TmuxWorkspace({ run, launch: async () => ({ code: 0 }), env: {}, revision: "current", socketName: "waga-test" });
+
+  await workspace.enter({ cwd: "/tmp/new-project" });
+
+  assert.ok(calls.some((args) => args.includes("respawn-window") && args.includes("/tmp/new-project")));
+  assert.ok(calls.some((args) => args.includes("set-window-option") && args.includes("@waga_cwd") && args.at(-1) === "/tmp/new-project"));
 });
 
 test("enter checks and replaces a stale overview from another window in the same Waga session", async () => {

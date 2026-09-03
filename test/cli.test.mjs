@@ -71,6 +71,7 @@ test("internal overview discovers all projects without an explicit cwd", async (
   const overview = async (options) => { seen = options; return 0; };
   assert.equal(await runCli(["overview"], { stdin, stdout, stderr: output(), bridge: {}, overview }), 0);
   assert.equal(seen.filterCwd, null);
+  assert.equal(seen.defaultCwd, path.resolve(process.cwd()));
 });
 
 test("text list keeps provider warnings off stdout", async () => {

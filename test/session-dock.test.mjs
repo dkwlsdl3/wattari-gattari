@@ -22,6 +22,7 @@ test("direct dock composes the overview with native detach guidance", async () =
   });
   assert.deepEqual(result, { code: 7, mode: "direct" });
   assert.equal(seen.filterCwd, null);
+  assert.equal(seen.defaultCwd, base.cwd);
   assert.equal(seen.bridge, base.bridge);
   assert.equal(seen.workspace, workspace);
   assert.match(seen.nativeHint, /Claude Ctrl\+Z/);

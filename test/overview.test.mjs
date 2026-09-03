@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import test from "node:test";
 
 import { buildOverviewFrame, buildOverviewTree, runOverview, selectOverviewSessions } from "../src/overview.mjs";
@@ -28,6 +29,21 @@ function capturedOutput() {
     writes,
     write(chunk) { writes.push(String(chunk)); },
   });
+}
+
+function rawTtyInput() {
+  const input = new PassThrough();
+  input.isTTY = true;
+  input.setRawMode = () => {};
+  return input;
+}
+
+async function waitFor(check, timeoutMs = 200) {
+  const deadline = performance.now() + timeoutMs;
+  while (!check()) {
+    if (performance.now() >= deadline) throw new Error(`condition was not met within ${timeoutMs}ms`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 function plain(value) {
@@ -69,6 +85,16 @@ test("overview groups sessions into collapsible workspace trees", () => {
     ["workspace", "workspace:/work/other"],
     ["session", "codex:3"],
   ]);
+});
+
+test("overview tree includes the launch workspace even when it has no sessions", () => {
+  assert.deepEqual(buildOverviewTree([], { rootCwd: "/work/current" }), [{
+    type: "workspace",
+    key: "workspace:/work/current",
+    cwd: "/work/current",
+    name: "current",
+    sessionCount: 0,
+  }]);
 });
 
 test("overview groups provider worktrees by their owning project", () => {
@@ -120,6 +146,32 @@ test("empty overview points to the control-key refresh command", () => {
   assert.doesNotMatch(frame, /(^|\s)r을 눌러/);
 });
 
+test("Escape cancels the composer without the readline default delay", async () => {
+  const input = rawTtyInput();
+  const output = capturedOutput();
+  const bridge = { async discover() { return { sessions: [{ ...sessions[0], cwd: "/work/current" }], warnings: [] }; } };
+  const workspace = {
+    async focusOrOpen() {},
+    async leave() { return { closeOverview: true }; },
+  };
+  const running = runOverview({ bridge, workspace, defaultCwd: "/work/current", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.match(plain(output.writes.at(-1)), /current/);
+    input.write("\u000e");
+    await waitFor(() => /새 세션 ·/.test(plain(output.writes.at(-1))));
+    const started = performance.now();
+    input.write("\u001b");
+    await waitFor(() => !/새 세션 ·/.test(plain(output.writes.at(-1))));
+    assert.ok(performance.now() - started < 200);
+    input.write("\u001b[B");
+    await waitFor(() => selectedSessionName(output) === "API");
+  } finally {
+    input.end();
+    await running;
+  }
+});
+
 test("Enter collapses and expands a workspace without opening a native session", async () => {
   const input = ttyInput();
   const output = capturedOutput();
@@ -131,7 +183,7 @@ test("Enter collapses and expands a workspace without opening a native session",
     async focusOrOpen() { nativeOpens += 1; },
     async leave() { return { closeOverview: true }; },
   };
-  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  const running = runOverview({ bridge, workspace, defaultCwd: "/work/api", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
   await new Promise((resolve) => setImmediate(resolve));
 
   input.emit("keypress", "", { name: "return" });
@@ -201,6 +253,7 @@ test("overview pauses discovery while a direct native TUI owns the terminal", as
   const running = runOverview({
     bridge,
     workspace,
+    defaultCwd: "/work/api",
     commandFor: async () => ({ command: "provider", args: [], cwd: "/tmp" }),
     inputStream: input,
     outputStream: output,
@@ -249,7 +302,7 @@ test("overview keeps newer keyboard selection when an older refresh completes", 
     async leave() { return { closeOverview: true }; },
   };
 
-  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 5, listenForSignals: false });
+  const running = runOverview({ bridge, workspace, defaultCwd: "/work/p", inputStream: input, outputStream: output, refreshMs: 5, listenForSignals: false });
   await refreshStarted;
   input.emit("keypress", "", { name: "down" });
   input.emit("keypress", "", { name: "down" });
@@ -278,7 +331,7 @@ test("overview navigation stops at tree boundaries instead of wrapping", async (
     async focusOrOpen() {},
     async leave() { return { closeOverview: true }; },
   };
-  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  const running = runOverview({ bridge, workspace, defaultCwd: "/work/p", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
   await new Promise((resolve) => setImmediate(resolve));
 
   input.emit("keypress", "", { name: "up" });
@@ -302,7 +355,7 @@ test("provider tabs clear stale rows and select the first matching session", asy
     async focusOrOpen() {},
     async leave() { return { closeOverview: true }; },
   };
-  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  const running = runOverview({ bridge, workspace, defaultCwd: "/work/p", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
   await new Promise((resolve) => setImmediate(resolve));
 
   input.emit("keypress", "", { name: "tab" });
@@ -344,7 +397,7 @@ test("overview uses IME-independent control shortcuts for commands", async (t) =
       return { closeOverview: true };
     },
   };
-  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  const running = runOverview({ bridge, workspace, defaultCwd: "/work/p", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
   await new Promise((resolve) => setImmediate(resolve));
 
   input.emit("keypress", "j", { name: "j", sequence: "j" });
@@ -390,6 +443,7 @@ test("overview creates a provider-owned session from its one-line composer", asy
   };
   const running = runOverview({ bridge, workspace, defaultCwd: "/work/new", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
   await new Promise((resolve) => setImmediate(resolve));
+  assert.match(plain(output.writes.at(-1)), /▾\s+new.*0 sessions/);
 
   input.emit("keypress", "n", { name: "n", sequence: "n" });
   assert.doesNotMatch(plain(output.writes.at(-1)), /새 세션 ·/);
