@@ -162,7 +162,7 @@ test("overview frame distinguishes providers and keeps navigation help visible",
   assert.match(frame, /Alt\+Q 나가기/);
   assert.match(frame, /Shift\+↑↓ 순서/);
   assert.match(frame, /tmux prefix \+ 0/);
-  assert.match(frame, /\x1b\[1;38;2;56;189;248m/);
+  assert.match(frame, /\x1b\[1;38;2;186;213;232m/);
   assert.doesNotMatch(frame, /\x1b\[38;5;/);
 });
 
@@ -183,6 +183,24 @@ test("overview formats and displays cached Claude usage", () => {
   assert.equal(formatClaudeUsage(usage), "Claude 5시간 90% · 주간 6% 남음 · 9/7 11:24 초기화");
   const frame = plain(buildOverviewFrame({ sessions, providerUsage: { claude: usage }, width: 120, height: 20 }));
   assert.match(frame, /Claude 5시간 90% · 주간 6% 남음 · 9\/7 11:24 초기화/);
+});
+
+test("overview uses native provider colors and colors usage independently", () => {
+  const frame = buildOverviewFrame({
+    sessions,
+    providerUsage: {
+      claude: { fiveHour: { remainingPercent: 90 }, weekly: { remainingPercent: 6 } },
+      codex: { remainingPercent: 2, windowDurationMins: 10_080 },
+    },
+    selected: 2,
+    width: 120,
+    height: 20,
+  });
+
+  assert.match(frame, /\x1b\[1;38;2;217;119;87mClaude 5시간 90% · 주간 6% 남음\x1b\[0m/);
+  assert.match(frame, /\x1b\[1;36mCodex 주간 2% 남음\x1b\[0m/);
+  assert.match(frame, /\x1b\[1;38;2;158;203;176m●\x1b\[0m.*\x1b\[38;2;190;199;211mworking/);
+  assert.doesNotMatch(frame, /38;2;(56;189;248|250;204;21|192;132;252|34;211;238|45;212;191)m/);
 });
 
 test("Shift+Up and Shift+Down persist manual order across refreshes", async (t) => {
@@ -697,11 +715,11 @@ test("overview creates a provider-owned session from its one-line composer", asy
   pressAlt(input, "n");
   assert.match(plain(output.writes.at(-1)), /새 세션 생성\s+◆\s+CLAUDE\s+◆\s+\/work\/new/);
   assert.match(plain(output.writes.at(-1)), /Tab → CODEX 전환/);
-  assert.match(output.writes.at(-1), /\x1b\[1;38;2;192;132;252m◆  CLAUDE  ◆/);
+  assert.match(output.writes.at(-1), /\x1b\[1;38;2;217;119;87m◆  CLAUDE  ◆/);
   input.emit("keypress", "", { name: "tab" });
   assert.match(plain(output.writes.at(-1)), /새 세션 생성\s+■\s+CODEX\s+■\s+\/work\/new/);
   assert.match(plain(output.writes.at(-1)), /Tab → CLAUDE 전환/);
-  assert.match(output.writes.at(-1), /\x1b\[1;38;2;34;211;238m■  CODEX  ■/);
+  assert.match(output.writes.at(-1), /\x1b\[1;36m■  CODEX  ■/);
   input.emit("keypress", "작업", { sequence: "작업" });
   input.emit("keypress", "", { name: "left" });
   input.emit("keypress", "새", { sequence: "새" });

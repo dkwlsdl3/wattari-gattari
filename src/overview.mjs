@@ -10,19 +10,19 @@ const ESCAPE_CODE_TIMEOUT_MS = 25;
 const color = (code, text) => `${ESC}${code}m${text}${RESET}`;
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 const THEME = {
-  title: "1;38;2;56;189;248",
-  primary: "1;38;2;226;232;240",
-  muted: "38;2;148;163;184",
-  divider: "38;2;71;85;105",
-  selected: "48;2;30;41;59",
-  cursor: "1;38;2;250;204;21",
-  claude: "1;38;2;192;132;252",
-  codex: "1;38;2;34;211;238",
-  working: "1;38;2;74;222;128",
-  idle: "1;38;2;56;189;248",
-  error: "1;38;2;251;113;133",
-  warning: "1;38;2;251;191;36",
-  hint: "1;38;2;45;212;191",
+  title: "1;38;2;186;213;232",
+  primary: "1;38;2;241;245;249",
+  muted: "38;2;190;199;211",
+  divider: "38;2;100;116;139",
+  selected: "48;2;58;72;94",
+  cursor: "1;38;2;226;232;240",
+  // Claude's brand coral and the native Codex TUI's terminal-defined cyan.
+  claude: "1;38;2;217;119;87",
+  codex: "1;36",
+  working: "1;38;2;158;203;176",
+  idle: "1;38;2;164;190;205",
+  error: "1;38;2;224;154;164",
+  warning: "1;38;2;224;190;132",
 };
 
 function safeText(value) {
@@ -203,6 +203,24 @@ export function formatClaudeUsage(usage) {
   return `Claude ${parts.join(" · ")} 남음${resetLabel(usage.weekly?.resetsAt)}`;
 }
 
+function coloredUsageLine(segments, width) {
+  let result = "";
+  let used = 0;
+  for (const segment of segments) {
+    const separator = used ? "   " : "";
+    const separatorWidth = widthOf(separator);
+    if (used + separatorWidth >= width) break;
+    result += separator;
+    used += separatorWidth;
+    const text = fit(segment.text, width - used).trimEnd();
+    if (!text) break;
+    result += color(segment.color, text);
+    used += widthOf(text);
+    if (text.endsWith("…")) break;
+  }
+  return `${result}${" ".repeat(Math.max(0, width - used))}`;
+}
+
 export function nativeReturnHint(mode) {
   return mode === "isolated"
     ? "네이티브 TUI: Alt+G → dock"
@@ -211,7 +229,10 @@ export function nativeReturnHint(mode) {
 
 export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, providerUsage = {}, notice = "", newTask = null, renameTask = null, nativeHint = nativeReturnHint(null) }) {
   const usableWidth = Math.max(1, width - 4);
-  const usageLabels = [formatClaudeUsage(providerUsage.claude), formatCodexUsage(providerUsage.codex)].filter(Boolean);
+  const usageLabels = [
+    { text: formatClaudeUsage(providerUsage.claude), color: THEME.claude },
+    { text: formatCodexUsage(providerUsage.codex), color: THEME.codex },
+  ].filter(({ text }) => text);
   const visibleRows = Math.max(1, height - (usageLabels.length ? 10 : 9));
   const safeSelected = Math.max(0, Math.min(selected, Math.max(0, nodes.length - 1)));
   const offset = Math.max(0, Math.min(safeSelected - Math.floor(visibleRows / 2), Math.max(0, nodes.length - visibleRows)));
@@ -221,7 +242,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
   const title = wide ? "WATTARI GATTARI  Claude + Codex session dock" : "WAGA · session dock";
   lines.push(`  ${color(THEME.title, fit(title, usableWidth))}`);
   lines.push(`  ${color(THEME.muted, fit(`${counts(sessions)}${provider ? `   filter: ${provider}` : ""}`, usableWidth))}`);
-  if (usageLabels.length) lines.push(`  ${color(THEME.hint, fit(usageLabels.join("   "), usableWidth))}`);
+  if (usageLabels.length) lines.push(`  ${coloredUsageLine(usageLabels, usableWidth)}`);
   lines.push(`  ${color(THEME.divider, "─".repeat(Math.max(1, usableWidth)))}`);
 
   if (!sessions.length) lines.push(`  ${color(THEME.muted, query ? "검색 결과가 없습니다." : "발견된 세션이 없습니다. Alt+R을 눌러 새로고침하세요.")}`);
@@ -241,8 +262,8 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     const providerName = wide ? (session.provider === "claude" ? "CLAUDE" : "CODEX ") : (session.provider === "claude" ? "CLAUDE" : "CODEX");
     const providerColor = session.provider === "claude" ? THEME.claude : THEME.codex;
     const row = wide
-      ? `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)}  ${fit(session.name, nameWidth)}  ${color(statusColor, fit(status, 11))}`
-      : `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)} ${fit(session.name, nameWidth)} ${color(statusColor, fit(status, 8))}`;
+      ? `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)}  ${fit(session.name, nameWidth)}  ${color(THEME.muted, fit(status, 11))}`
+      : `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)} ${fit(session.name, nameWidth)} ${color(THEME.muted, fit(status, 8))}`;
     lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
   }
   const helpLines = wide
@@ -281,7 +302,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     if (warnings.length) lines.push(`  ${color(THEME.warning, fit(`경고: ${safeText(warnings[0].provider)} · ${safeText(warnings[0].message)}`, usableWidth))}`);
     else lines.push(`  ${color(THEME.muted, fit(notice || "세션 상태는 자동으로 새로고침됩니다.", usableWidth))}`);
     for (const help of helpLines) lines.push(`  ${color(THEME.muted, fit(help, usableWidth))}`);
-    lines.push(`  ${color(THEME.hint, fit(nativeHint, usableWidth))}`);
+    lines.push(`  ${color(THEME.muted, fit(nativeHint, usableWidth))}`);
     if (query) lines.push(`  ${color(THEME.cursor, fit(`검색: ${query}`, usableWidth))}`);
     else lines.push("");
   }
