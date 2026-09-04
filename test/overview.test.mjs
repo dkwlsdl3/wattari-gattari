@@ -437,6 +437,36 @@ test("Enter collapses and expands a workspace without opening a native session",
   assert.equal(await running, 0);
 });
 
+test("Alt+Enter forces an exact native session reattach", async () => {
+  const input = ttyInput();
+  const output = capturedOutput();
+  const calls = [];
+  const bridge = { async discover() { return { sessions: [sessions[0]], warnings: [] }; } };
+  const workspace = {
+    async focusOrOpen(...args) { calls.push(args); },
+    async leave() { return { closeOverview: true }; },
+  };
+  const running = runOverview({
+    bridge,
+    workspace,
+    defaultCwd: "/work/api",
+    commandFor: async () => ({ command: "codex", args: ["resume", "codex:1"], cwd: "/work/api" }),
+    inputStream: input,
+    outputStream: output,
+    refreshMs: 60_000,
+    listenForSignals: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  input.emit("keypress", "", { name: "down" });
+
+  input.emit("keypress", "", { name: "return", meta: true });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(calls[0][2], { force: true });
+  pressAlt(input, "q");
+  assert.equal(await running, 0);
+});
+
 test("overview discovery is global unless a cwd filter is explicit", async () => {
   for (const [filterCwd, expected] of [[null, { includeUsage: true }], ["/tmp/project", { cwd: "/tmp/project", includeUsage: true }]]) {
     const input = Object.assign(new EventEmitter(), {

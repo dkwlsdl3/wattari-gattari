@@ -44,8 +44,11 @@ Dock은 프로젝트별 접이식 목록, 검색·필터, 수동 순서, 새 세
 - `tmux`는 네이티브 TUI마다 window를 재사용하고 여러 terminal client에 같은 화면을
   제공합니다. tmux 밖에서는 격리 server를, tmux 안에서는 현재 server의 Waga session을
   사용해 중첩 tmux를 피합니다.
-- Dock에서 세션을 다시 열면 기존 window의 frontend를 정확한 `attach`/`resume` 명령으로
-  교체하므로 provider Agents View에 머물지 않습니다.
+- Dock에서 실행 중인 세션을 다시 열면 기존 window를 재시작하지 않고 즉시 선택합니다.
+  window가 종료됐거나 `Alt+Enter`로 강제 재접속할 때만 정확한 `attach`/`resume` 명령으로
+  frontend를 교체합니다.
+- 격리 tmux server의 `Alt+A`는 세션 window와 분리된 provider Agents View를 열고,
+  `Alt+G`는 Dock으로 돌아갑니다.
 - Waga session에만 mouse mode를 적용합니다. provider가 휠을 처리하면 전달하고,
   아니면 tmux scrollback을 사용합니다.
 - `direct`는 현재 terminal을 네이티브 TUI에 넘긴 뒤 detach 또는 종료 시 dock을

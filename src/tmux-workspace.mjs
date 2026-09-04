@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { EventLog } from "./event-log.mjs";
+import { nativeAgentsCommand } from "./native-launcher.mjs";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_SOCKET = `waga-${typeof process.getuid === "function" ? process.getuid() : "user"}`;
@@ -99,8 +100,8 @@ function safeWindowName(session) {
 
 function parseWindows(stdout) {
   return String(stdout).split("\n").filter(Boolean).map((line) => {
-    const [windowId, sessionId = ""] = line.split("\t");
-    return { windowId, sessionId };
+    const [windowId, sessionId = "", paneDead = "0"] = line.split("\t");
+    return { windowId, sessionId, paneDead: paneDead === "1" };
   });
 }
 
@@ -189,18 +190,25 @@ export class TmuxWorkspace {
     return { code: result.code, mode };
   }
 
-  async focusOrOpen(session, commandSpec) {
+  async focusOrOpen(session, commandSpec, { force = false } = {}) {
     const sessionName = this.#env.WAGA_TMUX_SESSION || (await this.#call(["display-message", "-p", "#{session_name}"])).stdout.trim();
     if (!sessionName) throw Object.assign(new Error("Waga tmux session is unavailable"), { code: "TMUX_SESSION_UNAVAILABLE" });
-    const listed = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}\t#{@waga_session_id}"]);
+    const listed = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}\t#{@waga_session_id}\t#{pane_dead}"]);
     const existing = parseWindows(listed.stdout).find((entry) => entry.sessionId === session.id);
+    if (existing && !existing.paneDead && !force) {
+      await this.#setSessionWindowMetadata(existing.windowId, session, commandSpec);
+      await this.#call(["select-window", "-t", existing.windowId]);
+      return { reused: true, windowId: existing.windowId };
+    }
     if (existing) {
-      this.#eventLog.record("session_view_respawn_requested", { sessionId: session.id, windowId: existing.windowId, reason: "dock_reopen" });
+      const reason = force ? "forced_reattach" : "dead_view";
+      this.#eventLog.record("session_view_respawn_requested", { sessionId: session.id, windowId: existing.windowId, reason });
       await this.#call([
         "respawn-window", "-k", "-t", existing.windowId, "-c", commandSpec.cwd,
         this.#sessionCommand(session, commandSpec),
       ]);
-      this.#eventLog.record("session_view_respawned", { sessionId: session.id, windowId: existing.windowId, reason: "dock_reopen" });
+      await this.#setSessionWindowMetadata(existing.windowId, session, commandSpec);
+      this.#eventLog.record("session_view_respawned", { sessionId: session.id, windowId: existing.windowId, reason });
       await this.#waitForSettledFrame(existing.windowId);
       await this.#call(["select-window", "-t", existing.windowId]);
       return { reused: true, windowId: existing.windowId };
@@ -215,11 +223,53 @@ export class TmuxWorkspace {
     const windowId = created.stdout.trim();
     if (!windowId) throw Object.assign(new Error("tmux did not return the native session window id"), { code: "TMUX_WINDOW_FAILED" });
     await this.#call(["set-window-option", "-t", windowId, "@waga_session_id", session.id]);
+    await this.#setSessionWindowMetadata(windowId, session, commandSpec);
     await this.#call(["set-window-option", "-t", windowId, "automatic-rename", "off"]);
     await this.#styleWindow([], windowId);
     this.#eventLog.record("session_view_opened", { sessionId: session.id, windowId, reason: "dock_open" });
     await this.#call(["select-window", "-t", windowId]);
     return { reused: false, windowId };
+  }
+
+  async focusAgentsViewFromWindow(windowId) {
+    if (!/^@[0-9]+$/.test(windowId)) {
+      throw Object.assign(new Error(`Invalid tmux window id: ${windowId}`), { code: "TMUX_WINDOW_INVALID" });
+    }
+    const providerResult = await this.#call(["show-options", "-w", "-v", "-t", windowId, "@waga_provider"], { check: false });
+    const provider = providerResult.stdout.trim();
+    if (!["claude", "codex"].includes(provider)) return { code: 0, ignored: true };
+    const cwdResult = await this.#call(["show-options", "-w", "-v", "-t", windowId, "@waga_project_cwd"], { check: false });
+    const cwd = cwdResult.stdout.trim();
+    if (!cwd) throw Object.assign(new Error(`Waga session window is missing its project cwd: ${windowId}`), { code: "TMUX_WINDOW_INVALID" });
+    const sessionResult = await this.#call(["display-message", "-p", "-t", windowId, "#{session_name}"]);
+    const sessionName = sessionResult.stdout.trim();
+    const commandSpec = nativeAgentsCommand(provider, { cwd });
+    const listed = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}\t#{@waga_agents_provider}\t#{pane_dead}"]);
+    const existing = parseWindows(listed.stdout).find((entry) => entry.sessionId === provider);
+    if (existing && !existing.paneDead) {
+      await this.#call(["select-window", "-t", existing.windowId]);
+      return { reused: true, windowId: existing.windowId };
+    }
+
+    let agentsWindowId = existing?.windowId;
+    if (agentsWindowId) {
+      await this.#call(["respawn-window", "-k", "-t", agentsWindowId, "-c", commandSpec.cwd, shellCommand(commandSpec.command, commandSpec.args)]);
+    } else {
+      const created = await this.#call([
+        "new-window", "-d", "-P", "-F", "#{window_id}", "-t", sessionName,
+        "-n", `${provider === "claude" ? "Claude" : "Codex"} Agents`, "-c", commandSpec.cwd,
+        shellCommand(commandSpec.command, commandSpec.args),
+      ]);
+      agentsWindowId = created.stdout.trim();
+      if (!agentsWindowId) throw Object.assign(new Error("tmux did not return the Agents view window id"), { code: "TMUX_WINDOW_FAILED" });
+    }
+    await this.#call(["set-window-option", "-t", agentsWindowId, "@waga_agents_provider", provider]);
+    await this.#call(["set-window-option", "-t", agentsWindowId, "@waga_provider", provider]);
+    await this.#call(["set-window-option", "-t", agentsWindowId, "@waga_project_cwd", commandSpec.cwd]);
+    await this.#call(["set-window-option", "-t", agentsWindowId, "automatic-rename", "off"]);
+    await this.#styleWindow([], agentsWindowId);
+    await this.#call(["select-window", "-t", agentsWindowId]);
+    return { reused: false, windowId: agentsWindowId };
   }
 
   async closeSessionView(session) {
@@ -295,6 +345,13 @@ export class TmuxWorkspace {
     ]);
   }
 
+  async #setSessionWindowMetadata(windowId, session, commandSpec) {
+    const provider = session.provider ?? String(session.id).split(":", 1)[0];
+    const projectCwd = path.resolve(session.projectCwd ?? commandSpec.cwd);
+    await this.#call(["set-window-option", "-t", windowId, "@waga_provider", provider]);
+    await this.#call(["set-window-option", "-t", windowId, "@waga_project_cwd", projectCwd]);
+  }
+
   async #waitForSettledFrame(windowId) {
     let previous = null;
     let stablePolls = 0;
@@ -319,9 +376,9 @@ export class TmuxWorkspace {
       ["status-left", "#[bold,fg=#38bdf8] Waga #[default]│ "],
       ["status-left-length", "20"],
       ["status-right", mode === "isolated"
-        ? "#{?#{==:#{window_name},overview},,#[bold,fg=#4ade80]Alt+G  dock }"
+        ? "#{?#{==:#{window_name},overview},,#[bold,fg=#4ade80]Alt+A agents · Alt+G dock }"
         : "#{?#{==:#{window_name},overview},,#[bold,fg=#4ade80]prefix+0  overview }"],
-      ["status-right-length", "24"],
+      ["status-right-length", "36"],
       ["base-index", "0"],
       ["renumber-windows", "on"],
       ["mouse", "on"],
@@ -337,6 +394,8 @@ export class TmuxWorkspace {
       await this.#call([...prefix, "set-option", "-s", "extended-keys", "on"]);
       await this.#call([...prefix, "set-option", "-s", "escape-time", "0"]);
       await this.#call([...prefix, "bind-key", "-n", "M-g", "select-window", "-t", ":overview"]);
+      const agentsViewCommand = shellCommand(this.#nodePath, [this.#cliPath, "tmux-agents-view", "#{window_id}"]);
+      await this.#call([...prefix, "bind-key", "-n", "M-a", "run-shell", "-b", agentsViewCommand]);
       await this.#call([...prefix, "bind-key", "-n", "S-Enter", "send-keys", "C-j"]);
     }
   }

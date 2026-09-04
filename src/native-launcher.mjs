@@ -12,11 +12,16 @@ function defaultLaunch(command, args, options) {
 }
 
 export async function openNativeAgents(provider, { cwd = process.cwd(), launch = defaultLaunch } = {}) {
+  const spec = nativeAgentsCommand(provider, { cwd });
+  return launch(spec.command, spec.args, { cwd: spec.cwd });
+}
+
+export function nativeAgentsCommand(provider, { cwd = process.cwd() } = {}) {
   const workspace = path.resolve(cwd);
   const command = provider === "claude" ? "claude" : provider === "codex" ? "codex" : null;
   if (!command) throw Object.assign(new Error(`Unknown provider: ${provider}`), { code: "PROVIDER_NOT_FOUND" });
   const args = provider === "claude" ? ["agents", "--cwd", workspace] : ["agents", "-C", workspace];
-  return launch(command, args, { cwd: workspace });
+  return { command, args, cwd: workspace };
 }
 
 export async function nativeSessionCommand(session, { codexProvider = new CodexProvider() } = {}) {

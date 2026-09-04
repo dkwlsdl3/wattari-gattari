@@ -113,3 +113,13 @@ test("open delegates to the native Agents command", async () => {
   assert.equal(code, 7);
   assert.deepEqual(seen, ["codex", path.resolve(process.cwd())]);
 });
+
+test("internal tmux Agents command delegates the source window", async () => {
+  let seen;
+  const code = await runCli(["tmux-agents-view", "@7"], {
+    stdout: output(), stderr: output(), bridge: {},
+    tmuxAgentsView: async (windowId) => { seen = windowId; return { code: 0 }; },
+  });
+  assert.equal(code, 0);
+  assert.equal(seen, "@7");
+});

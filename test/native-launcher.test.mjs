@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
 
-import { nativeSessionCommand, openNativeAgents } from "../src/native-launcher.mjs";
+import { nativeAgentsCommand, nativeSessionCommand, openNativeAgents } from "../src/native-launcher.mjs";
 
 test("native launcher delegates to provider-owned Agents TUIs", async () => {
   const calls = [];
@@ -11,6 +11,15 @@ test("native launcher delegates to provider-owned Agents TUIs", async () => {
   await openNativeAgents("codex", { cwd: "/tmp", launch });
   assert.deepEqual(calls[0].slice(0, 2), ["claude", ["agents", "--cwd", path.resolve("/tmp")]]);
   assert.deepEqual(calls[1].slice(0, 2), ["codex", ["agents", "-C", path.resolve("/tmp")]]);
+});
+
+test("native Agents commands are reusable by retained tmux views", () => {
+  assert.deepEqual(nativeAgentsCommand("claude", { cwd: "/tmp" }), {
+    command: "claude", args: ["agents", "--cwd", path.resolve("/tmp")], cwd: path.resolve("/tmp"),
+  });
+  assert.deepEqual(nativeAgentsCommand("codex", { cwd: "/work" }), {
+    command: "codex", args: ["agents", "-C", path.resolve("/work")], cwd: path.resolve("/work"),
+  });
 });
 
 test("native session commands attach exact provider sessions", async () => {

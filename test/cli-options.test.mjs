@@ -42,3 +42,10 @@ test("open accepts only native providers", () => {
   assert.equal(parseCliArgs(["open", "claude"]).provider, "claude");
   assert.throws(() => parseCliArgs(["open", "other"]), { code: "INVALID_ARGUMENT" });
 });
+
+test("internal tmux Agents view accepts only a tmux window id", () => {
+  assert.deepEqual(parseCliArgs(["tmux-agents-view", "@7"]), {
+    command: "tmux-agents-view", cwd: null, provider: null, backend: "auto", waitTimeoutMs: 1_800_000, replyTimeoutMs: 180_000, untilIdle: false, json: false, windowId: "@7",
+  });
+  assert.throws(() => parseCliArgs(["tmux-agents-view", "not-a-window"]), { code: "INVALID_ARGUMENT" });
+});

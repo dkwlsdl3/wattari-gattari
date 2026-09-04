@@ -14,6 +14,7 @@ import { ClaudeProvider } from "./providers/claude.mjs";
 import { CodexProvider } from "./providers/codex.mjs";
 import { SessionBridge } from "./session-bridge.mjs";
 import { enterSessionDock } from "./session-dock.mjs";
+import { TmuxWorkspace } from "./tmux-workspace.mjs";
 
 function usage() {
   return [
@@ -30,6 +31,10 @@ function usage() {
 
 function defaultBridge() {
   return new SessionBridge({ providers: [new ClaudeProvider(), new CodexProvider()] });
+}
+
+async function openTmuxAgentsView(windowId) {
+  return new TmuxWorkspace().focusAgentsViewFromWindow(windowId);
 }
 
 function writeList(output, errorOutput, { sessions, warnings }, json) {
@@ -50,6 +55,7 @@ export async function runCli(args = process.argv.slice(2), {
   launcher = openNativeAgents,
   dock = enterSessionDock,
   overview = runOverview,
+  tmuxAgentsView = openTmuxAgentsView,
   orderStore = new DockOrderStore(),
 } = {}) {
   let options;
@@ -77,6 +83,7 @@ export async function runCli(args = process.argv.slice(2), {
       orderStore,
     })).code;
     else if (options.command === "overview") return await overview({ filterCwd: options.cwd ? cwd : null, defaultCwd: cwd, bridge, inputStream: stdin, outputStream: stdout, errorOutput: stderr, orderStore });
+    else if (options.command === "tmux-agents-view") return (await tmuxAgentsView(options.windowId)).code ?? 0;
     else if (options.command === "list" || options.command === "default") writeList(stdout, stderr, await bridge.discover({ provider: options.provider, cwd: options.cwd ? cwd : undefined }), options.json);
     else if (options.command === "send") {
       const result = await bridge.send(options.target, options.message, { cwd: options.cwd ? cwd : undefined });

@@ -75,7 +75,8 @@ test("enter attaches an isolated server when outside tmux", async () => {
   const workspace = new TmuxWorkspace({ run, launch, env: {}, cliPath: "/app/cli.mjs", nodePath: "/usr/bin/node", socketName: "waga-test" });
   assert.deepEqual(await workspace.enter({ cwd: "/tmp/project" }), { code: 3, mode: "isolated" });
   assert.ok(calls.some((args) => args.includes("new-session")));
-  assert.ok(calls.some((args) => args.includes("status-right") && args.some((value) => value.includes("Alt+G  dock"))));
+  assert.ok(calls.some((args) => args.includes("status-right") && args.some((value) => value.includes("Alt+A agents · Alt+G dock"))));
+  assert.ok(calls.some((args) => args.includes("bind-key") && args.includes("M-a") && args.some((value) => value.includes("tmux-agents-view") && value.includes("#{window_id}"))));
   assert.ok(launched[0].includes("attach-session"));
   assert.equal(launched[1].stdio, "inherit");
 });
@@ -182,9 +183,9 @@ test("enter reports a missing tmux binary as an unavailable dock", async () => {
   await assert.rejects(workspace.enter({ cwd: "/tmp/project" }), { code: "TMUX_UNAVAILABLE" });
 });
 
-test("focusOrOpen reattaches mapped sessions and creates only missing views", async () => {
+test("focusOrOpen reuses live mapped sessions and creates only missing views", async () => {
   const calls = [];
-  let list = "@2\tcodex:known\n@4\tclaude:known\n";
+  let list = "@2\tcodex:known\t0\n@4\tclaude:known\t0\n";
   const run = async (args) => {
     calls.push(args);
     if (args[0] === "list-windows") return { stdout: list, stderr: "", code: 0 };
@@ -200,24 +201,23 @@ test("focusOrOpen reattaches mapped sessions and creates only missing views", as
     sessionHostPath: "/app/native-session-host.mjs",
   });
   assert.deepEqual(await workspace.focusOrOpen({ id: "codex:known" }, { command: "codex", args: [], cwd: "/tmp" }), { reused: true, windowId: "@2" });
-  assert.deepEqual(await workspace.focusOrOpen({ id: "claude:known" }, { command: "claude", args: ["attach", "known"], cwd: "/work" }), { reused: true, windowId: "@4" });
+  assert.deepEqual(await workspace.focusOrOpen({ id: "claude:known", provider: "claude", projectCwd: "/project" }, { command: "claude", args: ["attach", "known"], cwd: "/work" }), { reused: true, windowId: "@4" });
   assert.deepEqual(await workspace.focusOrOpen({ id: "claude:new", provider: "claude", name: "Review", cwd: "/tmp" }, { command: "claude", args: ["attach", "12345678"], cwd: "/tmp" }), { reused: false, windowId: "@3" });
   assert.equal(calls.filter((args) => args[0] === "new-window").length, 1);
-  assert.deepEqual(calls.filter((args) => args[0] === "respawn-window"), [
-    ["respawn-window", "-k", "-t", "@2", "-c", "/tmp", "exec '/usr/bin/node' '/app/native-session-host.mjs' 'codex' 'codex:known' '--' 'codex'"],
-    ["respawn-window", "-k", "-t", "@4", "-c", "/work", "exec '/usr/bin/node' '/app/native-session-host.mjs' 'claude' 'claude:known' '--' 'claude' 'attach' 'known'"],
-  ]);
+  assert.deepEqual(calls.filter((args) => args[0] === "respawn-window"), []);
+  assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("@waga_provider") && args.at(-1) === "claude"));
+  assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("@waga_project_cwd") && args.at(-1) === "/project"));
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("@waga_session_id")));
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("window-status-format") && args.at(-1) === ""));
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("window-status-current-format") && args.at(-1).includes("#{window_name}")));
 });
 
-test("focusOrOpen keeps a reattached native view hidden until its frame settles", async () => {
+test("forced focusOrOpen keeps a reattached native view hidden until its frame settles", async () => {
   const calls = [];
   const frames = ["", ...Array(4).fill("loading\n"), ...Array(6).fill("ready\n")];
   const run = async (args) => {
     calls.push(args);
-    if (args[0] === "list-windows") return { stdout: "@2\tcodex:known\n", stderr: "", code: 0 };
+    if (args[0] === "list-windows") return { stdout: "@2\tcodex:known\t0\n", stderr: "", code: 0 };
     if (args[0] === "capture-pane") return { stdout: frames.shift() ?? "ready\n", stderr: "", code: 0 };
     return { stdout: "", stderr: "", code: 0 };
   };
@@ -229,14 +229,57 @@ test("focusOrOpen keeps a reattached native view hidden until its frame settles"
     sessionHostPath: "/app/native-session-host.mjs",
   });
 
-  await workspace.focusOrOpen({ id: "codex:known" }, { command: "codex", args: [], cwd: "/tmp" });
+  await workspace.focusOrOpen({ id: "codex:known" }, { command: "codex", args: [], cwd: "/tmp" }, { force: true });
 
   const respawnIndex = calls.findIndex((args) => args[0] === "respawn-window");
   const selectIndex = calls.findIndex((args) => args[0] === "select-window");
   const captures = calls.filter((args) => args[0] === "capture-pane");
   assert.equal(captures.length, 11);
   assert.ok(respawnIndex >= 0 && selectIndex > respawnIndex);
-  assert.ok(calls.slice(respawnIndex + 1, selectIndex).every((args) => args[0] === "capture-pane"));
+  assert.ok(calls.findIndex((args) => args[0] === "capture-pane") > respawnIndex);
+  assert.ok(calls.findLastIndex((args) => args[0] === "capture-pane") < selectIndex);
+});
+
+test("focusOrOpen automatically reattaches a dead mapped view", async () => {
+  const calls = [];
+  const workspace = new TmuxWorkspace({
+    run: async (args) => {
+      calls.push(args);
+      if (args[0] === "list-windows") return { stdout: "@2\tcodex:known\t1\n", stderr: "", code: 0 };
+      if (args[0] === "capture-pane") return { stdout: "ready\n", stderr: "", code: 0 };
+      return { stdout: "", stderr: "", code: 0 };
+    },
+    wait: async () => {},
+    env: { TMUX: "yes", WAGA_TMUX_SESSION: "waga-global" },
+    nodePath: "/usr/bin/node",
+    sessionHostPath: "/app/native-session-host.mjs",
+  });
+
+  await workspace.focusOrOpen({ id: "codex:known", provider: "codex" }, { command: "codex", args: ["resume", "known"], cwd: "/tmp" });
+
+  assert.equal(calls.filter((args) => args[0] === "respawn-window").length, 1);
+});
+
+test("Alt+A source metadata opens one retained provider Agents view", async () => {
+  const calls = [];
+  let agentsWindows = "";
+  const workspace = new TmuxWorkspace({
+    run: async (args) => {
+      calls.push(args);
+      if (args[0] === "show-options" && args.at(-1) === "@waga_provider") return { stdout: "codex\n", stderr: "", code: 0 };
+      if (args[0] === "show-options" && args.at(-1) === "@waga_project_cwd") return { stdout: "/work/project\n", stderr: "", code: 0 };
+      if (args[0] === "display-message") return { stdout: "waga-global\n", stderr: "", code: 0 };
+      if (args[0] === "list-windows") return { stdout: agentsWindows, stderr: "", code: 0 };
+      if (args[0] === "new-window") { agentsWindows = "@5\tcodex\t0\n"; return { stdout: "@5\n", stderr: "", code: 0 }; }
+      return { stdout: "", stderr: "", code: 0 };
+    },
+    env: { TMUX: "yes" },
+  });
+
+  assert.deepEqual(await workspace.focusAgentsViewFromWindow("@2"), { reused: false, windowId: "@5" });
+  assert.deepEqual(await workspace.focusAgentsViewFromWindow("@2"), { reused: true, windowId: "@5" });
+  assert.equal(calls.filter((args) => args[0] === "new-window").length, 1);
+  assert.ok(calls.some((args) => args[0] === "new-window" && args.at(-1).includes("'codex' 'agents' '-C' '/work/project'")));
 });
 
 test("closeSessionView removes only the window mapped to the archived session", async () => {

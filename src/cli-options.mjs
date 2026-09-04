@@ -1,4 +1,4 @@
-const COMMANDS = new Set(["list", "agents", "send", "ask", "open", "overview", "doctor", "help"]);
+const COMMANDS = new Set(["list", "agents", "send", "ask", "open", "overview", "tmux-agents-view", "doctor", "help"]);
 const DEFAULT_WAIT_TIMEOUT_MS = 30 * 60 * 1_000;
 const DEFAULT_REPLY_TIMEOUT_MS = 3 * 60 * 1_000;
 
@@ -60,6 +60,9 @@ export function parseCliArgs(args) {
     options.provider = positional.shift() ?? options.provider;
     if (!options.provider) throw invalid("open requires claude or codex");
     if (!['claude', 'codex'].includes(options.provider)) throw invalid(`Unknown provider: ${options.provider}`);
+  } else if (options.command === "tmux-agents-view") {
+    options.windowId = positional.shift();
+    if (!/^@[0-9]+$/.test(options.windowId ?? "") || positional.length) throw invalid("tmux-agents-view requires one tmux window id");
   } else if (positional.length) throw invalid(`Unexpected argument: ${positional[0]}`);
   return options;
 }

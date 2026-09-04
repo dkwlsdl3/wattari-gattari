@@ -67,7 +67,8 @@ waga open codex --cwd ~/work/my-app
 | `↑` / `↓` | Move |
 | `Shift+↑` / `Shift+↓` | Reorder sessions |
 | `←` / `→` / `Enter` | Collapse or expand a project |
-| `Enter` on a session | Open its native TUI |
+| `Enter` on a session | Return to its running native TUI |
+| `Alt+Enter` on a session | Force a native TUI reattach |
 | `/` / `Tab` | Search / filter providers |
 | `F2` | Rename the selected session |
 | `Alt+N` / `Alt+R` | New session / refresh |
@@ -78,10 +79,11 @@ Archiving removes a session from the active list without deleting its log.
 Codex moves it to archived sessions; Claude preserves the transcript while
 cleaning up the background job and managed worktree.
 
-The default `auto` backend uses tmux when available and falls back to `direct`.
-With tmux, use prefix then `0` to return to the dock; Waga's isolated server also
-supports `Alt+G`. In direct mode, leave the native view with `Ctrl+Z` in Claude
-or `Ctrl+D` in Codex.
+The default `auto` backend reuses running tmux session windows when available and
+falls back to `direct`. With tmux, use prefix then `0` to return to the dock.
+Waga's isolated server also uses `Alt+G` for the dock and `Alt+A` for a separate
+provider Agents View, without replacing the session TUI window. In direct mode,
+leave the native view with `Ctrl+Z` in Claude or `Ctrl+D` in Codex.
 
 ## Peer messages
 

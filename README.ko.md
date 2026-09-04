@@ -67,7 +67,8 @@ waga open codex --cwd ~/work/my-app
 | `↑` / `↓` | 이동 |
 | `Shift+↑` / `Shift+↓` | 세션 표시 순서 변경 |
 | `←` / `→` / `Enter` | 프로젝트 접기·펼치기 |
-| 세션에서 `Enter` | 네이티브 TUI 열기 |
+| 세션에서 `Enter` | 실행 중인 네이티브 TUI로 복귀 |
+| 세션에서 `Alt+Enter` | 네이티브 TUI 강제 재접속 |
 | `/` / `Tab` | 검색 / provider 필터 |
 | `F2` | 선택한 세션 이름 변경 |
 | `Alt+N` / `Alt+R` | 새 세션 / 새로고침 |
@@ -77,9 +78,10 @@ waga open codex --cwd ~/work/my-app
 보관은 활성 목록에서만 제외하고 대화 로그는 남깁니다. Codex는 archived sessions로
 옮기고, Claude는 transcript를 보존하면서 background job과 관리 worktree를 정리합니다.
 
-기본 `auto` backend는 tmux가 있으면 재사용 가능한 세션 window를 제공하고, 없으면
+기본 `auto` backend는 tmux가 있으면 실행 중인 세션 window를 그대로 재사용하고, 없으면
 `direct`로 전환합니다. tmux backend에서는 prefix 뒤 `0`으로 dock에 돌아오며 Waga의
-격리 server에서는 `Alt+G`도 사용할 수 있습니다. direct backend에서는 Claude
+격리 server에서는 `Alt+G`로 dock, `Alt+A`로 별도 provider Agents View를 엽니다.
+Agents View로 이동해도 세션 TUI window는 유지됩니다. direct backend에서는 Claude
 `Ctrl+Z`, Codex `Ctrl+D`로 native view에서 빠져나옵니다.
 
 ## 세션 간 메시지

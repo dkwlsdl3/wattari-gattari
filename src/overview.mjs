@@ -295,8 +295,8 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
   }
   const helpLines = wide
-    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  / 검색  Tab 필터", "F2 이름 변경  Alt+N 새 세션  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기"]
-    : ["Shift+↑↓ 순서  F2 이름  Alt+N 새 세션  Alt+X 보관  Alt+Q 나가기"];
+    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  Alt+Enter 재접속  / 검색  Tab 필터", "F2 이름 변경  Alt+N 새 세션  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기"]
+    : ["Shift+↑↓ 순서  Enter 열기  Alt+Enter 재접속  F2 이름  Alt+N 새 세션", "Alt+X 보관  Alt+Q 나가기"];
   while (lines.length < height - helpLines.length - 4) lines.push("");
   if (newTask) {
     const providerName = newTask.provider === "claude" ? "CLAUDE" : "CODEX";
@@ -558,6 +558,16 @@ export async function runOverview({
     })();
   };
 
+  const openSession = (target, { force = false } = {}) => {
+    busy = true;
+    notice = force ? `${target.name} 세션에 다시 연결하는 중입니다.` : `${target.name} 세션을 여는 중입니다.`;
+    render();
+    void commandFor(target)
+      .then((command) => workspace.focusOrOpen(target, command, { force }))
+      .catch((error) => { warnings = [{ provider: target.provider, message: error.message }]; })
+      .finally(() => { busy = false; render(); });
+  };
+
   const onKeypress = (text, key = {}) => {
     if (busy || closed) return;
     if ((key.ctrl && key.name === "c") || (key.meta && key.name === "q")) {
@@ -635,6 +645,10 @@ export async function runOverview({
       archiveSession(nodes[selected].session);
       return;
     }
+    if (key.meta && key.name === "return" && nodes[selected]?.type === "session") {
+      openSession(nodes[selected].session, { force: true });
+      return;
+    }
     if (key.name === "f2" && nodes[selected]?.type === "session") {
       renameTask = { session: nodes[selected].session, name: "", cursor: 0, error: "", submitting: false };
       render();
@@ -690,14 +704,7 @@ export async function runOverview({
       else collapsed.add(cwd);
     }
     else if (key.name === "return" && nodes[selected]?.type === "session") {
-      busy = true;
-      const target = nodes[selected].session;
-      notice = `${target.name} 세션을 여는 중입니다.`;
-      render();
-      void commandFor(target)
-        .then((command) => workspace.focusOrOpen(target, command))
-        .catch((error) => { warnings = [{ provider: target.provider, message: error.message }]; })
-        .finally(() => { busy = false; render(); });
+      openSession(nodes[selected].session);
       return;
     }
     selectedKey = visibleNodes()[selected]?.key ?? null;
