@@ -95,6 +95,52 @@ test("Claude provider joins agents JSON to the live peer registry", async (t) =>
   assert.match(endpointCalls.find(([kind]) => kind === "send")[1], /trust: untrusted/);
 });
 
+test("Claude provider fetches optional usage at most once per cache window", async () => {
+  let now = 1_000;
+  let reads = 0;
+  const provider = new ClaudeProvider({
+    run: async () => ({ stdout: "[]" }),
+    now: () => now,
+    usageCacheMs: 5 * 60_000,
+    usageReader: async () => {
+      reads += 1;
+      return { weekly: { remainingPercent: reads === 1 ? 6 : 5 } };
+    },
+  });
+
+  await provider.list();
+  await provider.list({ includeUsage: true });
+  now += 3_000;
+  await provider.list({ includeUsage: true });
+  assert.equal(reads, 1);
+  assert.equal(provider.usageSnapshot().weekly.remainingPercent, 6);
+
+  now += 5 * 60_000;
+  await provider.list({ includeUsage: true });
+  assert.equal(reads, 2);
+  assert.equal(provider.usageSnapshot().weekly.remainingPercent, 5);
+});
+
+test("Claude provider shares an in-flight usage request across concurrent discovery", async () => {
+  let resolveUsage;
+  let reads = 0;
+  const provider = new ClaudeProvider({
+    run: async () => ({ stdout: "[]" }),
+    usageReader: async () => {
+      reads += 1;
+      return new Promise((resolve) => { resolveUsage = resolve; });
+    },
+  });
+
+  const first = provider.list({ includeUsage: true });
+  const second = provider.list({ includeUsage: true });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(reads, 1);
+  resolveUsage({ weekly: { remainingPercent: 5 } });
+  await Promise.all([first, second]);
+  assert.equal(provider.usageSnapshot().weekly.remainingPercent, 5);
+});
+
 test("Claude send checks immediate peer disposition before reporting submission", async () => {
   const calls = [];
   const endpoint = {

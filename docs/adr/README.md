@@ -30,6 +30,8 @@ Wattari Gattari는 Claude Code와 Codex가 소유한 네이티브 세션을 발�
   세션 생성·resume·archive와 메시지 전달도 그 daemon에 위임합니다. 일반 CLI나
   VSCode 대화 기록은 dock에 섞지 않습니다.
 - provider 하나가 실패해도 다른 provider 목록은 경고와 함께 사용할 수 있습니다.
+- Dock의 사용량은 Claude OAuth usage endpoint와 Codex App Server에서 읽어 5분 캐시하며,
+  조회 실패는 세션 발견에 영향을 주지 않습니다.
 - 파서와 프로토콜 어댑터는 실제 출력 fixture로 검증합니다. 실제 통합 검증은
   `waga-proof-*` 이름과 임시 작업 디렉터리를 가진 폐기용 세션만 사용합니다.
 

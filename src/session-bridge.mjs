@@ -22,25 +22,28 @@ export class SessionBridge {
     this.#providers = new Map(providers.map((provider) => [provider.name, provider]));
   }
 
-  async discover({ provider, cwd } = {}) {
+  async discover({ provider, cwd, includeUsage = false } = {}) {
     const selected = provider ? [this.#provider(provider)] : [...this.#providers.values()];
-    const results = await Promise.allSettled(selected.map((adapter) => adapter.list({ cwd })));
+    const results = await Promise.allSettled(selected.map((adapter) => adapter.list(includeUsage ? { cwd, includeUsage: true } : { cwd })));
     const sessions = [];
     const warnings = [];
     const availableProviders = [];
+    const providerUsage = {};
     for (let index = 0; index < results.length; index += 1) {
       const result = results[index];
       const adapter = selected[index];
       if (result.status === "fulfilled") {
         sessions.push(...result.value);
         availableProviders.push(adapter.name);
+        const usage = includeUsage && typeof adapter.usageSnapshot === "function" ? adapter.usageSnapshot() : null;
+        if (usage) providerUsage[adapter.name] = usage;
       }
       else warnings.push({ provider: adapter.name, code: result.reason?.code ?? "PROVIDER_ERROR", message: result.reason?.message ?? String(result.reason) });
     }
     if (sessions.length === 0 && warnings.length === selected.length) {
       throw new BridgeError("DISCOVERY_FAILED", warnings.map((warning) => `${warning.provider}: ${warning.message}`).join("; "));
     }
-    return { sessions: sessions.sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0)), warnings, availableProviders };
+    return { sessions: sessions.sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0)), warnings, availableProviders, providerUsage };
   }
 
   async create(provider, prompt, { cwd } = {}) {

@@ -5,12 +5,14 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { buildPeerEnvelope } from "../bridge/envelope.mjs";
+import { readClaudeUsage } from "../claude-usage.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
 import { defaultClaudeAliasPath, SessionAliasCatalog } from "../session-alias-catalog.mjs";
 import { ClaudePeerEndpoint } from "./claude-peer.mjs";
 
 const execFileAsync = promisify(execFile);
 const SHORT_ID = /^[0-9a-f]{8}$/i;
+const USAGE_CACHE_MS = 5 * 60_000;
 
 async function defaultRun(args, { cwd } = {}) {
   return execFileAsync("claude", args, { cwd, encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 30_000 });
@@ -65,17 +67,24 @@ export class ClaudeProvider {
   #aliases;
   #wait;
   #now;
+  #usageReader;
+  #usageCacheMs;
+  #usageCache = null;
+  #usageRefresh = null;
 
-  constructor({ homeDirectory = os.homedir(), run = defaultRun, endpointFactory, aliasCatalog = null, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now } = {}) {
+  constructor({ homeDirectory = os.homedir(), run = defaultRun, endpointFactory, aliasCatalog = null, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now, usageReader = null, usageCacheMs = USAGE_CACHE_MS } = {}) {
     this.#home = homeDirectory;
     this.#run = run;
     this.#endpointFactory = endpointFactory ?? ((options) => new ClaudePeerEndpoint(options));
     this.#aliases = aliasCatalog ?? new SessionAliasCatalog(defaultClaudeAliasPath(process.env, homeDirectory));
     this.#wait = wait;
     this.#now = now;
+    this.#usageReader = usageReader ?? (() => readClaudeUsage({ homeDirectory: this.#home, now: this.#now }));
+    this.#usageCacheMs = usageCacheMs;
   }
 
-  async list({ cwd } = {}) {
+  async list({ cwd, includeUsage = false } = {}) {
+    if (includeUsage) void this.#refreshUsage();
     const expectedCwd = cwd ? canonical(cwd) : null;
     const aliases = this.#aliases.load();
     const args = ["agents", "--json"];
@@ -104,6 +113,27 @@ export class ClaudeProvider {
       });
     }
     return sessions;
+  }
+
+  usageSnapshot() {
+    return this.#usageCache?.value ?? null;
+  }
+
+  async #refreshUsage() {
+    const checkedAt = this.#now();
+    if (this.#usageCache && checkedAt - this.#usageCache.checkedAt < this.#usageCacheMs) return;
+    if (this.#usageRefresh) return this.#usageRefresh;
+    this.#usageRefresh = (async () => {
+      try {
+        const value = await this.#usageReader();
+        this.#usageCache = { checkedAt, value: value ?? this.#usageCache?.value ?? null };
+      } catch {
+        this.#usageCache = { checkedAt, value: this.#usageCache?.value ?? null };
+      } finally {
+        this.#usageRefresh = null;
+      }
+    })();
+    return this.#usageRefresh;
   }
 
   async create(prompt, { cwd = process.cwd() } = {}) {

@@ -18,6 +18,7 @@ Wattari Gattari(`waga`)는 Claude Code와 Codex의 활성 세션을 보여 주�
 - 모든 프로젝트의 Claude·Codex 세션을 하나의 dock에서 탐색
 - 정확한 네이티브 세션으로 attach/resume
 - 검색, provider 필터, 수동 정렬, 이름 변경, 새 세션 생성과 보관
+- 5분 캐시된 Claude·Codex 한도를 dock에 표시
 - `waga send` 단방향 알림과 `waga ask` 단일 응답 요청
 - peer 입력을 불신 입력으로 표시하고 기존 sandbox와 승인 정책 유지
 

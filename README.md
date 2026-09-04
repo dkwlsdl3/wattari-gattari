@@ -18,6 +18,7 @@ daemon or replacement chat UI.
 - Browse Claude and Codex sessions across projects in one dock
 - Attach or resume the exact native session
 - Search, filter, reorder, rename, create, and archive sessions
+- See five-minute cached Claude and Codex quota in the dock
 - Send one-way notifications with `waga send` or request one reply with `waga ask`
 - Mark peer input as untrusted while preserving native sandbox and approval rules
 

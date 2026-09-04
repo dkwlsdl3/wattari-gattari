@@ -22,6 +22,19 @@ test("discovery keeps healthy provider results and exposes warnings", async () =
   assert.deepEqual(result.sessions.map((row) => row.id), ["claude:1"]);
   assert.deepEqual(result.warnings, [{ provider: "codex", code: "DOWN", message: "offline" }]);
   assert.deepEqual(result.availableProviders, ["claude"]);
+  assert.deepEqual(result.providerUsage, {});
+});
+
+test("discovery requests and exposes optional provider usage", async () => {
+  const calls = [];
+  const usage = { remainingPercent: 2, windowDurationMins: 10_080 };
+  const codex = provider("codex", [], calls);
+  codex.usageSnapshot = () => usage;
+
+  const result = await new SessionBridge({ providers: [codex] }).discover({ cwd: "/work", includeUsage: true });
+
+  assert.deepEqual(calls, [["list", { cwd: "/work", includeUsage: true }]]);
+  assert.deepEqual(result.providerUsage, { codex: usage });
 });
 
 test("provider-prefixed target limits discovery and ask is one request", async () => {

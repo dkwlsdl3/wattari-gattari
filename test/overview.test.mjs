@@ -7,6 +7,8 @@ import {
   applyOverviewOrder,
   buildOverviewFrame,
   buildOverviewTree,
+  formatClaudeUsage,
+  formatCodexUsage,
   moveOverviewSession,
   nativeReturnHint,
   reconcileOverviewOrder,
@@ -162,6 +164,25 @@ test("overview frame distinguishes providers and keeps navigation help visible",
   assert.match(frame, /tmux prefix \+ 0/);
   assert.match(frame, /\x1b\[1;38;2;56;189;248m/);
   assert.doesNotMatch(frame, /\x1b\[38;5;/);
+});
+
+test("overview formats and displays cached Codex weekly usage", () => {
+  const resetsAt = Math.floor(new Date(2026, 8, 7, 11, 24).getTime() / 1_000);
+  const usage = { remainingPercent: 2, windowDurationMins: 10_080, resetsAt };
+  assert.equal(formatCodexUsage(usage), "Codex 주간 2% 남음 · 9/7 11:24 초기화");
+  const frame = plain(buildOverviewFrame({ sessions, providerUsage: { codex: usage }, width: 120, height: 20 }));
+  assert.match(frame, /Codex 주간 2% 남음 · 9\/7 11:24 초기화/);
+});
+
+test("overview formats and displays cached Claude usage", () => {
+  const resetsAt = Math.floor(new Date(2026, 8, 7, 11, 24).getTime() / 1_000);
+  const usage = {
+    fiveHour: { remainingPercent: 90 },
+    weekly: { remainingPercent: 6, resetsAt },
+  };
+  assert.equal(formatClaudeUsage(usage), "Claude 5시간 90% · 주간 6% 남음 · 9/7 11:24 초기화");
+  const frame = plain(buildOverviewFrame({ sessions, providerUsage: { claude: usage }, width: 120, height: 20 }));
+  assert.match(frame, /Claude 5시간 90% · 주간 6% 남음 · 9\/7 11:24 초기화/);
 });
 
 test("Shift+Up and Shift+Down persist manual order across refreshes", async (t) => {
@@ -361,7 +382,7 @@ test("Enter collapses and expands a workspace without opening a native session",
 });
 
 test("overview discovery is global unless a cwd filter is explicit", async () => {
-  for (const [filterCwd, expected] of [[null, {}], ["/tmp/project", { cwd: "/tmp/project" }]]) {
+  for (const [filterCwd, expected] of [[null, { includeUsage: true }], ["/tmp/project", { cwd: "/tmp/project", includeUsage: true }]]) {
     const input = Object.assign(new EventEmitter(), {
       isTTY: true,
       setRawMode() {},

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { CodexProvider, parseDaemonVersion } from "../src/providers/codex.mjs";
+import { CodexProvider, parseCodexUsage, parseDaemonVersion } from "../src/providers/codex.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../src/managed-session-instructions.mjs";
 
 process.env.XDG_STATE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "waga-codex-test-state-"));
@@ -26,6 +26,20 @@ function harness(responder, options = {}) {
 test("daemon version parser rejects protocol drift", () => {
   assert.equal(parseDaemonVersion('{"status":"running"}').status, "running");
   assert.throws(() => parseDaemonVersion("no"), { code: "CODEX_DAEMON_INVALID" });
+});
+
+test("Codex usage parser selects the weekly window", () => {
+  assert.deepEqual(parseCodexUsage({ rateLimits: {
+    primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 10 },
+    secondary: { usedPercent: 98.6, windowDurationMins: 10_080, resetsAt: 20 },
+  } }, 30), {
+    usedPercent: 99,
+    remainingPercent: 1,
+    windowDurationMins: 10_080,
+    resetsAt: 20,
+    observedAt: 30,
+  });
+  assert.equal(parseCodexUsage({ rateLimits: {} }), null);
 });
 
 test("Codex provider lists only top-level sessions owned by Agents view", async () => {
@@ -59,6 +73,46 @@ test("Codex provider reuses fresh daemon discovery across overview refreshes", a
   now += 3_000;
   await provider.list();
   assert.equal(calls.filter(([kind, args]) => kind === "run" && args[2] === "version").length, 1);
+});
+
+test("Codex provider fetches optional usage at most once per five-minute cache window", async () => {
+  let now = 1_000;
+  let usedPercent = 98;
+  const { provider, calls } = harness((method) => {
+    if (method === "thread/loaded/list") return { data: [], nextCursor: null };
+    if (method === "account/rateLimits/read") return {
+      rateLimits: { primary: { usedPercent, windowDurationMins: 10_080, resetsAt: 2_000 } },
+    };
+    throw new Error(method);
+  }, { now: () => now });
+
+  await provider.list();
+  await provider.list({ includeUsage: true });
+  usedPercent = 99;
+  now += 3 * 60_000;
+  await provider.list({ includeUsage: true });
+  assert.equal(calls.filter(([method]) => method === "account/rateLimits/read").length, 1);
+  assert.equal(provider.usageSnapshot().remainingPercent, 2);
+
+  now += 2 * 60_000;
+  await provider.list({ includeUsage: true });
+  assert.equal(calls.filter(([method]) => method === "account/rateLimits/read").length, 2);
+  assert.equal(provider.usageSnapshot().remainingPercent, 1);
+});
+
+test("Codex usage failure does not fail discovery and is negatively cached", async () => {
+  let now = 1_000;
+  const { provider, calls } = harness((method) => {
+    if (method === "thread/loaded/list") return { data: [], nextCursor: null };
+    if (method === "account/rateLimits/read") throw new Error("quota unavailable");
+    throw new Error(method);
+  }, { now: () => now, usageCacheMs: 60_000 });
+
+  assert.deepEqual(await provider.list({ includeUsage: true }), []);
+  now += 3_000;
+  assert.deepEqual(await provider.list({ includeUsage: true }), []);
+  assert.equal(calls.filter(([method]) => method === "account/rateLimits/read").length, 1);
+  assert.equal(provider.usageSnapshot(), null);
 });
 
 test("Codex provider records the first loaded-set removal", async () => {

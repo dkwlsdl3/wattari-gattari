@@ -9,6 +9,8 @@ import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
 
 const execFileAsync = promisify(execFile);
 const THREAD_READ_CONCURRENCY = 8;
+const USAGE_CACHE_MS = 5 * 60_000;
+const WEEKLY_WINDOW_MINS = 7 * 24 * 60;
 
 async function defaultRun(args) {
   return execFileAsync("codex", args, { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 30_000 });
@@ -21,6 +23,23 @@ export function parseDaemonVersion(stdout) {
   }
   if (!value || typeof value.status !== "string") throw Object.assign(new Error("Codex daemon version JSON is missing status"), { code: "CODEX_DAEMON_INVALID" });
   return value;
+}
+
+export function parseCodexUsage(result, observedAt = Date.now()) {
+  const rateLimits = result?.rateLimitsByLimitId?.codex ?? result?.rateLimits;
+  const windows = [rateLimits?.primary, rateLimits?.secondary]
+    .filter((window) => Number.isFinite(window?.usedPercent));
+  const window = windows.find((candidate) => candidate.windowDurationMins === WEEKLY_WINDOW_MINS)
+    ?? windows.toSorted((left, right) => (right.windowDurationMins ?? 0) - (left.windowDurationMins ?? 0))[0];
+  if (!window) return null;
+  const usedPercent = Math.max(0, Math.min(100, Math.round(window.usedPercent)));
+  return {
+    usedPercent,
+    remainingPercent: 100 - usedPercent,
+    windowDurationMins: Number.isFinite(window.windowDurationMins) ? window.windowDurationMins : null,
+    resetsAt: Number.isFinite(window.resetsAt) ? window.resetsAt : null,
+    observedAt,
+  };
 }
 
 function publicStatus(status) {
@@ -76,20 +95,25 @@ export class CodexProvider {
   #now;
   #daemonCacheMs;
   #daemonCache = null;
+  #usageCacheMs;
+  #usageCache = null;
+  #usageRefresh = null;
   #eventLog;
   #loadedIds = null;
 
-  constructor({ run = defaultRun, clientFactory, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now, daemonCacheMs = 30_000, eventLog = new EventLog() } = {}) {
+  constructor({ run = defaultRun, clientFactory, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now, daemonCacheMs = 30_000, usageCacheMs = USAGE_CACHE_MS, eventLog = new EventLog() } = {}) {
     this.#run = run;
     this.#clientFactory = clientFactory ?? ((socketPath) => CodexAppServerClient.connectUnixWebSocket({ socketPath }));
     this.#wait = wait;
     this.#now = now;
     this.#daemonCacheMs = daemonCacheMs;
+    this.#usageCacheMs = usageCacheMs;
     this.#eventLog = eventLog;
   }
 
-  async list({ cwd } = {}) {
+  async list({ cwd, includeUsage = false } = {}) {
     return this.#withClient(async (client) => {
+      const usageRefresh = includeUsage ? this.#refreshUsage(client) : Promise.resolve();
       const loadedIds = [];
       let cursor = null;
       do {
@@ -115,14 +139,38 @@ export class CodexProvider {
         .filter((thread) => !requestedCwd || (thread.cwd && path.resolve(thread.cwd) === requestedCwd))
         .filter(isRootSession);
       const seen = new Set();
-      return roots
+      const sessions = roots
         .filter((thread) => {
           if (seen.has(thread.id)) return false;
           seen.add(thread.id);
           return true;
         })
         .map(toSession);
+      await usageRefresh;
+      return sessions;
     });
+  }
+
+  usageSnapshot() {
+    return this.#usageCache?.value ?? null;
+  }
+
+  async #refreshUsage(client) {
+    const checkedAt = this.#now();
+    if (this.#usageCache && checkedAt - this.#usageCache.checkedAt < this.#usageCacheMs) return;
+    if (this.#usageRefresh) return this.#usageRefresh;
+    this.#usageRefresh = (async () => {
+      try {
+        const result = await client.request("account/rateLimits/read");
+        const value = parseCodexUsage(result, checkedAt);
+        this.#usageCache = { checkedAt, value: value ?? this.#usageCache?.value ?? null };
+      } catch {
+        this.#usageCache = { checkedAt, value: this.#usageCache?.value ?? null };
+      } finally {
+        this.#usageRefresh = null;
+      }
+    })();
+    return this.#usageRefresh;
   }
 
   #recordLoadedIds(sessionIds) {

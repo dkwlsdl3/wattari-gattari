@@ -176,15 +176,43 @@ function counts(sessions) {
   return `${count("needs-input")} need input   ${count("working")} working   ${count("idle")} ready`;
 }
 
+function resetLabel(resetsAt) {
+  if (!Number.isFinite(resetsAt)) return "";
+  const date = new Date(resetsAt * 1_000);
+  if (Number.isNaN(date.getTime())) return "";
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  return ` · ${date.getMonth() + 1}/${date.getDate()} ${hour}:${minute} 초기화`;
+}
+
+function remaining(value) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+export function formatCodexUsage(usage) {
+  if (!Number.isFinite(usage?.remainingPercent)) return null;
+  const scope = usage.windowDurationMins === 7 * 24 * 60 ? "주간 " : "";
+  return `Codex ${scope}${remaining(usage.remainingPercent)}% 남음${resetLabel(usage.resetsAt)}`;
+}
+
+export function formatClaudeUsage(usage) {
+  const parts = [];
+  if (Number.isFinite(usage?.fiveHour?.remainingPercent)) parts.push(`5시간 ${remaining(usage.fiveHour.remainingPercent)}%`);
+  if (Number.isFinite(usage?.weekly?.remainingPercent)) parts.push(`주간 ${remaining(usage.weekly.remainingPercent)}%`);
+  if (!parts.length) return null;
+  return `Claude ${parts.join(" · ")} 남음${resetLabel(usage.weekly?.resetsAt)}`;
+}
+
 export function nativeReturnHint(mode) {
   return mode === "isolated"
     ? "네이티브 TUI: Alt+G → dock"
     : "네이티브 TUI: tmux prefix + 0 → dock";
 }
 
-export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, notice = "", newTask = null, renameTask = null, nativeHint = nativeReturnHint(null) }) {
+export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, providerUsage = {}, notice = "", newTask = null, renameTask = null, nativeHint = nativeReturnHint(null) }) {
   const usableWidth = Math.max(1, width - 4);
-  const visibleRows = Math.max(1, height - 9);
+  const usageLabels = [formatClaudeUsage(providerUsage.claude), formatCodexUsage(providerUsage.codex)].filter(Boolean);
+  const visibleRows = Math.max(1, height - (usageLabels.length ? 10 : 9));
   const safeSelected = Math.max(0, Math.min(selected, Math.max(0, nodes.length - 1)));
   const offset = Math.max(0, Math.min(safeSelected - Math.floor(visibleRows / 2), Math.max(0, nodes.length - visibleRows)));
   const wide = usableWidth >= 64;
@@ -193,6 +221,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
   const title = wide ? "WATTARI GATTARI  Claude + Codex session dock" : "WAGA · session dock";
   lines.push(`  ${color(THEME.title, fit(title, usableWidth))}`);
   lines.push(`  ${color(THEME.muted, fit(`${counts(sessions)}${provider ? `   filter: ${provider}` : ""}`, usableWidth))}`);
+  if (usageLabels.length) lines.push(`  ${color(THEME.hint, fit(usageLabels.join("   "), usableWidth))}`);
   lines.push(`  ${color(THEME.divider, "─".repeat(Math.max(1, usableWidth)))}`);
 
   if (!sessions.length) lines.push(`  ${color(THEME.muted, query ? "검색 결과가 없습니다." : "발견된 세션이 없습니다. Alt+R을 눌러 새로고침하세요.")}`);
@@ -280,6 +309,7 @@ export async function runOverview({
 
   let allSessions = [];
   let warnings = [];
+  let providerUsage = {};
   let orderWarning = null;
   let orderByWorkspace = new Map();
   if (orderStore) {
@@ -328,6 +358,7 @@ export async function runOverview({
       query,
       warnings: orderWarning ? [orderWarning, ...warnings] : warnings,
       provider,
+      providerUsage,
       notice,
       newTask,
       renameTask,
@@ -343,10 +374,11 @@ export async function runOverview({
     try {
       if (!force && workspace.shouldRefreshOverview && !await workspace.shouldRefreshOverview()) return;
       renderAfter = true;
-      const discovered = await bridge.discover(filterCwd ? { cwd: path.resolve(filterCwd) } : {});
+      const discovered = await bridge.discover(filterCwd ? { cwd: path.resolve(filterCwd), includeUsage: true } : { includeUsage: true });
       const activeSessions = discovered.sessions.filter((session) => !archivedSessionIds.has(session.id));
       orderByWorkspace = reconcileOverviewOrder(orderByWorkspace, activeSessions);
       allSessions = applyOverviewOrder(activeSessions, orderByWorkspace);
+      if (discovered.providerUsage) providerUsage = { ...providerUsage, ...discovered.providerUsage };
       let reconcileWarning = null;
       if (workspace.reconcileSessionViews && Array.isArray(discovered.availableProviders)) {
         try {
