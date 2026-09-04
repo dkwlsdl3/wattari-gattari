@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import { CodexProvider, parseDaemonVersion } from "../src/providers/codex.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../src/managed-session-instructions.mjs";
+
+process.env.XDG_STATE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "waga-codex-test-state-"));
 
 function harness(responder, options = {}) {
   const calls = [];
@@ -54,6 +59,25 @@ test("Codex provider reuses fresh daemon discovery across overview refreshes", a
   now += 3_000;
   await provider.list();
   assert.equal(calls.filter(([kind, args]) => kind === "run" && args[2] === "version").length, 1);
+});
+
+test("Codex provider records the first loaded-set removal", async () => {
+  const snapshots = [["kept", "removed"], ["kept"], ["kept"]];
+  const events = [];
+  const { provider } = harness((method, params) => {
+    if (method === "thread/loaded/list") return { data: snapshots.shift(), nextCursor: null };
+    if (method === "thread/read") return { thread: { id: params.threadId, cwd: "/work", status: { type: "idle" } } };
+    throw new Error(method);
+  }, { eventLog: { record(event, details) { events.push([event, details]); } } });
+
+  await provider.list();
+  await provider.list();
+  await provider.list();
+
+  assert.deepEqual(events, [
+    ["codex_loaded_snapshot", { sessionIds: ["kept", "removed"] }],
+    ["codex_loaded_changed", { addedSessionIds: [], removedSessionIds: ["removed"], sessionIds: ["kept"] }],
+  ]);
 });
 
 test("Codex provider bounds concurrent thread reads", async () => {

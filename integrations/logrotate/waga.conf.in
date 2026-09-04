@@ -1,0 +1,25 @@
+@HOME@/.local/state/wattari-gattari/events.jsonl {
+    daily
+    rotate 30
+    maxage 30
+    dateext
+    dateformat -%Y%m%d
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0600 @USER@ @GROUP@
+}
+
+@HOME@/.codex/app-server-daemon/app-server.stderr.log {
+    daily
+    rotate 30
+    maxage 30
+    dateext
+    dateformat -%Y%m%d
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}

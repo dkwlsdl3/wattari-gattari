@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 
 import { buildPeerEnvelope } from "../bridge/envelope.mjs";
 import { CodexAppServerClient } from "../codex-app-server.mjs";
+import { EventLog } from "../event-log.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -75,13 +76,16 @@ export class CodexProvider {
   #now;
   #daemonCacheMs;
   #daemonCache = null;
+  #eventLog;
+  #loadedIds = null;
 
-  constructor({ run = defaultRun, clientFactory, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now, daemonCacheMs = 30_000 } = {}) {
+  constructor({ run = defaultRun, clientFactory, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now, daemonCacheMs = 30_000, eventLog = new EventLog() } = {}) {
     this.#run = run;
     this.#clientFactory = clientFactory ?? ((socketPath) => CodexAppServerClient.connectUnixWebSocket({ socketPath }));
     this.#wait = wait;
     this.#now = now;
     this.#daemonCacheMs = daemonCacheMs;
+    this.#eventLog = eventLog;
   }
 
   async list({ cwd } = {}) {
@@ -94,7 +98,8 @@ export class CodexProvider {
         cursor = page.nextCursor;
       } while (cursor);
 
-      const uniqueIds = [...new Set(loadedIds)];
+      const uniqueIds = [...new Set(loadedIds)].sort();
+      this.#recordLoadedIds(uniqueIds);
       const reads = await mapSettled(uniqueIds, THREAD_READ_CONCURRENCY, async (threadId) => {
         const result = await client.request("thread/read", { threadId, includeTurns: false });
         if (!result?.thread || result.thread.id !== threadId) {
@@ -118,6 +123,22 @@ export class CodexProvider {
         })
         .map(toSession);
     });
+  }
+
+  #recordLoadedIds(sessionIds) {
+    if (this.#loadedIds === null) {
+      this.#eventLog.record("codex_loaded_snapshot", { sessionIds });
+      this.#loadedIds = sessionIds;
+      return;
+    }
+    const previous = new Set(this.#loadedIds);
+    const current = new Set(sessionIds);
+    const addedSessionIds = sessionIds.filter((id) => !previous.has(id));
+    const removedSessionIds = this.#loadedIds.filter((id) => !current.has(id));
+    if (addedSessionIds.length || removedSessionIds.length) {
+      this.#eventLog.record("codex_loaded_changed", { addedSessionIds, removedSessionIds, sessionIds });
+    }
+    this.#loadedIds = sessionIds;
   }
 
   async create(prompt, { cwd = process.cwd() } = {}) {

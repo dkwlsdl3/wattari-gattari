@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import { DirectWorkspace } from "../src/direct-workspace.mjs";
+
+process.env.XDG_STATE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "waga-direct-test-state-"));
 
 function terminalStream() {
   const events = [];
@@ -61,6 +66,26 @@ test("direct workspace restores the terminal when native launch fails", async ()
   );
   assert.deepEqual(input.events, ["raw:false", "pause", "raw:true", "resume"]);
   assert.match(output.events.at(-1), /\?1049h/);
+});
+
+test("direct workspace records a native TUI exit", async () => {
+  const events = [];
+  const workspace = new DirectWorkspace({
+    inputStream: terminalStream(),
+    outputStream: terminalStream(),
+    eventLog: { record(event, details) { events.push([event, details]); } },
+    launch: async () => ({ code: 3, signal: null }),
+  });
+
+  await workspace.focusOrOpen(
+    { id: "codex:thread-1", provider: "codex" },
+    { command: "codex", args: ["resume", "thread-1"], cwd: "/tmp" },
+  );
+
+  assert.deepEqual(events, [
+    ["native_session_started", { provider: "codex", sessionId: "codex:thread-1", command: "codex" }],
+    ["native_session_exited", { provider: "codex", sessionId: "codex:thread-1", command: "codex", code: 3, signal: null }],
+  ]);
 });
 
 test("direct workspace closes its overview instead of switching a multiplexer", async () => {

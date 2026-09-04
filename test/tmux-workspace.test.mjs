@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -7,6 +10,8 @@ import {
   shellCommand,
   workspaceSessionName,
 } from "../src/tmux-workspace.mjs";
+
+process.env.XDG_STATE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "waga-tmux-test-state-"));
 
 test("workspace session names are stable, readable, and tmux-safe", () => {
   const first = workspaceSessionName("/tmp/My Project");
@@ -186,14 +191,19 @@ test("focusOrOpen reattaches mapped sessions and creates only missing views", as
     if (args[0] === "new-window") { list += "@3\tclaude:new\n"; return { stdout: "@3\n", stderr: "", code: 0 }; }
     return { stdout: "", stderr: "", code: 0 };
   };
-  const workspace = new TmuxWorkspace({ run, env: { TMUX: "/tmp/tmux,1,0", WAGA_TMUX_SESSION: "waga-project-deadbeef" } });
+  const workspace = new TmuxWorkspace({
+    run,
+    env: { TMUX: "/tmp/tmux,1,0", WAGA_TMUX_SESSION: "waga-project-deadbeef" },
+    nodePath: "/usr/bin/node",
+    sessionHostPath: "/app/native-session-host.mjs",
+  });
   assert.deepEqual(await workspace.focusOrOpen({ id: "codex:known" }, { command: "codex", args: [], cwd: "/tmp" }), { reused: true, windowId: "@2" });
   assert.deepEqual(await workspace.focusOrOpen({ id: "claude:known" }, { command: "claude", args: ["attach", "known"], cwd: "/work" }), { reused: true, windowId: "@4" });
   assert.deepEqual(await workspace.focusOrOpen({ id: "claude:new", provider: "claude", name: "Review", cwd: "/tmp" }, { command: "claude", args: ["attach", "12345678"], cwd: "/tmp" }), { reused: false, windowId: "@3" });
   assert.equal(calls.filter((args) => args[0] === "new-window").length, 1);
   assert.deepEqual(calls.filter((args) => args[0] === "respawn-window"), [
-    ["respawn-window", "-k", "-t", "@2", "-c", "/tmp", "exec 'codex'"],
-    ["respawn-window", "-k", "-t", "@4", "-c", "/work", "exec 'claude' 'attach' 'known'"],
+    ["respawn-window", "-k", "-t", "@2", "-c", "/tmp", "exec '/usr/bin/node' '/app/native-session-host.mjs' 'codex' 'codex:known' '--' 'codex'"],
+    ["respawn-window", "-k", "-t", "@4", "-c", "/work", "exec '/usr/bin/node' '/app/native-session-host.mjs' 'claude' 'claude:known' '--' 'claude' 'attach' 'known'"],
   ]);
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("@waga_session_id")));
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("window-status-format") && args.at(-1) === ""));
@@ -233,6 +243,35 @@ test("reconcileSessionViews closes only stale windows from healthy providers", a
     { availableProviders: ["claude"] },
   ), { closed: ["claude:stale"] });
   assert.deepEqual(calls.filter((args) => args[0] === "kill-window"), [["kill-window", "-t", "@3"]]);
+});
+
+test("reconcileSessionViews records its reason before killing a stale window", async () => {
+  const calls = [];
+  const events = [];
+  const workspace = new TmuxWorkspace({
+    run: async (args) => {
+      calls.push(args);
+      if (args[0] === "list-windows") return { stdout: "@3\tcodex:missing\n", stderr: "", code: 0 };
+      return { stdout: "", stderr: "", code: 0 };
+    },
+    env: { TMUX: "yes", WAGA_TMUX_SESSION: "waga-global" },
+    eventLog: { record(event, details) { events.push([event, details]); } },
+  });
+
+  await workspace.reconcileSessionViews([], { availableProviders: ["codex"] });
+
+  const killIndex = calls.findIndex((args) => args[0] === "kill-window");
+  assert.ok(killIndex >= 0);
+  assert.deepEqual(events[0], ["session_view_close_requested", {
+    sessionId: "codex:missing",
+    windowId: "@3",
+    reason: "provider_missing_from_loaded_set",
+  }]);
+  assert.deepEqual(events[1], ["session_view_closed", {
+    sessionId: "codex:missing",
+    windowId: "@3",
+    reason: "provider_missing_from_loaded_set",
+  }]);
 });
 
 test("shouldRefreshOverview reports whether the dock is attached and selected", async () => {

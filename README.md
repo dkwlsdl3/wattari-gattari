@@ -94,6 +94,11 @@ Sessions created with `Alt+N` automatically receive guidance for `waga agents`,
 `waga send`, and `waga ask`, plus the peer trust boundary, through the provider's
 instruction channel. This guidance is kept separate from the user's first prompt.
 
+Waga records session lifecycle diagnostics in
+`~/.local/state/wattari-gattari/events.jsonl` without conversation content. The
+`integrations/` directory includes logrotate and user systemd timer files for
+30-day retention.
+
 For unattended Claude replies, allow inbound messages in the target session:
 
 ```bash

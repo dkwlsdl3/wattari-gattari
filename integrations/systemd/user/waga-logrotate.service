@@ -1,0 +1,10 @@
+[Unit]
+Description=Rotate Waga lifecycle and Codex App Server error logs
+
+[Service]
+Type=oneshot
+UMask=0077
+ExecStartPre=/usr/bin/mkdir -p %h/.local/state/wattari-gattari
+ExecStartPre=-/usr/bin/chmod 0700 %h/.codex/app-server-daemon
+ExecStartPre=-/usr/bin/chmod 0600 %h/.codex/app-server-daemon/app-server.stderr.log
+ExecStart=/usr/sbin/logrotate --state %h/.local/state/wattari-gattari/logrotate.status %h/.config/wattari-gattari/logrotate.conf

@@ -52,6 +52,10 @@ Dock은 프로젝트별 접이식 목록, 검색·필터, 수동 순서, 새 세
 tmux는 화면 배치와 전환만 소유합니다. provider daemon, 세션, transcript와 작업은
 Waga dock 또는 tmux window의 수명과 독립적입니다.
 
+Waga는 세션 ID, loaded 목록 변화, tmux 창 조작과 native TUI 종료 결과만 로컬 진단
+이벤트로 기록합니다. 프롬프트와 transcript는 기록하지 않으며 이벤트 파일은 30일 뒤
+회전·삭제합니다.
+
 ## 변경 검증
 
 넓은 변경은 `관측 → 최소 재현 → 가설 → 계측 → 수정 → 회귀 테스트`의 작은 루프로

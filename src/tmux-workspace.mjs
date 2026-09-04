@@ -5,9 +5,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
+import { EventLog } from "./event-log.mjs";
+
 const execFileAsync = promisify(execFile);
 const DEFAULT_SOCKET = `waga-${typeof process.getuid === "function" ? process.getuid() : "user"}`;
 const CLI_PATH = fileURLToPath(new URL("./cli.mjs", import.meta.url));
+const SESSION_HOST_PATH = fileURLToPath(new URL("./native-session-host.mjs", import.meta.url));
 const SOURCE_DIR = fileURLToPath(new URL(".", import.meta.url));
 const CURRENT_WINDOW_FORMAT = "#[bold,fg=#0f172a,bg=#38bdf8] #{?#{==:#{window_name},overview},OVERVIEW,#{window_name}} ";
 const EXIT_COMMAND = "printf '%s\\n' 'Waga frontend를 종료했습니다. Claude/Codex 세션과 로그는 유지됩니다.'";
@@ -102,8 +105,10 @@ export class TmuxWorkspace {
   #nodePath;
   #socketName;
   #revision;
+  #sessionHostPath;
+  #eventLog;
 
-  constructor({ run = defaultRun, launch = defaultLaunch, env = process.env, cliPath = CLI_PATH, nodePath = process.execPath, socketName = DEFAULT_SOCKET, revision = CURRENT_REVISION } = {}) {
+  constructor({ run = defaultRun, launch = defaultLaunch, env = process.env, cliPath = CLI_PATH, nodePath = process.execPath, socketName = DEFAULT_SOCKET, revision = CURRENT_REVISION, sessionHostPath = SESSION_HOST_PATH, eventLog = new EventLog() } = {}) {
     this.#run = run;
     this.#launch = launch;
     this.#env = env;
@@ -111,6 +116,8 @@ export class TmuxWorkspace {
     this.#nodePath = nodePath;
     this.#socketName = socketName;
     this.#revision = revision;
+    this.#sessionHostPath = sessionHostPath;
+    this.#eventLog = eventLog;
   }
 
   async enter({ cwd = process.cwd(), filterCwd = null } = {}) {
@@ -179,24 +186,28 @@ export class TmuxWorkspace {
     const listed = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}\t#{@waga_session_id}"]);
     const existing = parseWindows(listed.stdout).find((entry) => entry.sessionId === session.id);
     if (existing) {
+      this.#eventLog.record("session_view_respawn_requested", { sessionId: session.id, windowId: existing.windowId, reason: "dock_reopen" });
       await this.#call([
         "respawn-window", "-k", "-t", existing.windowId, "-c", commandSpec.cwd,
-        shellCommand(commandSpec.command, commandSpec.args),
+        this.#sessionCommand(session, commandSpec),
       ]);
+      this.#eventLog.record("session_view_respawned", { sessionId: session.id, windowId: existing.windowId, reason: "dock_reopen" });
       await this.#call(["select-window", "-t", existing.windowId]);
       return { reused: true, windowId: existing.windowId };
     }
 
+    this.#eventLog.record("session_view_open_requested", { sessionId: session.id, reason: "dock_open" });
     const created = await this.#call([
       "new-window", "-d", "-P", "-F", "#{window_id}", "-t", sessionName,
       "-n", safeWindowName(session), "-c", commandSpec.cwd,
-      shellCommand(commandSpec.command, commandSpec.args),
+      this.#sessionCommand(session, commandSpec),
     ]);
     const windowId = created.stdout.trim();
     if (!windowId) throw Object.assign(new Error("tmux did not return the native session window id"), { code: "TMUX_WINDOW_FAILED" });
     await this.#call(["set-window-option", "-t", windowId, "@waga_session_id", session.id]);
     await this.#call(["set-window-option", "-t", windowId, "automatic-rename", "off"]);
     await this.#styleWindow([], windowId);
+    this.#eventLog.record("session_view_opened", { sessionId: session.id, windowId, reason: "dock_open" });
     await this.#call(["select-window", "-t", windowId]);
     return { reused: false, windowId };
   }
@@ -207,7 +218,9 @@ export class TmuxWorkspace {
     const listed = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}\t#{@waga_session_id}"]);
     const existing = parseWindows(listed.stdout).find((entry) => entry.sessionId === session.id);
     if (!existing) return { closed: false };
+    this.#eventLog.record("session_view_close_requested", { sessionId: session.id, windowId: existing.windowId, reason: "session_archived" });
     await this.#call(["kill-window", "-t", existing.windowId]);
+    this.#eventLog.record("session_view_closed", { sessionId: session.id, windowId: existing.windowId, reason: "session_archived" });
     return { closed: true, windowId: existing.windowId };
   }
 
@@ -221,7 +234,12 @@ export class TmuxWorkspace {
       const provider = separator > 0 ? sessionId.slice(0, separator) : null;
       return provider && healthy.has(provider) && !activeIds.has(sessionId);
     });
-    for (const entry of stale) await this.#call(["kill-window", "-t", entry.windowId]);
+    for (const entry of stale) {
+      const details = { sessionId: entry.sessionId, windowId: entry.windowId, reason: "provider_missing_from_loaded_set" };
+      this.#eventLog.record("session_view_close_requested", details);
+      await this.#call(["kill-window", "-t", entry.windowId]);
+      this.#eventLog.record("session_view_closed", details);
+    }
     return { closed: stale.map((entry) => entry.sessionId) };
   }
 
@@ -238,6 +256,7 @@ export class TmuxWorkspace {
 
   async leave() {
     const sessionName = await this.#currentSessionName();
+    this.#eventLog.record("dock_shutdown_requested", { tmuxSession: sessionName, reason: "user_leave" });
     if (this.#env.WAGA_TMUX_MODE === "existing") {
       const switched = await this.#call(["switch-client", "-l"], { check: false });
       if (switched.code !== 0) await this.#call(["detach-client", "-E", EXIT_COMMAND], { check: false });
@@ -252,6 +271,18 @@ export class TmuxWorkspace {
     const sessionName = this.#env.WAGA_TMUX_SESSION || (await this.#call(["display-message", "-p", "#{session_name}"])).stdout.trim();
     if (!sessionName) throw Object.assign(new Error("Waga tmux session is unavailable"), { code: "TMUX_SESSION_UNAVAILABLE" });
     return sessionName;
+  }
+
+  #sessionCommand(session, commandSpec) {
+    const provider = session.provider ?? String(session.id).split(":", 1)[0];
+    return shellCommand(this.#nodePath, [
+      this.#sessionHostPath,
+      provider,
+      session.id,
+      "--",
+      commandSpec.command,
+      ...commandSpec.args,
+    ]);
   }
 
   async #configure(prefix, sessionName, mode) {

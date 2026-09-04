@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
 
+import { EventLog } from "./event-log.mjs";
+
 const LEAVE_OVERVIEW = "\x1b[?25h\x1b[?1049l";
 const ENTER_OVERVIEW = "\x1b[?1049h\x1b[?25l\x1b[2J";
 
@@ -21,6 +23,7 @@ export class DirectWorkspace {
   #errorOutput;
   #env;
   #launch;
+  #eventLog;
 
   constructor({
     inputStream = process.stdin,
@@ -28,18 +31,22 @@ export class DirectWorkspace {
     errorOutput = process.stderr,
     env = process.env,
     launch = defaultLaunch,
+    eventLog = new EventLog(),
   } = {}) {
     this.#inputStream = inputStream;
     this.#outputStream = outputStream;
     this.#errorOutput = errorOutput;
     this.#env = env;
     this.#launch = launch;
+    this.#eventLog = eventLog;
   }
 
-  async focusOrOpen(_session, commandSpec) {
+  async focusOrOpen(session, commandSpec) {
     if (this.#inputStream.isTTY) this.#inputStream.setRawMode(false);
     this.#inputStream.pause?.();
     this.#outputStream.write(LEAVE_OVERVIEW);
+    const context = { provider: session.provider, sessionId: session.id, command: commandSpec.command };
+    this.#eventLog.record("native_session_started", context);
     try {
       const result = await this.#launch(commandSpec.command, commandSpec.args, {
         cwd: commandSpec.cwd,
@@ -48,7 +55,11 @@ export class DirectWorkspace {
         outputStream: this.#outputStream,
         errorOutput: this.#errorOutput,
       });
+      this.#eventLog.record("native_session_exited", { ...context, code: result.code, signal: result.signal ?? null });
       return { reused: false, ...result };
+    } catch (error) {
+      this.#eventLog.record("native_session_launch_failed", { ...context, code: error.code ?? null, message: error.message });
+      throw error;
     } finally {
       this.#outputStream.write(ENTER_OVERVIEW);
       if (this.#inputStream.isTTY) this.#inputStream.setRawMode(true);

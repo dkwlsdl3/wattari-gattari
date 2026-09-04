@@ -92,6 +92,10 @@ Dock의 `Alt+N`으로 만든 세션에는 `waga agents`, `waga send`, `waga ask`
 peer 신뢰 경계가 provider의 지침 채널을 통해 자동으로 전달됩니다. 사용자의 첫
 프롬프트에는 이 안내를 섞지 않습니다.
 
+Waga의 세션 연결·종료 진단 이벤트는
+`~/.local/state/wattari-gattari/events.jsonl`에 기록됩니다. 대화 내용은 기록하지
+않으며, `integrations/`에 한 달 보존용 logrotate와 user systemd timer가 있습니다.
+
 Claude가 사용자 확인 없이 답하려면 대상 세션에서 inbound 메시지를 허용해야 합니다.
 
 ```bash
