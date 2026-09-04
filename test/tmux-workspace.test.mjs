@@ -76,6 +76,7 @@ test("enter attaches an isolated server when outside tmux", async () => {
   assert.deepEqual(await workspace.enter({ cwd: "/tmp/project" }), { code: 3, mode: "isolated" });
   assert.ok(calls.some((args) => args.includes("new-session")));
   assert.ok(calls.some((args) => args.includes("status-right") && args.some((value) => value.includes("Alt+A agents · Alt+G dock"))));
+  assert.ok(calls.some((args) => args.includes("bind-key") && args.includes("M-g") && args.at(-1) === "select-window -t :overview ; send-keys -t :overview M-r"));
   assert.ok(calls.some((args) => args.includes("bind-key") && args.includes("M-a") && args.some((value) => value.includes("tmux-agents-view") && value.includes("#{window_id}"))));
   assert.ok(launched[0].includes("attach-session"));
   assert.equal(launched[1].stdio, "inherit");

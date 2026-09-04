@@ -393,7 +393,7 @@ export class TmuxWorkspace {
       await this.#call([...prefix, "set-option", "-as", "terminal-features", ",*:RGB:extkeys"]);
       await this.#call([...prefix, "set-option", "-s", "extended-keys", "on"]);
       await this.#call([...prefix, "set-option", "-s", "escape-time", "0"]);
-      await this.#call([...prefix, "bind-key", "-n", "M-g", "select-window", "-t", ":overview"]);
+      await this.#call([...prefix, "bind-key", "-n", "M-g", "select-window -t :overview ; send-keys -t :overview M-r"]);
       const agentsViewCommand = shellCommand(this.#nodePath, [this.#cliPath, "tmux-agents-view", "#{window_id}"]);
       await this.#call([...prefix, "bind-key", "-n", "M-a", "run-shell", "-b", agentsViewCommand]);
       await this.#call([...prefix, "bind-key", "-n", "S-Enter", "send-keys", "C-j"]);
