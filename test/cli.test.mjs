@@ -11,6 +11,7 @@ test("help explains that cwd filtering is optional for the global dock", async (
   assert.equal(await runCli(["--help"], { stdout, stderr: output(), bridge: {} }), 0);
   assert.match(stdout.value, /waga \[--cwd PATH\] \[--backend auto\|direct\|tmux\]/);
   assert.match(stdout.value, /global dock/);
+  assert.match(stdout.value, /ask .*--until-idle/);
 });
 
 test("list renders provider-prefixed ids", async () => {
@@ -95,11 +96,12 @@ test("ask prints exactly the peer reply", async () => {
     assert.equal(message, "ping");
     assert.equal(options.waitTimeoutMs, 1000);
     assert.equal(options.replyTimeoutMs, 1000);
+    assert.equal(options.untilIdle, true);
     options.onProgress({ state: "waiting", target: "codex:x" });
     options.onProgress({ state: "submitted", target: "codex:x" });
     return { reply: "PONG" };
   } };
-  assert.equal(await runCli(["ask", "codex:x", "ping", "--timeout", "1"], { stdout, stderr, bridge }), 0);
+  assert.equal(await runCli(["ask", "codex:x", "ping", "--timeout", "1", "--until-idle"], { stdout, stderr, bridge }), 0);
   assert.equal(stdout.value, "PONG\n");
   assert.match(stderr.value, /status\twaiting\tcodex:x/);
   assert.match(stderr.value, /status\tsubmitted\tcodex:x/);

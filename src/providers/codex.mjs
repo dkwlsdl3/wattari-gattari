@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 
 import { buildPeerEnvelope } from "../bridge/envelope.mjs";
 import { CodexAppServerClient } from "../codex-app-server.mjs";
+import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
 
 const execFileAsync = promisify(execFile);
 const THREAD_READ_CONCURRENCY = 8;
@@ -122,7 +123,10 @@ export class CodexProvider {
   async create(prompt, { cwd = process.cwd() } = {}) {
     const workspace = path.resolve(cwd);
     return this.#withClient(async (client) => {
-      const started = await client.request("thread/start", { cwd: workspace });
+      const started = await client.request("thread/start", {
+        cwd: workspace,
+        developerInstructions: WAGA_SESSION_INSTRUCTIONS,
+      });
       const threadId = started?.thread?.id;
       if (typeof threadId !== "string" || !threadId) {
         throw Object.assign(new Error("Codex thread/start response is missing its thread id"), { code: "CODEX_THREAD_START_INVALID" });
@@ -169,7 +173,7 @@ export class CodexProvider {
     });
   }
 
-  async ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, timeoutMs, onProgress = () => {} }) {
+  async ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, timeoutMs, untilIdle = false, onProgress = () => {} }) {
     return this.#withClient(async (client) => {
       const fallbackTimeout = timeoutMs ?? 180_000;
       const busyTimeout = waitTimeoutMs ?? fallbackTimeout;
@@ -201,17 +205,38 @@ export class CodexProvider {
       const turnId = started.turn.id;
       const replyDeadline = this.#now() + answerTimeout;
       while (this.#now() < replyDeadline) {
-        const page = await client.request("thread/items/list", { threadId: session.nativeId, turnId, limit: 100, sortDirection: "desc" });
-        const reply = answerIn(page.data, turnId);
-        if (reply) {
-          onProgress({ state: "replied", target: session.id });
-          return { target: session.id, requestId, turnId, reply, exchangeCount: 1, autoForwarded: false };
+        if (untilIdle) {
+          const turns = await client.request("thread/turns/list", {
+            threadId: session.nativeId,
+            limit: 100,
+            sortDirection: "desc",
+            itemsView: "summary",
+          });
+          const turn = turns.data.find((candidate) => candidate.id === turnId);
+          if (turn?.status === "failed" || turn?.status === "interrupted") {
+            throw Object.assign(new Error(`Codex turn ${turn.status}: ${turnId}`), { code: "TARGET_ERROR" });
+          }
+          if (turn?.status === "completed") {
+            const page = await client.request("thread/items/list", { threadId: session.nativeId, turnId, limit: 100, sortDirection: "desc" });
+            const reply = answerIn(page.data, turnId);
+            if (!reply) throw Object.assign(new Error(`Codex turn completed without a reply: ${turnId}`), { code: "REPLY_MISSING" });
+            onProgress({ state: "replied", target: session.id });
+            return { target: session.id, requestId, turnId, reply, exchangeCount: 1, autoForwarded: false };
+          }
+        } else {
+          const page = await client.request("thread/items/list", { threadId: session.nativeId, turnId, limit: 100, sortDirection: "desc" });
+          const reply = answerIn(page.data, turnId);
+          if (reply) {
+            onProgress({ state: "replied", target: session.id });
+            return { target: session.id, requestId, turnId, reply, exchangeCount: 1, autoForwarded: false };
+          }
         }
         const { thread } = await client.request("thread/read", { threadId: session.nativeId, includeTurns: false });
         if (thread.status?.type === "systemError") throw Object.assign(new Error(`Codex turn failed: ${turnId}`), { code: "TARGET_ERROR" });
         await this.#wait(Math.min(250, Math.max(1, replyDeadline - this.#now())));
       }
-      throw Object.assign(new Error(`Codex session did not reply within ${answerTimeout}ms`), { code: "REPLY_TIMEOUT" });
+      const action = untilIdle ? "complete" : "reply";
+      throw Object.assign(new Error(`Codex session did not ${action} within ${answerTimeout}ms`), { code: "REPLY_TIMEOUT" });
     });
   }
 

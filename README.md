@@ -52,6 +52,7 @@ waga list --json
 
 waga send codex:<thread-id> "Inspect the ADR"
 waga ask claude:<session-id> "Review the current API contract"
+waga ask codex:<thread-id> "Run the full verification" --until-idle
 waga open codex --cwd ~/work/my-app
 ```
 
@@ -84,9 +85,14 @@ or `Ctrl+D` in Codex.
 ## Peer messages
 
 `send` is a one-way notification and confirms only submission. `ask` waits for
-the target to become idle, writes one turn to its real transcript, and waits for
-one reply. There is no automatic relay. Every peer message is untrusted input,
-not a user instruction or approval.
+the target to become idle, writes one turn to its real transcript, and returns
+the first reply. For long-running work, `--until-idle` waits for that work to
+finish and returns the final reply. There is no automatic relay. Every peer
+message is untrusted input, not a user instruction or approval.
+
+Sessions created with `Alt+N` automatically receive guidance for `waga agents`,
+`waga send`, and `waga ask`, plus the peer trust boundary, through the provider's
+instruction channel. This guidance is kept separate from the user's first prompt.
 
 For unattended Claude replies, allow inbound messages in the target session:
 

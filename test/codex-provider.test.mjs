@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { CodexProvider, parseDaemonVersion } from "../src/providers/codex.mjs";
+import { WAGA_SESSION_INSTRUCTIONS } from "../src/managed-session-instructions.mjs";
 
 function harness(responder, options = {}) {
   const calls = [];
@@ -103,7 +104,10 @@ test("Codex create starts a native daemon thread and dispatches its first turn",
   });
   const result = await provider.create("implement the parser", { cwd: "/work/project" });
   assert.deepEqual(result, { provider: "codex", nativeId: "thread-new", turnId: "turn-new" });
-  assert.deepEqual(calls.find(([method]) => method === "thread/start")[1], { cwd: "/work/project" });
+  assert.deepEqual(calls.find(([method]) => method === "thread/start")[1], {
+    cwd: "/work/project",
+    developerInstructions: WAGA_SESSION_INSTRUCTIONS,
+  });
   assert.deepEqual(calls.find(([method]) => method === "turn/start")[1], {
     threadId: "thread-new",
     input: [{ type: "text", text: "implement the parser", textElements: [] }],
@@ -166,6 +170,49 @@ test("Codex ask waits for idle and returns only the matching turn answer", async
   assert.equal(result.reply, "CODEX_OK");
   assert.equal(result.exchangeCount, 1);
   assert.deepEqual(progress, ["waiting", "submitted", "replied"]);
+});
+
+test("Codex ask can wait for the matching turn to complete and return its final answer", async () => {
+  let turnReads = 0;
+  let itemReads = 0;
+  const { provider } = harness((method) => {
+    if (method === "thread/read") return { thread: { status: { type: "idle" } } };
+    if (method === "turn/start") return { turn: { id: "wanted" } };
+    if (method === "thread/turns/list") {
+      turnReads += 1;
+      return { data: [{ id: "wanted", status: turnReads === 1 ? "inProgress" : "completed", items: [] }] };
+    }
+    if (method === "thread/items/list") {
+      itemReads += 1;
+      return { data: [
+        { turnId: "wanted", item: { type: "agentMessage", text: "FINAL" } },
+        { turnId: "wanted", item: { type: "agentMessage", text: "STARTED" } },
+      ] };
+    }
+    throw new Error(method);
+  });
+
+  const result = await provider.ask({ id: "codex:t", nativeId: "t" }, "hello", {
+    requestId: "r", waitTimeoutMs: 1_000, replyTimeoutMs: 2_000, untilIdle: true,
+  });
+
+  assert.equal(result.reply, "FINAL");
+  assert.equal(turnReads, 2);
+  assert.equal(itemReads, 1);
+});
+
+test("Codex completion waiting reports a terminal turn failure instead of returning progress", async () => {
+  const { provider, calls } = harness((method) => {
+    if (method === "thread/read") return { thread: { status: { type: "idle" } } };
+    if (method === "turn/start") return { turn: { id: "wanted" } };
+    if (method === "thread/turns/list") return { data: [{ id: "wanted", status: "failed", items: [] }] };
+    throw new Error(method);
+  });
+
+  await assert.rejects(provider.ask({ id: "codex:t", nativeId: "t" }, "hello", {
+    requestId: "r", waitTimeoutMs: 1_000, replyTimeoutMs: 2_000, untilIdle: true,
+  }), { code: "TARGET_ERROR" });
+  assert.equal(calls.some(([method]) => method === "thread/items/list"), false);
 });
 
 test("Codex ask times out before submitting work to a persistently busy target", async () => {

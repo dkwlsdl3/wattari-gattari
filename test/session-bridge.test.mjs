@@ -29,12 +29,13 @@ test("provider-prefixed target limits discovery and ask is one request", async (
   const session = { id: "codex:full", nativeId: "full", sessionId: "full", provider: "codex", name: "proof" };
   const bridge = new SessionBridge({ providers: [provider("claude", [], calls), provider("codex", [session], calls)] });
   const onProgress = () => {};
-  const result = await bridge.ask("codex:full", "hello", { waitTimeoutMs: 12_000, replyTimeoutMs: 1234, onProgress });
+  const result = await bridge.ask("codex:full", "hello", { waitTimeoutMs: 12_000, replyTimeoutMs: 1234, untilIdle: true, onProgress });
   assert.equal(result.reply, "yes");
   assert.equal(calls.filter(([kind]) => kind === "list").length, 1);
   assert.equal(calls.at(-1)[0], "ask");
   assert.equal(calls.at(-1)[3].waitTimeoutMs, 12_000);
   assert.equal(calls.at(-1)[3].replyTimeoutMs, 1234);
+  assert.equal(calls.at(-1)[3].untilIdle, true);
   assert.equal(calls.at(-1)[3].onProgress, onProgress);
 });
 

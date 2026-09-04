@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { ClaudeProvider, parseClaudeAgents, parseClaudeBackgroundId } from "../src/providers/claude.mjs";
+import { WAGA_SESSION_INSTRUCTIONS } from "../src/managed-session-instructions.mjs";
 
 test("Claude agents parser rejects drifted output", () => {
   assert.throws(() => parseClaudeAgents("{}"), { code: "CLAUDE_AGENTS_INVALID" });
@@ -34,7 +35,7 @@ test("Claude create starts an official background agent in the requested workspa
   const result = await provider.create("review this change", { cwd: "/work/project" });
   assert.deepEqual(result, { provider: "claude", nativeId: "1234abcd" });
   assert.deepEqual(invocation, {
-    args: ["--bg", "--", "review this change"],
+    args: ["--bg", "--append-system-prompt", WAGA_SESSION_INSTRUCTIONS, "--", "review this change"],
     options: { cwd: "/work/project" },
   });
 });
@@ -166,6 +167,39 @@ test("Claude ask waits for idle before submitting and gives reply generation a f
   assert.equal(result.reply, "OK");
   assert.deepEqual(events, ["wait", "start", "send", "reply:321", "stop"]);
   assert.deepEqual(progress, ["waiting", "submitted", "replied"]);
+});
+
+test("Claude ask can wait for the target to become idle after its peer reply", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-claude-complete-"));
+  const sessions = path.join(root, ".claude", "sessions");
+  fs.mkdirSync(sessions, { recursive: true });
+  const socketPath = path.join(root, "target.sock");
+  const server = net.createServer();
+  await new Promise((resolve) => server.listen(socketPath, resolve));
+  t.after(() => { server.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  const base = { id: "1234abcd", sessionId: "full-id", cwd: process.cwd(), pid: process.pid, name: "target", startedAt: 7 };
+  fs.writeFileSync(path.join(sessions, `${process.pid}.json`), JSON.stringify({ ...base, peerProtocol: 1, messagingSocketPath: socketPath }));
+  let reads = 0;
+  let now = 0;
+  const provider = new ClaudeProvider({
+    homeDirectory: root,
+    run: async () => ({ stdout: JSON.stringify([{ ...base, status: ["idle", "busy", "idle"][reads++] }]) }),
+    endpointFactory: () => ({
+      async start() {},
+      async send() { return "message-1"; },
+      async waitForReply() { return { text: "FINAL" }; },
+      async stop() {},
+    }),
+    now: () => now,
+    wait: async (milliseconds) => { now += milliseconds; },
+  });
+
+  const result = await provider.ask({ id: "claude:full-id", sessionId: "full-id", projectCwd: process.cwd(), socketPath }, "hello", {
+    requestId: "r", waitTimeoutMs: 1_000, replyTimeoutMs: 2_000, untilIdle: true,
+  });
+
+  assert.equal(result.reply, "FINAL");
+  assert.equal(reads, 3);
 });
 
 test("Claude ask does not enqueue after its busy-wait timeout", async (t) => {

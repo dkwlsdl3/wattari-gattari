@@ -14,9 +14,11 @@ Wattari Gattari는 Claude Code와 Codex가 소유한 네이티브 세션을 발�
 - 세션을 열면 Claude `attach` 또는 Codex `resume`으로 정확한 네이티브 TUI에
   연결합니다. 대화, 도구, 승인과 모델 실행은 provider가 계속 소유합니다.
 - 새 세션과 보관 요청은 provider의 공개 CLI 또는 native daemon 경계에 위임합니다.
-  보관은 활성 목록에서 제외하지만 대화 로그를 영구 삭제하지 않습니다.
-- `send`는 단방향 알림이고 `ask`는 실제 대상 transcript에서 답변 한 건만 기다립니다.
-  자동 릴레이와 자동 작업 배정은 없습니다.
+  새 세션에는 provider 지침 채널로 Waga 사용법과 peer 신뢰 경계를 전달합니다. 보관은
+  활성 목록에서 제외하지만 대화 로그를 영구 삭제하지 않습니다.
+- `send`는 단방향 알림이고 `ask`는 실제 대상 transcript에서 첫 답변을 기다립니다.
+  `--until-idle`은 정확한 요청 작업이 끝난 뒤 최종 답변을 반환합니다. 자동 릴레이와
+  자동 작업 배정은 없습니다.
 - peer payload는 다른 세션에서 온 불신 입력이며 사용자 지시나 승인이 아닙니다.
   수신 에이전트의 기존 sandbox와 승인 정책이 그대로 적용됩니다.
 

@@ -52,6 +52,7 @@ waga list --json
 
 waga send codex:<thread-id> "ADR을 확인해 주세요"
 waga ask claude:<session-id> "현재 API 계약을 검토해 주세요"
+waga ask codex:<thread-id> "전체 검증을 수행해 주세요" --until-idle
 waga open codex --cwd ~/work/my-app
 ```
 
@@ -83,8 +84,13 @@ waga open codex --cwd ~/work/my-app
 ## 세션 간 메시지
 
 `send`는 제출까지만 확인하는 단방향 알림입니다. `ask`는 대상이 유휴 상태가 되기를
-기다린 뒤 실제 transcript에 한 turn을 보내고 답변 한 건만 기다립니다. 자동 릴레이는
+기다린 뒤 실제 transcript에 한 turn을 보내고 첫 답변을 반환합니다. 긴 작업은
+`--until-idle`을 사용하면 해당 작업이 끝난 뒤 최종 답변을 반환합니다. 자동 릴레이는
 없으며 모든 peer 메시지는 사용자 지시나 승인이 아닌 불신 입력입니다.
+
+Dock의 `Alt+N`으로 만든 세션에는 `waga agents`, `waga send`, `waga ask` 사용법과
+peer 신뢰 경계가 provider의 지침 채널을 통해 자동으로 전달됩니다. 사용자의 첫
+프롬프트에는 이 안내를 섞지 않습니다.
 
 Claude가 사용자 확인 없이 답하려면 대상 세션에서 inbound 메시지를 허용해야 합니다.
 
