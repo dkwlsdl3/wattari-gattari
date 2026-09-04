@@ -14,6 +14,9 @@ const SESSION_HOST_PATH = fileURLToPath(new URL("./native-session-host.mjs", imp
 const SOURCE_DIR = fileURLToPath(new URL(".", import.meta.url));
 const CURRENT_WINDOW_FORMAT = "#[bold,fg=#0f172a,bg=#38bdf8] #{?#{==:#{window_name},overview},OVERVIEW,#{window_name}} ";
 const EXIT_COMMAND = "printf '%s\\n' 'Waga frontend를 종료했습니다. Claude/Codex 세션과 로그는 유지됩니다.'";
+const VIEW_SETTLE_POLL_MS = 40;
+const VIEW_SETTLE_MAX_POLLS = 50;
+const VIEW_SETTLE_STABLE_POLLS = 6;
 export const GLOBAL_DOCK_SESSION = "waga-global";
 
 function sourceFiles(directory, root = directory) {
@@ -65,6 +68,10 @@ function defaultLaunch(args, { env = process.env, ...options } = {}) {
   });
 }
 
+function defaultWait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 function quote(value) {
   return `'${String(value).replaceAll("'", `'\\''`)}'`;
 }
@@ -107,8 +114,9 @@ export class TmuxWorkspace {
   #revision;
   #sessionHostPath;
   #eventLog;
+  #wait;
 
-  constructor({ run = defaultRun, launch = defaultLaunch, env = process.env, cliPath = CLI_PATH, nodePath = process.execPath, socketName = DEFAULT_SOCKET, revision = CURRENT_REVISION, sessionHostPath = SESSION_HOST_PATH, eventLog = new EventLog() } = {}) {
+  constructor({ run = defaultRun, launch = defaultLaunch, env = process.env, cliPath = CLI_PATH, nodePath = process.execPath, socketName = DEFAULT_SOCKET, revision = CURRENT_REVISION, sessionHostPath = SESSION_HOST_PATH, eventLog = new EventLog(), wait = defaultWait } = {}) {
     this.#run = run;
     this.#launch = launch;
     this.#env = env;
@@ -118,6 +126,7 @@ export class TmuxWorkspace {
     this.#revision = revision;
     this.#sessionHostPath = sessionHostPath;
     this.#eventLog = eventLog;
+    this.#wait = wait;
   }
 
   async enter({ cwd = process.cwd(), filterCwd = null } = {}) {
@@ -192,6 +201,7 @@ export class TmuxWorkspace {
         this.#sessionCommand(session, commandSpec),
       ]);
       this.#eventLog.record("session_view_respawned", { sessionId: session.id, windowId: existing.windowId, reason: "dock_reopen" });
+      await this.#waitForSettledFrame(existing.windowId);
       await this.#call(["select-window", "-t", existing.windowId]);
       return { reused: true, windowId: existing.windowId };
     }
@@ -283,6 +293,21 @@ export class TmuxWorkspace {
       commandSpec.command,
       ...commandSpec.args,
     ]);
+  }
+
+  async #waitForSettledFrame(windowId) {
+    let previous = null;
+    let stablePolls = 0;
+    for (let attempt = 0; attempt < VIEW_SETTLE_MAX_POLLS; attempt += 1) {
+      const captured = await this.#call(["capture-pane", "-p", "-t", windowId], { check: false });
+      const frame = captured.code === 0 ? captured.stdout.trim() : "";
+      if (frame && frame === previous) stablePolls += 1;
+      else stablePolls = frame ? 1 : 0;
+      previous = frame;
+      if (stablePolls >= VIEW_SETTLE_STABLE_POLLS) return true;
+      await this.#wait(VIEW_SETTLE_POLL_MS);
+    }
+    return false;
   }
 
   async #configure(prefix, sessionName, mode) {

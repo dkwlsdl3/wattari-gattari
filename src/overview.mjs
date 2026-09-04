@@ -7,6 +7,7 @@ import { TmuxWorkspace } from "./tmux-workspace.mjs";
 const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
 const ESCAPE_CODE_TIMEOUT_MS = 25;
+const SESSION_REMOVAL_CONFIRMATIONS = 2;
 const color = (code, text) => `${ESC}${code}m${text}${RESET}`;
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 const THEME = {
@@ -110,6 +111,32 @@ export function applyOverviewOrder(sessions, orderByWorkspace) {
       return leftRank - rightRank || left.index - right.index;
     }).map(({ session }) => session);
   });
+}
+
+export function reconcileDiscoveredSessions(previousSessions, discovered, missingCounts = new Map(), { removalConfirmations = SESSION_REMOVAL_CONFIRMATIONS } = {}) {
+  const discoveredSessions = discovered.sessions ?? [];
+  const seen = new Set(discoveredSessions.map((session) => session.id));
+  const unavailableProviders = new Set((discovered.warnings ?? []).map((warning) => warning.provider));
+  const availableProviders = Array.isArray(discovered.availableProviders) ? new Set(discovered.availableProviders) : null;
+  const sessions = [...discoveredSessions];
+  const nextMissingCounts = new Map();
+
+  for (const session of previousSessions) {
+    if (seen.has(session.id)) continue;
+    const providerUnavailable = unavailableProviders.has(session.provider)
+      || (availableProviders && !availableProviders.has(session.provider));
+    if (providerUnavailable) {
+      sessions.push(session);
+      continue;
+    }
+    const misses = (missingCounts.get(session.id) ?? 0) + 1;
+    if (misses < removalConfirmations) {
+      nextMissingCounts.set(session.id, misses);
+      sessions.push(session);
+    }
+  }
+
+  return { sessions, missingCounts: nextMissingCounts };
 }
 
 export function moveOverviewSession(orderByWorkspace, workspace, sessionId, direction, visibleIds) {
@@ -262,8 +289,8 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     const providerName = wide ? (session.provider === "claude" ? "CLAUDE" : "CODEX ") : (session.provider === "claude" ? "CLAUDE" : "CODEX");
     const providerColor = session.provider === "claude" ? THEME.claude : THEME.codex;
     const row = wide
-      ? `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)}  ${fit(session.name, nameWidth)}  ${color(THEME.muted, fit(status, 11))}`
-      : `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)} ${fit(session.name, nameWidth)} ${color(THEME.muted, fit(status, 8))}`;
+      ? `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)}  ${fit(session.name, nameWidth)}  ${color(statusColor, fit(status, 11))}`
+      : `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)} ${fit(session.name, nameWidth)} ${color(statusColor, fit(status, 8))}`;
     lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
   }
   const helpLines = wide
@@ -330,6 +357,7 @@ export async function runOverview({
 
   let allSessions = [];
   let warnings = [];
+  let missingSessionCounts = new Map();
   let providerUsage = {};
   let orderWarning = null;
   let orderByWorkspace = new Map();
@@ -396,7 +424,13 @@ export async function runOverview({
       if (!force && workspace.shouldRefreshOverview && !await workspace.shouldRefreshOverview()) return;
       renderAfter = true;
       const discovered = await bridge.discover(filterCwd ? { cwd: path.resolve(filterCwd), includeUsage: true } : { includeUsage: true });
-      const activeSessions = discovered.sessions.filter((session) => !archivedSessionIds.has(session.id));
+      const snapshot = reconcileDiscoveredSessions(
+        allSessions.filter((session) => !archivedSessionIds.has(session.id)),
+        { ...discovered, sessions: discovered.sessions.filter((session) => !archivedSessionIds.has(session.id)) },
+        missingSessionCounts,
+      );
+      missingSessionCounts = snapshot.missingCounts;
+      const activeSessions = snapshot.sessions;
       orderByWorkspace = reconcileOverviewOrder(orderByWorkspace, activeSessions);
       allSessions = applyOverviewOrder(activeSessions, orderByWorkspace);
       if (discovered.providerUsage) providerUsage = { ...providerUsage, ...discovered.providerUsage };

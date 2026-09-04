@@ -11,6 +11,7 @@ import {
   formatCodexUsage,
   moveOverviewSession,
   nativeReturnHint,
+  reconcileDiscoveredSessions,
   reconcileOverviewOrder,
   runOverview,
   selectOverviewSessions,
@@ -83,6 +84,41 @@ test("overview reconciles discovered sessions with manual workspace order", () =
 
   const moved = moveOverviewSession(new Map([["/work/shared", ["codex:1", "hidden", "claude:2"]]]), "/work/shared", "codex:1", "down", ["codex:1", "claude:2"]);
   assert.deepEqual(moved.get("/work/shared"), ["claude:2", "hidden", "codex:1"]);
+});
+
+test("overview retains one-tick provider failures and partial snapshots", () => {
+  const previous = [
+    { id: "claude:sample-app", provider: "claude", cwd: "/work/sample-app" },
+    { id: "codex:sample-app", provider: "codex", cwd: "/work/sample-app" },
+    { id: "codex:waga", provider: "codex", cwd: "/work/waga" },
+  ];
+  let missingCounts = new Map();
+
+  let reconciled = reconcileDiscoveredSessions(previous, {
+    sessions: [previous[2]],
+    warnings: [{ provider: "claude", message: "transient invalid JSON" }],
+    availableProviders: ["codex"],
+  }, missingCounts);
+  assert.deepEqual(reconciled.sessions.map(({ id }) => id), ["codex:waga", "claude:sample-app", "codex:sample-app"]);
+  assert.deepEqual([...reconciled.missingCounts], [["codex:sample-app", 1]]);
+
+  missingCounts = reconciled.missingCounts;
+  reconciled = reconcileDiscoveredSessions(reconciled.sessions, {
+    sessions: previous,
+    warnings: [],
+    availableProviders: ["claude", "codex"],
+  }, missingCounts);
+  assert.deepEqual(new Set(reconciled.sessions.map(({ id }) => id)), new Set(previous.map(({ id }) => id)));
+  assert.equal(reconciled.missingCounts.size, 0);
+
+  reconciled = reconcileDiscoveredSessions(reconciled.sessions, {
+    sessions: [previous[2]], warnings: [], availableProviders: ["claude", "codex"],
+  }, reconciled.missingCounts);
+  assert.equal(reconciled.sessions.length, 3, "the first healthy omission remains visible");
+  reconciled = reconcileDiscoveredSessions(reconciled.sessions, {
+    sessions: [previous[2]], warnings: [], availableProviders: ["claude", "codex"],
+  }, reconciled.missingCounts);
+  assert.deepEqual(reconciled.sessions.map(({ id }) => id), ["codex:waga"], "two consecutive healthy omissions confirm removal");
 });
 
 test("overview filtering is provider agnostic and searches names and paths", () => {
@@ -199,7 +235,7 @@ test("overview uses native provider colors and colors usage independently", () =
 
   assert.match(frame, /\x1b\[1;38;2;217;119;87mClaude 5시간 90% · 주간 6% 남음\x1b\[0m/);
   assert.match(frame, /\x1b\[1;36mCodex 주간 2% 남음\x1b\[0m/);
-  assert.match(frame, /\x1b\[1;38;2;158;203;176m●\x1b\[0m.*\x1b\[38;2;190;199;211mworking/);
+  assert.match(frame, /\x1b\[1;38;2;158;203;176m●\x1b\[0m.*\x1b\[1;38;2;158;203;176mworking/);
   assert.doesNotMatch(frame, /38;2;(56;189;248|250;204;21|192;132;252|34;211;238|45;212;191)m/);
 });
 
@@ -500,6 +536,46 @@ test("overview stops provider polling while its tmux window is hidden", async ()
 
   visible = true;
   await waitFor(() => discoveries >= 2);
+  pressAlt(input, "q");
+  assert.equal(await running, 0);
+});
+
+test("overview does not blink a workspace out on a transient mixed-provider snapshot", async () => {
+  const input = ttyInput();
+  const output = capturedOutput();
+  const sampleAppClaude = { id: "claude:sample-app", provider: "claude", status: "idle", name: "Sample App Claude", cwd: "/work/sample-app" };
+  const sampleAppCodex = { id: "codex:sample-app", provider: "codex", status: "working", name: "Sample App Codex", cwd: "/work/sample-app" };
+  const wagaCodex = { id: "codex:waga", provider: "codex", status: "working", name: "Waga Codex", cwd: "/work/waga" };
+  const snapshots = [
+    { sessions: [sampleAppClaude, sampleAppCodex, wagaCodex], warnings: [], availableProviders: ["claude", "codex"] },
+    { sessions: [wagaCodex], warnings: [{ provider: "claude", message: "transient invalid JSON" }], availableProviders: ["codex"] },
+    { sessions: [sampleAppClaude, sampleAppCodex, wagaCodex], warnings: [], availableProviders: ["claude", "codex"] },
+  ];
+  let discoveries = 0;
+  const bridge = {
+    async discover() {
+      const snapshot = snapshots[Math.min(discoveries, snapshots.length - 1)];
+      discoveries += 1;
+      return snapshot;
+    },
+  };
+  const workspace = {
+    async shouldRefreshOverview() { return true; },
+    async reconcileSessionViews() {},
+    async leave() { return { closeOverview: true }; },
+  };
+
+  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await waitFor(() => discoveries === 1 && plain(output.writes.at(-1)).includes("Sample App Codex"));
+  pressAlt(input, "r");
+  await waitFor(() => discoveries === 2 && plain(output.writes.at(-1)).includes("transient invalid JSON"));
+  assert.match(plain(output.writes.at(-1)), /sample-app \/work\/sample-app · 2 sessions/);
+  assert.match(plain(output.writes.at(-1)), /Sample App Claude/);
+  assert.match(plain(output.writes.at(-1)), /Sample App Codex/);
+
+  pressAlt(input, "r");
+  await waitFor(() => discoveries === 3 && !plain(output.writes.at(-1)).includes("transient invalid JSON"));
+  assert.match(plain(output.writes.at(-1)), /sample-app \/work\/sample-app · 2 sessions/);
   pressAlt(input, "q");
   assert.equal(await running, 0);
 });

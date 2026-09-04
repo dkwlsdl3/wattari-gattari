@@ -188,11 +188,13 @@ test("focusOrOpen reattaches mapped sessions and creates only missing views", as
   const run = async (args) => {
     calls.push(args);
     if (args[0] === "list-windows") return { stdout: list, stderr: "", code: 0 };
+    if (args[0] === "capture-pane") return { stdout: "ready\n", stderr: "", code: 0 };
     if (args[0] === "new-window") { list += "@3\tclaude:new\n"; return { stdout: "@3\n", stderr: "", code: 0 }; }
     return { stdout: "", stderr: "", code: 0 };
   };
   const workspace = new TmuxWorkspace({
     run,
+    wait: async () => {},
     env: { TMUX: "/tmp/tmux,1,0", WAGA_TMUX_SESSION: "waga-project-deadbeef" },
     nodePath: "/usr/bin/node",
     sessionHostPath: "/app/native-session-host.mjs",
@@ -208,6 +210,33 @@ test("focusOrOpen reattaches mapped sessions and creates only missing views", as
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("@waga_session_id")));
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("window-status-format") && args.at(-1) === ""));
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("window-status-current-format") && args.at(-1).includes("#{window_name}")));
+});
+
+test("focusOrOpen keeps a reattached native view hidden until its frame settles", async () => {
+  const calls = [];
+  const frames = ["", ...Array(4).fill("loading\n"), ...Array(6).fill("ready\n")];
+  const run = async (args) => {
+    calls.push(args);
+    if (args[0] === "list-windows") return { stdout: "@2\tcodex:known\n", stderr: "", code: 0 };
+    if (args[0] === "capture-pane") return { stdout: frames.shift() ?? "ready\n", stderr: "", code: 0 };
+    return { stdout: "", stderr: "", code: 0 };
+  };
+  const workspace = new TmuxWorkspace({
+    run,
+    wait: async () => {},
+    env: { TMUX: "/tmp/tmux,1,0", WAGA_TMUX_SESSION: "waga-project-deadbeef" },
+    nodePath: "/usr/bin/node",
+    sessionHostPath: "/app/native-session-host.mjs",
+  });
+
+  await workspace.focusOrOpen({ id: "codex:known" }, { command: "codex", args: [], cwd: "/tmp" });
+
+  const respawnIndex = calls.findIndex((args) => args[0] === "respawn-window");
+  const selectIndex = calls.findIndex((args) => args[0] === "select-window");
+  const captures = calls.filter((args) => args[0] === "capture-pane");
+  assert.equal(captures.length, 11);
+  assert.ok(respawnIndex >= 0 && selectIndex > respawnIndex);
+  assert.ok(calls.slice(respawnIndex + 1, selectIndex).every((args) => args[0] === "capture-pane"));
 });
 
 test("closeSessionView removes only the window mapped to the archived session", async () => {
