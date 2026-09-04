@@ -20,8 +20,9 @@ const THEME = {
   // Claude's brand coral and the native Codex TUI's terminal-defined cyan.
   claude: "1;38;2;217;119;87",
   codex: "1;36",
-  working: "1;38;2;158;203;176",
-  idle: "1;38;2;164;190;205",
+  working: "1;32",
+  idle: "1;34",
+  needsInput: "1;31",
   error: "1;38;2;224;154;164",
   warning: "1;38;2;224;190;132",
 };
@@ -191,7 +192,7 @@ export function buildOverviewTree(sessions, { collapsed = new Set(), query = "",
 }
 
 function statusView(status) {
-  if (status === "needs-input") return ["!", "needs input", THEME.error];
+  if (status === "needs-input") return ["!", "needs input", THEME.needsInput];
   if (status === "working") return ["●", "working", THEME.working];
   if (status === "error") return ["!", "error", THEME.error];
   if (status === "idle") return ["○", "ready", THEME.idle];
