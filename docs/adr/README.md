@@ -66,7 +66,7 @@ Waga는 세션 ID, loaded 목록 변화, tmux 창 조작과 native TUI 종료 �
 넓은 변경은 `관측 → 최소 재현 → 가설 → 계측 → 수정 → 회귀 테스트`의 작은 루프로
 진행합니다. 완료하려면 최종 tree에서 다음을 확인합니다.
 
-- 관련 동작과 회귀 테스트, `npm run check`, `npm pack --dry-run`
+- 관련 동작과 회귀 테스트, `npm run check`, `npm run benchmark`, `npm pack --dry-run`
 - `git diff --check`와 예상 밖 staged·untracked 파일 부재
 - 실제 provider 검증은 폐기용 세션으로 한정
 - 완료된 `TODO.md` 항목 삭제와 미검증 런타임의 명시

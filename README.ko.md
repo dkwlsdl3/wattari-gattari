@@ -112,6 +112,7 @@ npm run demo          # 가짜 provider로 메시지 계약 실행
 npm run demo:dock     # 가짜 세션으로 dock 실행
 npm run demo:record   # VHS로 GIF 재생성
 npm run check
+npm run benchmark
 npm pack --dry-run
 ```
 
