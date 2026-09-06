@@ -24,4 +24,5 @@ jobs:
       - run: npm ci
       - run: tmux -V
       - run: npm run check
+      - run: npm run benchmark
       - run: npm pack --dry-run

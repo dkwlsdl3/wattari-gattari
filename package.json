@@ -21,9 +21,10 @@
     "demo": "node src/demo.mjs",
     "demo:dock": "node src/demo-dock.mjs",
     "demo:record": "vhs demo/wattari-gattari.tape",
+    "benchmark": "node scripts/benchmark.mjs",
     "test": "node --test",
     "test:coverage": "node --test --experimental-test-coverage",
-    "check": "find src test -name '*.mjs' -print0 | xargs -0 -n1 node --check && node --test && node src/demo.mjs"
+    "check": "find src test scripts -name '*.mjs' -print0 | xargs -0 -n1 node --check && node --test && node src/demo.mjs"
   },
   "engines": {
     "node": ">=22"
