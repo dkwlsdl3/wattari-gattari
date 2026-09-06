@@ -23,8 +23,8 @@
     "demo:record": "vhs demo/wattari-gattari.tape",
     "benchmark": "node scripts/benchmark.mjs",
     "test": "node --test",
-    "test:coverage": "node --test --experimental-test-coverage",
-    "check": "find src test scripts -name '*.mjs' -print0 | xargs -0 -n1 node --check && node --test && node src/demo.mjs"
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-lines=85 --test-coverage-branches=70 --test-coverage-functions=80",
+    "check": "find src test scripts -name '*.mjs' -print0 | xargs -0 -n1 node --check && npm run test:coverage && node src/demo.mjs"
   },
   "engines": {
     "node": ">=22"
