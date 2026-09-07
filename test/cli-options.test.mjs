@@ -43,6 +43,16 @@ test("open accepts only native providers", () => {
   assert.throws(() => parseCliArgs(["open", "other"]), { code: "INVALID_ARGUMENT" });
 });
 
+test("CLI refuses overflowed deadlines, unknown flags and surplus open arguments", () => {
+  for (const value of ["0", "-1", "Infinity", "NaN", "1e308", "9007199254741"]) {
+    assert.throws(() => parseCliArgs(["ask", "codex:proof", "hello", "--timeout", value]), { code: "INVALID_ARGUMENT" }, value);
+  }
+  assert.equal(parseCliArgs(["ask", "codex:proof", "hello", "--timeout", "0.0001"]).replyTimeoutMs, 1);
+  for (const args of [["open", "codex", "extra"], ["list", "--unknown"], ["list", "--cwd"], ["ask", "codex:proof"]]) {
+    assert.throws(() => parseCliArgs(args), { code: "INVALID_ARGUMENT" });
+  }
+});
+
 test("internal tmux Agents view accepts only a tmux window id", () => {
   assert.deepEqual(parseCliArgs(["tmux-agents-view", "@7"]), {
     command: "tmux-agents-view", cwd: null, provider: null, backend: "auto", waitTimeoutMs: 1_800_000, replyTimeoutMs: 180_000, untilIdle: false, json: false, windowId: "@7",

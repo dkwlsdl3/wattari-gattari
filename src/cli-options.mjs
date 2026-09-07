@@ -35,6 +35,7 @@ export function parseCliArgs(args) {
         const seconds = Number(value);
         if (!Number.isFinite(seconds) || seconds <= 0) throw invalid(`${arg} must be a positive number of seconds`);
         const milliseconds = Math.ceil(seconds * 1_000);
+        if (!Number.isSafeInteger(milliseconds)) throw invalid(`${arg} is too large`);
         if (arg === "--timeout" || arg === "--wait-timeout") options.waitTimeoutMs = milliseconds;
         if (arg === "--timeout" || arg === "--reply-timeout") options.replyTimeoutMs = milliseconds;
       }
@@ -60,6 +61,7 @@ export function parseCliArgs(args) {
     options.provider = positional.shift() ?? options.provider;
     if (!options.provider) throw invalid("open requires claude or codex");
     if (!['claude', 'codex'].includes(options.provider)) throw invalid(`Unknown provider: ${options.provider}`);
+    if (positional.length) throw invalid(`Unexpected argument: ${positional[0]}`);
   } else if (options.command === "tmux-agents-view") {
     options.windowId = positional.shift();
     if (!/^@[0-9]+$/.test(options.windowId ?? "") || positional.length) throw invalid("tmux-agents-view requires one tmux window id");

@@ -27,9 +27,10 @@ export class EventLog {
       fs.mkdirSync(path.dirname(this.#filePath), { recursive: true, mode: 0o700 });
       const observedAt = this.#now();
       const timestamp = observedAt instanceof Date ? observedAt.toISOString() : new Date(observedAt).toISOString();
-      const line = `${JSON.stringify({ timestamp, pid: this.#processId, event, ...details })}\n`;
-      const descriptor = fs.openSync(this.#filePath, "a", 0o600);
+      const line = `${JSON.stringify({ ...details, timestamp, pid: this.#processId, event })}\n`;
+      const descriptor = fs.openSync(this.#filePath, fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK, 0o600);
       try {
+        if (!fs.fstatSync(descriptor).isFile()) return false;
         fs.fchmodSync(descriptor, 0o600);
         fs.writeFileSync(descriptor, line);
       } finally {

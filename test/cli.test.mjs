@@ -6,6 +6,35 @@ import { runCli } from "../src/cli.mjs";
 
 function output() { let value = ""; return { write(chunk) { value += chunk; }, get value() { return value; } }; }
 
+test("CLI errors and JSON replies preserve exit codes and stdout/stderr separation", async () => {
+  const stdout = output();
+  const stderr = output();
+  let submissions = 0;
+  const bridge = { send: async () => { submissions++; throw Object.assign(new Error("send failed"), { code: "SEND_FAILED" }); } };
+  assert.equal(await runCli(["send", "codex:x", "hello"], { bridge, stdout, stderr }), 1);
+  assert.equal(submissions, 1);
+  assert.equal(stdout.value, "");
+  assert.equal(stderr.value, "SEND_FAILED: send failed\n");
+  const json = output();
+  const warnings = [{ provider: "claude", message: "unavailable" }];
+  assert.equal(await runCli(["list", "--json"], { stdout: json, stderr: output(), bridge: { discover: async () => ({ sessions: [], warnings }) } }), 0);
+  assert.deepEqual(JSON.parse(json.value), { sessions: [], warnings });
+  assert.equal(await runCli(["ask"], { stdout, stderr, bridge }), 2);
+  assert.equal(submissions, 1);
+});
+
+test("text list neutralizes terminal controls and embedded field separators", async () => {
+  const stdout = output();
+  const row = { id: "codex:proof", status: "idle", name: "name\x1b[2J\tforged\nrow", cwd: "/tmp" };
+  await runCli(["list"], { stdout, stderr: output(), bridge: { discover: async () => ({ sessions: [row], warnings: [] }) } });
+  assert.equal(stdout.value.split("\n").length, 2);
+  assert.equal(stdout.value.trimEnd().split("\t").length, 4);
+  assert.doesNotMatch(stdout.value, /\x1b/);
+  const json = output();
+  await runCli(["list", "--json"], { stdout: json, stderr: output(), bridge: { discover: async () => ({ sessions: [row], warnings: [] }) } });
+  assert.equal(JSON.parse(json.value).sessions[0].name, row.name);
+});
+
 test("help explains that cwd filtering is optional for the global dock", async () => {
   const stdout = output();
   assert.equal(await runCli(["--help"], { stdout, stderr: output(), bridge: {} }), 0);

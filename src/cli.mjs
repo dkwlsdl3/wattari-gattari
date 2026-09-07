@@ -42,8 +42,9 @@ function writeList(output, errorOutput, { sessions, warnings }, json) {
     output.write(`${JSON.stringify({ sessions, warnings }, null, 2)}\n`);
     return;
   }
-  for (const session of sessions) output.write(`${session.id}\t${session.status}\t${session.name}\t${session.cwd}\n`);
-  for (const warning of warnings) errorOutput.write(`warning\t${warning.provider}\t${warning.message}\n`);
+  const field = (value) => String(value ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
+  for (const session of sessions) output.write(`${[session.id, session.status, session.name, session.cwd].map(field).join("\t")}\n`);
+  for (const warning of warnings) errorOutput.write(`warning\t${field(warning.provider)}\t${field(warning.message)}\n`);
 }
 
 export async function runCli(args = process.argv.slice(2), {

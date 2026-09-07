@@ -14,6 +14,20 @@ test("doctor reports each native boundary", async () => {
   assert.match(text, /Claude peer registry/);
 });
 
+test("doctor continues after required probes fail or throw", async () => {
+  const ok = async () => ({ ok: true, detail: "ok" });
+  let last = false;
+  const result = await runDoctor({ output: { write() {} }, probes: {
+    node: ok, tmux: ok, codexCli: async () => { throw new Error("missing executable"); }, claudeCli: ok,
+    codexAgents: ok, codexDaemon: async () => ({ ok: false }), claudeAgents: async () => { last = true; return { ok: true }; },
+  } });
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.checks.length, 7);
+  assert.equal(result.checks[2].detail, "missing executable");
+  assert.equal(result.checks[5].detail, "no detail");
+  assert.equal(last, true);
+});
+
 test("doctor reports missing tmux without failing required checks", async () => {
   const ok = async () => ({ ok: true, detail: "ready" });
   const missing = async () => ({ ok: false, detail: "not found" });
