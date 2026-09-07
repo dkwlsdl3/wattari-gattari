@@ -1,69 +1,61 @@
-# 테스트 보완 계획
+# 테스트 검증 절차
 
-## 파일럿 근거 — 2026-09-07
+## 구획
 
-기준: `08aa75e`, Node 24.15.0, StrykerJS 10.0.0. 원본 source와 의존성을
-변경하지 않고 임시 복사본에서 `session-bridge.mjs`와 `bridge/envelope.mjs`를
-변이했다. worker 1개, command runner, coverage analysis off, timeout 5초 + 실행시간 배수 2.
+| 구획 | 검증 계약 |
+|---|---|
+| 메시지 신뢰 경계 | 정확한 대상, 모호함·부재 거부, 요청 ID, 불신 입력, 무전달 |
+| provider·통신·사용량 | 응답 페이지·상관관계, 상태·timeout, 연결 정리, 인증 실패·캐시 |
+| 목록·순서·별칭 | 늦은 갱신, 일시 누락, 화면 소유권, 선택 유지, 저장 실패 |
+| 실행·tmux·dock | 창 재사용, 재접속, 실패 정리, signal·종료 코드, 격리 프로세스 |
+| CLI·진단·로그 | 잘못된 입력, 출력·종료 코드, 제어문자, 파일 권한·회전 |
 
-| 실행 범위 | 검출 / 전체 변이 | 생존 | 벽시계 시간 |
-|---|---:|---:|---:|
-| 기존 관련 테스트 9개 | 124 / 200 (62%) | 76 | 19.22초 |
-| 기존 전체 테스트 142개 | 124 / 200 (62%) | 76 | 134.58초 |
-| 보완 후 관련 테스트 12개 | 145 / 200 (72.5%) | 55 | 20.10초 |
+각 구획은 호출 구현과 테스트를 함께 대조합니다. 발견한 결함은 수정 전 실패를
+확인하고, 수정 후 관련 테스트와 전체 회귀를 실행합니다. 검토 기록과 당시 hash는
+`test/mutation/*-review.json`, 활성 작업은 `TODO.md`, 완료 이력은 `git log`를 따릅니다.
 
-세 실행 모두 timeout/error 0. command runner의 “1 test”는 명령 전체를 가리키며,
-실제 Node 테스트 수는 9/142/12개다. 이 runner는 미커버와 생존을 구분하지 못한다.
-이는 두 파일의 **원시 점수**이며 제품 전체 점수나 버그 검출 확률이 아니다.
-보완 후 전체 테스트를 사용하는 변이 실행은 하지 않았다.
+## 일반 회귀
 
-테스트 3개로 추가 검출한 변이는 21개다. 주요 사례는 대상 필터 제거,
-native/session ID 비교 반전, 존재하지 않는 대상의 거부 제거, 100,000자 경계 변경,
-비문자열 검증 및 peer 출처·자동 릴레이 금지 문구 제거다.
-일반 회귀 검증은 보완 후 145개 통과, 실패·취소·skip 0이다.
+```sh
+npm run check
+npm run benchmark
+npm pack --dry-run
+git diff --check
+```
 
-생존 55개는 아직 전부 판정하지 않았다. 예를 들어 모든 provider가 실패하면
-sessions는 항상 비므로 그 분기의 `sessions.length === 0`을 true로 바꾸는 변이는
-동등할 수 있다. 오류 설명 문자열 삭제는 오류 코드 계약과 별도로 우선순위를 판단한다.
+벤치마크는 1,000개 세션의 메모리 내 처리·문자열 프레임 구성입니다.
+provider 응답 속도나 실제 터미널 표시 속도를 측정하지 않습니다.
+실제 tmux 통합 테스트의 skip 여부도 별도로 확인합니다.
 
-원본 JSON/HTML, 설정, 설치 lockfile은 작업자의 Downloads에
-`waga-qa-pilot-2026-09-07-*` 묶음으로 보존한다. 결과는 커밋·테스트·도구 버전에
-종속되며 테스트를 영구 동결하거나 이후 변경의 검증을 생략하는 근거로 쓰지 않는다.
+## 선정 변이 재실행
 
-## 순서와 완료 기준
+```sh
+node scripts/mutation-check.mjs provider /absolute/new-provider-report
+node scripts/mutation-check.mjs overview /absolute/new-overview-report
+node scripts/mutation-check.mjs lifecycle /absolute/new-lifecycle-report
+node scripts/mutation-check.mjs cli /absolute/new-cli-report
+```
 
-| 순서 | 대상 / 현재 테스트 수 | 중점 |
-|---|---|---|
-| 1 | bridge·envelope·주입 지침 / 24 | 정확한 대상, 모호함·부재 거부, 무전달, 요청 ID·신뢰 경계 |
-| 2 | provider·RPC·peer·사용량 / 37 | 실제 fixture, 응답 상관관계, 지연·중복·단절, timeout, 캐시 |
-| 3 | overview·순서·별칭 / 39 | 과거 응답 경합, 일시적 목록 누락, 상태 전환, 저장 실패 |
-| 4 | tmux·direct·실행기·dock / 34 | 창 재사용, 실패·종료·signal, 프로세스·소켓 정리 |
-| 5 | CLI·인자·doctor·이벤트 로그 / 22 | 잘못된 입력, 종료 코드, 출력 분리, 민감정보·파일 권한 |
+출력 폴더는 아직 존재하지 않아야 합니다. 실행기는 임시 복사본에서
+`test/mutation/cases.json`의 위험 분기를 하나씩 변경합니다. 원본 checkout과
+사용자 세션에는 변이를 적용하지 않습니다. Node 외 새 검증 의존성은 없습니다.
 
-각 테스트를 호출 구현과 함께 읽고, 관찰할 계약·assertion·가짜 경계·누락 조건을
-대조한다. 파일/함수별로 검출·생존·동등·미커버·timeout·환경 오류를 구분해 기록한다.
-command runner에서 확인 불가능한 항목은 추정하지 말고 별도 실행으로 확인한다.
-결과에는 source/test hash, tool/config, 명령, 원본 리포트와 제외 사유를 남긴다.
-구획별 검토 기록은 `test/mutation/*-review.json`에 두며 현재 작업 상태는 `TODO.md`를 따른다.
+- 먼저 정상 baseline을 확인하고, 각 변이의 구문을 검사한 뒤 관련 테스트를 실행합니다.
+- 생존은 전체 테스트로 다시 확인합니다. 정상 코드로 복구한 baseline도 확인합니다.
+- 일반 실패·테스트 timeout·프로세스 timeout·runner 오류를 구분합니다.
+- TAP 원본, 명령·Node 버전·timeout, source/test/lockfile hash를 `report.json`과 함께 보존합니다.
+- 자동 생성된 검토 기록은 hash 대상에서 제외합니다. 테스트와 구현은 제외하지 않습니다.
 
-고위험 누락부터 테스트를 보완하고 같은 변이를 재실행한다. 동등 변이와 단순 문구를
-억지로 잡아 100%를 만드는 것은 목표가 아니다. 블록별로 표준 회귀·벤치마크·패키징을
-확인하고, 실제 provider 검증은 `waga-proof-*` 폐기용 세션만 사용한다.
+이 실행기는 **선정 결함 주입**입니다. 앞서 StrykerJS로 수행한 변이 검사와 도구·분모가
+다르므로 점수를 합산하지 않습니다. 최초 추산 5,061개 후보를 전부 실행하는 명령도
+아닙니다. 신규 분기는 사례를 추가하거나 Stryker 실행 범위를 다시 선정해야 합니다.
 
-## 초기 견적과 운영 제안
+## 결과를 재사용할 조건
 
-- source 23파일/3,135줄, 기존 test 21파일/2,831줄. 이는 규모 조사이며 전수 리뷰 완료가 아니다.
-- demo 2파일·제품 상수 1파일을 제외한 20파일에서 변이 후보 **5,061개**를 생성했다.
-  계측된 원본으로 dry run만 성공했으며, 전체 변이를 실행한 결과는 아니다.
-- `134.58초 × 5,061 / 200 ≈ 57분`이 전체 테스트 재실행 방식의 단순 추정이다.
-  순수 계산 파일 두 개의 편향과 I/O·무한 루프·timeout 가능성을 고려해 **1~2시간 이상**을
-  1회 실행 예산으로 둔다. 실제 총시간의 보장이나 상한은 아니다.
-- 코드·테스트 전수 대조와 생존 판정·우선 보완은 **4~8시간의 초기 작업 예산**으로 잡고,
-  provider 블록까지 측정한 뒤 재산정한다. 발견되는 구현 결함과 실제 provider 대기시간은 별도다.
-- 우선 고위험 파일을 묶어 관련 테스트만 실행하고, 생존 변이는 전체 테스트로 재확인한다.
-  PR에는 빠른 회귀 검증, 변이 검사는 관련 변경과 주기적 전체 실행으로 분리한다.
-- Node 기본 runner를 유지한다. Stryker command runner는 테스트별 coverage 최적화가 없으므로
-  관련 파일 선정과 보수적인 캐시 무효화가 필요하다. 도구를 위해 테스트 프레임워크를 교체하지 않는다.
+통과는 테스트 동결 근거가 아닙니다. 구현·관련 테스트·공유 의존성·lockfile·Node 또는
+검증 설정이 바뀌면 관련 구획을 재실행합니다. 영향 범위가 불명확하면 네 구획 모두
+실행하고 신뢰 경계의 Stryker 범위도 재검토합니다. runner 오류와 미실행은 통과가 아닙니다.
 
-도구 동작 근거: [Stryker configuration](https://stryker-mutator.io/docs/stryker-js/configuration/),
-[incremental limitations](https://stryker-mutator.io/docs/stryker-js/incremental/).
+네이티브 모델의 실제 응답, Claude 최종 답변 상관관계, 외부 OAuth 서비스,
+동시 다중 프로세스의 저장 충돌은 격리 fixture 테스트만으로 입증되지 않습니다.
+실제 provider 검증은 `waga-proof-*` 폐기용 세션에 한정하고 별도 결과로 기록합니다.

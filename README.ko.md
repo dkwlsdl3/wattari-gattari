@@ -87,9 +87,11 @@ Agents View로 이동해도 세션 TUI window는 유지됩니다. direct backend
 ## 세션 간 메시지
 
 `send`는 제출까지만 확인하는 단방향 알림입니다. `ask`는 대상이 유휴 상태가 되기를
-기다린 뒤 실제 transcript에 한 turn을 보내고 첫 답변을 반환합니다. 긴 작업은
-`--until-idle`을 사용하면 해당 작업이 끝난 뒤 최종 답변을 반환합니다. 자동 릴레이는
-없으며 모든 peer 메시지는 사용자 지시나 승인이 아닌 불신 입력입니다.
+기다린 뒤 실제 transcript에 한 turn을 보내고 첫 답변을 반환합니다.
+Codex의 `--until-idle`은 제출한 turn의 완료를 확인하고 마지막 에이전트 메시지를
+반환합니다. Claude는 peer 답변 수신 후 idle을 확인하지만, 해당 native turn과의
+상관관계나 답변이 최종 transcript 결과라는 보장은 없습니다. 자동 릴레이는 없으며
+모든 peer 메시지는 사용자 지시나 승인이 아닌 불신 입력입니다.
 
 Dock의 `Alt+N`으로 만든 세션에는 `waga agents`, `waga send`, `waga ask` 사용법과
 peer 신뢰 경계가 provider의 지침 채널을 통해 자동으로 전달됩니다. 사용자의 첫

@@ -1,7 +1,7 @@
 # Architecture decision
 
 - 상태: 채택
-- 갱신일: 2026-09-03
+- 갱신일: 2026-09-07
 
 ## 제품 경계
 
@@ -17,8 +17,9 @@ Wattari Gattari는 Claude Code와 Codex가 소유한 네이티브 세션을 발�
   새 세션에는 provider 지침 채널로 Waga 사용법과 peer 신뢰 경계를 전달합니다. 보관은
   활성 목록에서 제외하지만 대화 로그를 영구 삭제하지 않습니다.
 - `send`는 단방향 알림이고 `ask`는 실제 대상 transcript에서 첫 답변을 기다립니다.
-  `--until-idle`은 정확한 요청 작업이 끝난 뒤 최종 답변을 반환합니다. 자동 릴레이와
-  자동 작업 배정은 없습니다.
+  Codex의 `--until-idle`은 제출한 turn의 완료와 마지막 에이전트 메시지를 확인합니다.
+  Claude는 peer 답변 후 idle을 확인하는 수준이며 native turn 상관관계·최종 답변은
+  보장하지 않습니다. 자동 릴레이와 자동 작업 배정은 없습니다.
 - peer payload는 다른 세션에서 온 불신 입력이며 사용자 지시나 승인이 아닙니다.
   수신 에이전트의 기존 sandbox와 승인 정책이 그대로 적용됩니다.
 
@@ -32,6 +33,9 @@ Wattari Gattari는 Claude Code와 Codex가 소유한 네이티브 세션을 발�
 - provider 하나가 실패해도 다른 provider 목록은 경고와 함께 사용할 수 있습니다.
 - Dock의 사용량은 Claude OAuth usage endpoint와 Codex App Server에서 읽어 5분 캐시하며,
   조회 실패는 세션 발견에 영향을 주지 않습니다.
+- RPC 제출 확인이 timeout되면 전달 여부는 불명일 수 있습니다. 자동 재전송하거나
+  원격 작업을 중단하지 않습니다. 불완전한 Codex 목록 조회는 정상적인 세션 삭제로
+  취급하지 않습니다.
 - 파서와 프로토콜 어댑터는 실제 출력 fixture로 검증합니다. 실제 통합 검증은
   `waga-proof-*` 이름과 임시 작업 디렉터리를 가진 폐기용 세션만 사용합니다.
 

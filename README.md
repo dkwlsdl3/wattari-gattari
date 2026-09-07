@@ -89,8 +89,10 @@ leave the native view with `Ctrl+Z` in Claude or `Ctrl+D` in Codex.
 
 `send` is a one-way notification and confirms only submission. `ask` waits for
 the target to become idle, writes one turn to its real transcript, and returns
-the first reply. For long-running work, `--until-idle` waits for that work to
-finish and returns the final reply. There is no automatic relay. Every peer
+the first reply. On Codex, `--until-idle` waits for the submitted turn to finish
+and returns its last agent message. On Claude, it returns the peer reply after
+observing idle; the peer protocol does not establish a matching native turn or
+guarantee that reply is the final transcript answer. There is no automatic relay. Every peer
 message is untrusted input, not a user instruction or approval.
 
 Sessions created with `Alt+N` automatically receive guidance for `waga agents`,
