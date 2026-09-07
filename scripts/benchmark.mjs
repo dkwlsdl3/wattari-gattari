@@ -14,8 +14,8 @@ const SESSION_COUNT = 1_000;
 const WARMUP_RUNS = 20;
 const SAMPLE_RUNS = 100;
 const budgets = {
-  discoveryP95Ms: 10,
-  frameP95Ms: 25,
+  bridgeProcessingP95Ms: 10,
+  frameBuildP95Ms: 25,
 };
 
 function sessionsFor(provider) {
@@ -61,26 +61,27 @@ const bridge = new SessionBridge({
 const allSessions = [...claude, ...codex];
 const order = reconcileOverviewOrder(new Map(), allSessions);
 
-const discovery = await measure(() => bridge.discover());
-const frame = await measure(() => {
+const bridgeProcessing = await measure(() => bridge.discover());
+const frameBuild = await measure(() => {
   const ordered = applyOverviewOrder(allSessions, order);
   const nodes = buildOverviewTree(ordered);
   return buildOverviewFrame({ sessions: ordered, nodes, width: 120, height: 40 });
 });
 const result = {
+  scope: "In-memory bridge processing and frame string construction; excludes provider CLI/RPC/parsing and terminal drawing",
   node: process.version,
   sessions: SESSION_COUNT,
   samples: SAMPLE_RUNS,
-  discovery,
-  frame,
+  bridgeProcessing,
+  frameBuild,
   rssMiB: process.memoryUsage().rss / 1024 / 1024,
   budgets,
 };
 
 process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 const failures = [];
-if (discovery.p95Ms > budgets.discoveryP95Ms) failures.push(`discovery p95 ${discovery.p95Ms.toFixed(2)}ms > ${budgets.discoveryP95Ms}ms`);
-if (frame.p95Ms > budgets.frameP95Ms) failures.push(`frame p95 ${frame.p95Ms.toFixed(2)}ms > ${budgets.frameP95Ms}ms`);
+if (bridgeProcessing.p95Ms > budgets.bridgeProcessingP95Ms) failures.push(`bridge processing p95 ${bridgeProcessing.p95Ms.toFixed(2)}ms > ${budgets.bridgeProcessingP95Ms}ms`);
+if (frameBuild.p95Ms > budgets.frameBuildP95Ms) failures.push(`frame build p95 ${frameBuild.p95Ms.toFixed(2)}ms > ${budgets.frameBuildP95Ms}ms`);
 if (failures.length) {
   process.stderr.write(`Performance budget exceeded: ${failures.join(", ")}\n`);
   process.exitCode = 1;

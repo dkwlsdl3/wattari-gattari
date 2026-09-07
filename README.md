@@ -115,7 +115,7 @@ npm run demo          # exercise messaging with fake providers
 npm run demo:dock     # open the dock with fake sessions
 npm run demo:record   # regenerate the GIF with VHS
 npm run check
-npm run benchmark
+npm run benchmark     # in-memory processing and frame strings; excludes provider I/O and terminal drawing
 npm pack --dry-run
 ```
 

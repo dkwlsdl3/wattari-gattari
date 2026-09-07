@@ -112,7 +112,7 @@ npm run demo          # 가짜 provider로 메시지 계약 실행
 npm run demo:dock     # 가짜 세션으로 dock 실행
 npm run demo:record   # VHS로 GIF 재생성
 npm run check
-npm run benchmark
+npm run benchmark     # 메모리 내 처리·화면 문자열 생성만 측정 (provider I/O·터미널 출력 제외)
 npm pack --dry-run
 ```
 

@@ -7,9 +7,11 @@ import test from "node:test";
 import { promisify } from "node:util";
 
 import { TmuxWorkspace, shellCommand } from "../src/tmux-workspace.mjs";
+import { defaultEventLogPath } from "../src/event-log.mjs";
 
 const execFileAsync = promisify(execFile);
-const hasTmux = spawnSync("tmux", ["-V"], { stdio: "ignore" }).status === 0;
+const commandTimeoutMs = 5_000;
+const hasTmux = spawnSync("tmux", ["-V"], { stdio: "ignore", timeout: commandTimeoutMs, killSignal: "SIGKILL" }).status === 0;
 
 async function waitFor(check, timeoutMs = 2_000) {
   const deadline = Date.now() + timeoutMs;
@@ -21,16 +23,20 @@ async function waitFor(check, timeoutMs = 2_000) {
   throw new Error(`condition was not met within ${timeoutMs}ms`);
 }
 
-test("real isolated tmux reuses, revives, and removes one retained session view", { skip: !hasTmux }, async (t) => {
+test("real isolated tmux reuses, revives, and removes one retained session view", { skip: !hasTmux, timeout: 30_000 }, async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-tmux-"));
+  const env = { ...process.env, XDG_STATE_HOME: path.join(root, "state") };
   const socketPath = path.join(root, "tmux.sock");
   const sessionName = "waga-proof-integration";
   const prefix = ["-S", socketPath, "-f", "/dev/null"];
   const call = async (args, { check = true } = {}) => {
     try {
-      const result = await execFileAsync("tmux", [...prefix, ...args], { encoding: "utf8" });
+      const result = await execFileAsync("tmux", [...prefix, ...args], {
+        encoding: "utf8", env, timeout: commandTimeoutMs, killSignal: "SIGKILL", signal: t.signal,
+      });
       return { ...result, code: 0 };
     } catch (error) {
+      if (error.killed || error.name === "AbortError") throw error;
       const result = {
         stdout: String(error.stdout ?? ""),
         stderr: String(error.stderr ?? error.message ?? ""),
@@ -41,7 +47,7 @@ test("real isolated tmux reuses, revives, and removes one retained session view"
     }
   };
   t.after(() => {
-    spawnSync("tmux", [...prefix, "kill-server"], { stdio: "ignore" });
+    spawnSync("tmux", [...prefix, "kill-server"], { stdio: "ignore", env, timeout: commandTimeoutMs, killSignal: "SIGKILL" });
     fs.rmSync(root, { recursive: true, force: true });
   });
 
@@ -71,6 +77,8 @@ test("real isolated tmux reuses, revives, and removes one retained session view"
   const opened = await workspace.focusOrOpen(session, command("WAGA_PROOF_READY_ONE"));
   assert.equal(opened.reused, false);
   await waitFor(async () => (await call(["capture-pane", "-p", "-t", opened.windowId])).stdout.includes("WAGA_PROOF_READY_ONE"));
+  const events = fs.readFileSync(defaultEventLogPath(env), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+  assert.ok(events.some((event) => event.event === "native_session_started" && event.sessionId === session.id));
 
   const reused = await workspace.focusOrOpen(session, command("MUST_NOT_RESTART"));
   assert.deepEqual(reused, { reused: true, windowId: opened.windowId });
