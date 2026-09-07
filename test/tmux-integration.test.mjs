@@ -23,9 +23,9 @@ async function waitFor(check, timeoutMs = 2_000) {
 
 test("real isolated tmux reuses, revives, and removes one retained session view", { skip: !hasTmux }, async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-tmux-"));
-  const socketName = `waga-proof-${process.pid}-${Date.now()}`;
+  const socketPath = path.join(root, "tmux.sock");
   const sessionName = "waga-proof-integration";
-  const prefix = ["-L", socketName, "-f", "/dev/null"];
+  const prefix = ["-S", socketPath, "-f", "/dev/null"];
   const call = async (args, { check = true } = {}) => {
     try {
       const result = await execFileAsync("tmux", [...prefix, ...args], { encoding: "utf8" });
