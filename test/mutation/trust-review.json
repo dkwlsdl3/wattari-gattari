@@ -1,0 +1,53 @@
+{
+  "observedOn": "2026-09-07",
+  "baselineCommit": "29471bd749116540adcef5ff820cc20f4061db7f",
+  "scope": ["src/session-bridge.mjs", "src/bridge/envelope.mjs", "src/managed-session-instructions.mjs"],
+  "tool": { "name": "StrykerJS", "version": "10.0.0", "node": "24.15.0", "runner": "command", "coverageAnalysis": "off", "workers": 1, "timeoutMS": 5000, "timeoutFactor": 2 },
+  "testCommand": "node --test --test-reporter=tap test/session-bridge.test.mjs test/envelope.test.mjs test/managed-session-instructions.test.mjs",
+  "before": { "tests": 13, "mutants": 210, "killed": 151, "survived": 59, "timeouts": 0, "errors": 0 },
+  "after": { "tests": 24, "mutants": 210, "killed": 203, "survived": 7, "timeouts": 0, "errors": 0 },
+  "fullSuiteReplay": { "testsPerRun": 156, "survivorsRetested": 7, "stillSurvived": 7, "baselineAndRestoredPassed": true, "skipped": 0 },
+  "sourceSha256": {
+    "src/session-bridge.mjs": "149f0d29c716462f5822b731127f6e23635fad0d30508179672dd59e27653d88",
+    "src/bridge/envelope.mjs": "1833f80916d12e01148050540dd8ab2714fb19543b6a26abdaac148aeb3a3b25",
+    "src/managed-session-instructions.mjs": "160f75fb566e04f7f35eb9ec684f08fdada29d3a79e8481e7b93ebe6f723538c"
+  },
+  "testSha256": {
+    "test/session-bridge.test.mjs": "75264a1ad78c9f3f7753e4db81d8b62f8d800851a2d8058039b97c59dd7ff571",
+    "test/envelope.test.mjs": "2121fc058d05529e0ceb4cceb22dc319387e00985a07c832dd95f3cbe17dad2a",
+    "test/managed-session-instructions.test.mjs": "73c3342cbbb3f9c2cf3a9b4b3d4fb77f2012073a899ed0504d78822d6f36fe1c"
+  },
+  "functionReview": {
+    "BridgeError.constructor": "Code, message, cause, Error identity.",
+    "providerFromTarget": "Leading provider prefix restricts discovery; embedded provider-like name does not.",
+    "SessionBridge.constructor": "Nonempty provider collection; rejects invalid collections.",
+    "SessionBridge.discover": "Provider selection, partial/total failure, empty healthy result, non-Error rejection, timestamp ordering, opt-in usage, no adapter-array mutation.",
+    "SessionBridge.create": "Valid trimmed prompt and cwd routed once; invalid input rejected before provider access.",
+    "SessionBridge.archive": "Exact resolved target; ambiguous/invalid target rejected; failure propagated once.",
+    "SessionBridge.rename": "Name validation/trimming, resolved target, no mutation on ambiguous/invalid input, failure propagation.",
+    "SessionBridge.send": "Exact identities among decoys, missing/partial rejection, notification metadata, no retry or relay.",
+    "SessionBridge.ask": "Exact session/message/options, independent default deadlines, fresh request IDs, exactly one delegation, no retry or relay.",
+    "SessionBridge.#resolve": "Full/native/session ID and name matching, prefix routing, ambiguity candidates and missing-target diagnostics, validation before discovery.",
+    "SessionBridge.#provider": "Unknown provider produces a public error without consulting others.",
+    "buildPeerEnvelope": "Input type and length boundaries; origin/trust, authorization disclaimer, reply mode, no-relay instructions and content boundaries.",
+    "WAGA_SESSION_INSTRUCTIONS": "Native-session context, user override, discovery/send/ask commands, full-ID preference, no authorization/automatic forwarding. Text only, not model compliance."
+  },
+  "survivorReview": [
+    { "file": "src/bridge/envelope.mjs", "id": "10", "line": 5, "classification": "accepted-low-risk", "reason": "Empty invalid-message explanation; MESSAGE_REQUIRED and rejection remain verified. Exact diagnostic wording is not gated here." },
+    { "file": "src/bridge/envelope.mjs", "id": "18", "line": 8, "classification": "accepted-low-risk", "reason": "Empty oversized-message explanation; MESSAGE_TOO_LARGE and size boundary remain verified." },
+    { "file": "src/session-bridge.mjs", "id": "103", "line": 43, "classification": "equivalent", "reason": "All selected providers failing implies no fulfilled result could append a session; the sessions.length guard is redundant in that branch." },
+    { "file": "src/session-bridge.mjs", "id": "112", "line": 44, "classification": "accepted-low-risk", "reason": "Only the separator between provider diagnostics is removed; providers, reasons and DISCOVERY_FAILED remain checked." },
+    { "file": "src/session-bridge.mjs", "id": "196", "line": 88, "classification": "accepted-low-risk", "reason": "Only the separator between warning diagnostics is removed. Multi-warning formatting is outside this safety-focused gate." },
+    { "file": "src/session-bridge.mjs", "id": "197", "line": 88, "classification": "accepted-low-risk", "reason": "Adds spurious diagnostic text when there are no warnings; rejection code and no-delivery behavior remain verified. Not equivalent." },
+    { "file": "src/session-bridge.mjs", "id": "210", "line": 92, "classification": "accepted-low-risk", "reason": "Candidate delimiter changes; both candidate IDs, ambiguity rejection and absence of downstream operations remain verified." }
+  ],
+  "artifacts": "Downloads/waga-qa-trust-2026-09-07-CAMGSb: raw JSON reports, replay TAP logs, configs, replay script and tooling lockfile",
+  "limitations": [
+    "Raw mutation score is scope-specific, not a product reliability percentage.",
+    "Command runner cannot distinguish uncovered mutants from survivors.",
+    "Real providers and active user sessions were not exercised; provider behavior is a separate review block.",
+    "Text assertions cannot prove an agent obeys the trust instructions.",
+    "All 210 mutants used focused tests; only the seven survivors were replayed with the full suite.",
+    "Hash or dependency/environment/config changes require reassessment; this record does not freeze tests."
+  ]
+}

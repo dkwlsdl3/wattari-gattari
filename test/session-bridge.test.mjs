@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { SessionBridge } from "../src/session-bridge.mjs";
+import { BridgeError, SessionBridge } from "../src/session-bridge.mjs";
+
+function publicError(code) {
+  return (error) => {
+    assert.ok(error instanceof BridgeError);
+    assert.equal(error.code, code);
+    assert.ok(error.message.trim(), "public errors need a readable explanation");
+    return true;
+  };
+}
 
 function provider(name, sessions, calls = []) {
   return {
@@ -44,20 +53,28 @@ test("provider-prefixed target limits discovery and ask is one request", async (
   const onProgress = () => {};
   const result = await bridge.ask("codex:full", "hello", { waitTimeoutMs: 12_000, replyTimeoutMs: 1234, untilIdle: true, onProgress });
   assert.equal(result.reply, "yes");
-  assert.equal(calls.filter(([kind]) => kind === "list").length, 1);
-  assert.equal(calls.at(-1)[0], "ask");
-  assert.equal(calls.at(-1)[3].waitTimeoutMs, 12_000);
-  assert.equal(calls.at(-1)[3].replyTimeoutMs, 1234);
-  assert.equal(calls.at(-1)[3].untilIdle, true);
-  assert.equal(calls.at(-1)[3].onProgress, onProgress);
+  assert.deepEqual(calls, [
+    ["list", { cwd: undefined }],
+    ["ask", session, "hello", { requestId: result.requestId, waitTimeoutMs: 12_000, replyTimeoutMs: 1234, untilIdle: true, onProgress, expectsReply: true }],
+  ]);
 });
 
 test("ambiguous unprefixed name fails with exact candidates", async () => {
+  const calls = [];
   const bridge = new SessionBridge({ providers: [
-    provider("claude", [{ id: "claude:a", provider: "claude", name: "same" }]),
-    provider("codex", [{ id: "codex:b", provider: "codex", name: "same" }]),
+    provider("claude", [{ id: "claude:a", provider: "claude", name: "same" }], calls),
+    provider("codex", [{ id: "codex:b", provider: "codex", name: "same" }], calls),
   ] });
-  await assert.rejects(bridge.send("same", "hello"), { code: "TARGET_AMBIGUOUS" });
+  for (const action of [() => bridge.send("same", "hello"), () => bridge.ask("same", "hello"), () => bridge.archive("same"), () => bridge.rename("same", "new")]) {
+    calls.length = 0;
+    await assert.rejects(action(), (error) => {
+      publicError("TARGET_AMBIGUOUS")(error);
+      assert.match(error.message, /claude:a/);
+      assert.match(error.message, /codex:b/);
+      return true;
+    });
+    assert.deepEqual(calls.map(([kind]) => kind), ["list", "list"]);
+  }
 });
 
 test("send resolves each exact identity among decoys and never sends to a missing or partial target", async () => {
@@ -87,7 +104,7 @@ test("send resolves each exact identity among decoys and never sends to a missin
 test("create delegates one prompt to the selected native provider", async () => {
   const calls = [];
   const bridge = new SessionBridge({ providers: [provider("claude", [], calls), provider("codex", [], calls)] });
-  const result = await bridge.create("codex", "implement the parser", { cwd: "/work/project" });
+  const result = await bridge.create("codex", "  implement the parser  ", { cwd: "/work/project" });
   assert.deepEqual(result, { provider: "codex", nativeId: "codex-new" });
   assert.deepEqual(calls, [["create", "implement the parser", { cwd: "/work/project" }]]);
   await assert.rejects(bridge.create("codex", "   ", { cwd: "/work/project" }), { code: "PROMPT_REQUIRED" });
@@ -111,4 +128,142 @@ test("rename resolves one live target and validates the new name", async () => {
   assert.deepEqual(await bridge.rename("codex:full", "  after  "), { target: "codex:full", renamed: true, name: "after" });
   assert.deepEqual(calls, [["list", { cwd: undefined }], ["rename", session, "after"]]);
   await assert.rejects(bridge.rename("codex:full", "  "), { code: "NAME_REQUIRED" });
+});
+
+test("bridge errors preserve their public code and original cause", () => {
+  const cause = new Error("transport closed");
+  const error = new BridgeError("DOWN", "provider unavailable", { cause });
+  assert.ok(error instanceof Error);
+  assert.equal(error.code, "DOWN");
+  assert.equal(error.message, "provider unavailable");
+  assert.equal(error.cause, cause);
+});
+
+test("bridge rejects missing or invalid provider collections at construction", () => {
+  for (const providers of [undefined, null, [], {}, "codex"]) {
+    assert.throws(() => new SessionBridge({ providers }), (error) => {
+      assert.ok(error instanceof TypeError);
+      assert.match(error.message, /SessionBridge/);
+      return true;
+    });
+  }
+});
+
+test("invalid target, prompt, or name never reaches a provider", async () => {
+  const calls = [];
+  const bridge = new SessionBridge({ providers: [provider("codex", [], calls)] });
+  for (const invalid of [undefined, null, 42, {}, "", " \n\t "]) {
+    await assert.rejects(bridge.create("codex", invalid), publicError("PROMPT_REQUIRED"));
+    await assert.rejects(bridge.rename("codex:x", invalid), publicError("NAME_REQUIRED"));
+    await assert.rejects(bridge.send(invalid, "message"), publicError("TARGET_REQUIRED"));
+    await assert.rejects(bridge.ask(invalid, "message"), publicError("TARGET_REQUIRED"));
+    await assert.rejects(bridge.archive(invalid), publicError("TARGET_REQUIRED"));
+    await assert.rejects(bridge.rename(invalid, "valid"), publicError("TARGET_REQUIRED"));
+  }
+  assert.deepEqual(calls, []);
+});
+
+test("unknown providers are rejected without consulting a configured provider", async () => {
+  const calls = [];
+  const bridge = new SessionBridge({ providers: [provider("codex", [], calls)] });
+  for (const action of [() => bridge.discover({ provider: "unknown" }), () => bridge.create("unknown", "prompt"), () => bridge.send("claude:x", "message")]) {
+    await assert.rejects(action(), (error) => {
+      publicError("PROVIDER_NOT_FOUND")(error);
+      assert.match(error.message, /unknown|claude/);
+      return true;
+    });
+  }
+  assert.deepEqual(calls, []);
+});
+
+test("discovery distinguishes an empty healthy provider from total failure", async () => {
+  const offline = { name: "codex", async list() { throw Object.assign(new Error("offline"), { code: "DOWN" }); } };
+  const bridge = new SessionBridge({ providers: [provider("claude", []), offline] });
+  const result = await bridge.discover();
+  assert.deepEqual(result.sessions, []);
+  assert.deepEqual(result.availableProviders, ["claude"]);
+  assert.deepEqual(result.warnings, [{ provider: "codex", code: "DOWN", message: "offline" }]);
+  const broken = { name: "claude", async list() { throw new Error("broken"); } };
+  await assert.rejects(new SessionBridge({ providers: [broken, offline] }).discover(), (error) => {
+    publicError("DISCOVERY_FAILED")(error);
+    assert.match(error.message, /claude: broken/);
+    assert.match(error.message, /codex: offline/);
+    return true;
+  });
+});
+
+test("discovery tolerates non-Error rejections and retains missing-target diagnostics", async () => {
+  const calls = [];
+  for (const reason of [null, undefined, "offline"]) {
+    const offline = { name: "codex", async list() { throw reason; } };
+    const bridge = new SessionBridge({ providers: [provider("claude", [], calls), offline] });
+    const result = await bridge.discover();
+    assert.deepEqual(result.warnings, [{ provider: "codex", code: "PROVIDER_ERROR", message: String(reason) }]);
+    await assert.rejects(bridge.send("missing", "message"), (error) => {
+      publicError("SESSION_NOT_FOUND")(error);
+      assert.ok(error.message.includes("missing"));
+      assert.ok(error.message.includes(`codex: ${String(reason)}`));
+      return true;
+    });
+  }
+  assert.ok(calls.every(([kind]) => kind === "list"));
+});
+
+test("discovery sorts mixed timestamps without changing provider-owned arrays", async () => {
+  const rows = [{ id: "missing" }, { id: "new", updatedAt: 30 }, { id: "old", updatedAt: 10 }, { id: "null", updatedAt: null }];
+  const original = structuredClone(rows);
+  const bridge = new SessionBridge({ providers: [provider("claude", rows), provider("codex", [{ id: "middle", updatedAt: 20 }])] });
+  assert.deepEqual((await bridge.discover()).sessions.map(({ id }) => id), ["new", "middle", "old", "missing", "null"]);
+  assert.deepEqual(rows, original);
+});
+
+test("usage remains opt-in and adapters without usage snapshots are supported", async () => {
+  let reads = 0;
+  const claude = provider("claude", []);
+  claude.usageSnapshot = () => { reads += 1; return { remainingPercent: 50 }; };
+  const bridge = new SessionBridge({ providers: [claude, provider("codex", [])] });
+  assert.deepEqual((await bridge.discover()).providerUsage, {});
+  assert.equal(reads, 0);
+  assert.deepEqual((await bridge.discover({ includeUsage: true })).providerUsage, { claude: { remainingPercent: 50 } });
+  assert.equal(reads, 1);
+});
+
+test("provider-like text inside a name does not restrict discovery", async () => {
+  const session = { id: "claude:x", provider: "claude", name: "review codex:task" };
+  const calls = [];
+  const bridge = new SessionBridge({ providers: [provider("claude", [session], calls), provider("codex", [], calls)] });
+  assert.equal((await bridge.send(session.name, "message")).target, session.id);
+  assert.deepEqual(calls.map(([kind]) => kind), ["list", "list", "send"]);
+});
+
+test("ask defaults retain separate deadlines and fresh IDs across requests", async () => {
+  const session = { id: "codex:x", provider: "codex" };
+  const calls = [];
+  const bridge = new SessionBridge({ providers: [provider("codex", [session], calls)] });
+  const first = await bridge.ask(session.id, "first", { cwd: "/work" });
+  const second = await bridge.ask(session.id, "second", { cwd: "/work" });
+  assert.equal(typeof first.requestId, "string");
+  assert.ok(first.requestId.length > 0);
+  assert.notEqual(first.requestId, second.requestId);
+  assert.deepEqual(calls, [
+    ["list", { cwd: "/work" }],
+    ["ask", session, "first", { requestId: first.requestId, waitTimeoutMs: 1_800_000, replyTimeoutMs: 180_000, untilIdle: false, onProgress: undefined, expectsReply: true }],
+    ["list", { cwd: "/work" }],
+    ["ask", session, "second", { requestId: second.requestId, waitTimeoutMs: 1_800_000, replyTimeoutMs: 180_000, untilIdle: false, onProgress: undefined, expectsReply: true }],
+  ]);
+});
+
+test("provider delivery failure is propagated without retrying or relaying", async () => {
+  const session = { id: "codex:x", provider: "codex" };
+  const calls = [];
+  const adapter = provider("codex", [session], calls);
+  const failure = new Error("delivery failed");
+  for (const method of ["send", "ask", "archive", "rename"]) {
+    adapter[method] = async (...args) => { calls.push([method, ...args]); throw failure; };
+    calls.length = 0;
+    const bridge = new SessionBridge({ providers: [adapter] });
+    const action = method === "archive" ? bridge.archive(session.id) : bridge[method](session.id, "message");
+    await assert.rejects(action, (error) => error === failure);
+    assert.deepEqual(calls.map(([kind]) => kind), ["list", method]);
+  }
 });

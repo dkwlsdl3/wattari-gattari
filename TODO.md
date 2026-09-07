@@ -6,7 +6,6 @@
 
 범위·실측·완료 기준: [테스트 보완 계획](docs/testing-plan.md).
 
-- [ ] bridge·신뢰 경계 테스트 전수 대조와 파일럿 생존 변이 판정
 - [ ] provider·RPC·peer의 응답 상관관계·실패·timeout·캐시 검증
 - [ ] 목록·상태·순서의 경합과 저장 실패 검증
 - [ ] tmux·실행기 수명과 격리 통합 테스트의 정리·timeout 검증

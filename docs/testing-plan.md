@@ -34,7 +34,7 @@ sessions는 항상 비므로 그 분기의 `sessions.length === 0`을 true로 �
 
 | 순서 | 대상 / 현재 테스트 수 | 중점 |
 |---|---|---|
-| 1 | bridge·envelope·주입 지침 / 13 | 정확한 대상, 모호함·부재 거부, 무전달, 요청 ID·신뢰 경계 |
+| 1 | bridge·envelope·주입 지침 / 24 | 정확한 대상, 모호함·부재 거부, 무전달, 요청 ID·신뢰 경계 |
 | 2 | provider·RPC·peer·사용량 / 37 | 실제 fixture, 응답 상관관계, 지연·중복·단절, timeout, 캐시 |
 | 3 | overview·순서·별칭 / 39 | 과거 응답 경합, 일시적 목록 누락, 상태 전환, 저장 실패 |
 | 4 | tmux·direct·실행기·dock / 34 | 창 재사용, 실패·종료·signal, 프로세스·소켓 정리 |
@@ -44,6 +44,7 @@ sessions는 항상 비므로 그 분기의 `sessions.length === 0`을 true로 �
 대조한다. 파일/함수별로 검출·생존·동등·미커버·timeout·환경 오류를 구분해 기록한다.
 command runner에서 확인 불가능한 항목은 추정하지 말고 별도 실행으로 확인한다.
 결과에는 source/test hash, tool/config, 명령, 원본 리포트와 제외 사유를 남긴다.
+구획별 검토 기록은 `test/mutation/*-review.json`에 두며 현재 작업 상태는 `TODO.md`를 따른다.
 
 고위험 누락부터 테스트를 보완하고 같은 변이를 재실행한다. 동등 변이와 단순 문구를
 억지로 잡아 100%를 만드는 것은 목표가 아니다. 블록별로 표준 회귀·벤치마크·패키징을
