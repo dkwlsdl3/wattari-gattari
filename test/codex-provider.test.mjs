@@ -23,9 +23,70 @@ function harness(responder, options = {}) {
   return { calls, provider: new CodexProvider({ run, clientFactory: async () => client, wait: async () => {}, ...options }) };
 }
 
+test("Codex completion finds the matching turn and answer beyond the first page", async () => {
+  const { provider, calls } = harness((method, params) => {
+    if (method === "thread/read") return { thread: { status: { type: "idle" } } };
+    if (method === "turn/start") return { turn: { id: "wanted" } };
+    if (method === "thread/turns/list") return params.cursor
+      ? { data: [{ id: "wanted", status: "completed" }], nextCursor: null }
+      : { data: [{ id: "unrelated", status: "failed" }], nextCursor: "turn-page-2" };
+    if (method === "thread/items/list") return params.cursor
+      ? { data: [{ turnId: "wanted", item: { type: "agentMessage", text: "FINAL" } }], nextCursor: null }
+      : { data: [{ turnId: "other", item: { type: "agentMessage", text: "WRONG" } }], nextCursor: "item-page-2" };
+    throw new Error(method);
+  });
+  const result = await provider.ask({ id: "codex:t", nativeId: "t" }, "review", { requestId: "r", untilIdle: true, timeoutMs: 100 });
+  assert.equal(result.reply, "FINAL");
+  assert.equal(calls.filter(([method]) => method === "turn/start").length, 1);
+  for (const method of ["thread/items/list", "thread/turns/list"]) {
+    assert.equal(calls.filter(([name]) => name === method).length, 2);
+  }
+});
+
+test("Codex loaded pagination rejects cursor loops instead of polling forever", async () => {
+  let pages = 0;
+  const { provider, calls } = harness((method) => {
+    if (method === "thread/loaded/list") {
+      if (++pages > 3) throw new Error("test guard: pagination did not terminate");
+      return { data: [], nextCursor: "same" };
+    }
+    throw new Error(method);
+  });
+  await assert.rejects(provider.list(), { code: "CODEX_PAGE_INVALID" });
+  assert.equal(calls.filter(([method]) => method === "thread/loaded/list").length, 2);
+  assert.equal(calls.at(-1)[0], "close");
+});
+
 test("daemon version parser rejects protocol drift", () => {
   assert.equal(parseDaemonVersion('{"status":"running"}').status, "running");
   assert.throws(() => parseDaemonVersion("no"), { code: "CODEX_DAEMON_INVALID" });
+});
+
+test("Codex partial thread read failure is not reported as a healthy complete snapshot", async () => {
+  const { provider, calls } = harness((method, params) => {
+    if (method === "thread/loaded/list") return { data: ["good", "failed"], nextCursor: null };
+    if (method === "thread/read" && params.threadId === "good") return { thread: { id: "good", cwd: "/work" } };
+    throw Object.assign(new Error("temporary read failure"), { code: "READ_FAILED" });
+  });
+  await assert.rejects(provider.list(), { code: "READ_FAILED" });
+  assert.equal(calls.at(-1)[0], "close");
+});
+
+test("Codex connection recovery retries discovery but never repeats initialized operations", async () => {
+  const failure = new Error("initialize failed");
+  let attempts = 0;
+  let discoveries = 0;
+  let closes = 0;
+  const provider = new CodexProvider({
+    run: async () => ({ stdout: JSON.stringify({ status: "running", socketPath: `/tmp/proof-${++discoveries}.sock` }) }),
+    clientFactory: async (socket) => {
+      assert.equal(socket, `/tmp/proof-${attempts + 1}.sock`);
+      if (++attempts === 1) throw new Error("old socket");
+      return { initialize: async () => { throw failure; }, close: async () => { closes++; }, request: async () => assert.fail("must not submit") };
+    },
+  });
+  await assert.rejects(provider.create("not submitted"), (error) => error === failure);
+  assert.deepEqual([attempts, discoveries, closes], [2, 2, 1]);
 });
 
 test("Codex usage parser selects the weekly window", () => {

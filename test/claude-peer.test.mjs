@@ -12,6 +12,38 @@ function listen(server, socketPath) {
   return new Promise((resolve, reject) => { server.once("error", reject); server.listen(socketPath, resolve); });
 }
 
+test("peer stop closes idle inbound sockets and cancels outstanding waits", { timeout: 1500 }, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-peer-stop-"));
+  const endpoint = new ClaudePeerEndpoint({ homeDirectory: root });
+  let client;
+  t.after(async () => { client?.destroy(); await endpoint.stop(); fs.rmSync(root, { recursive: true, force: true }); });
+  await endpoint.start({ socketDirectory: root });
+  client = net.connect(endpoint.socketPath);
+  await new Promise((resolve, reject) => { client.once("connect", resolve); client.once("error", reject); });
+  const reply = assert.rejects(endpoint.waitForReply("/unused", "r", { timeoutMs: 1000 }), { code: "CLAUDE_PEER_CLOSED" });
+  const disposition = assert.rejects(endpoint.waitForDisposition("r", { timeoutMs: 1000 }), { code: "CLAUDE_PEER_CLOSED" });
+  await endpoint.stop();
+  await Promise.all([reply, disposition]);
+  assert.equal(endpoint.socketPath, null);
+});
+
+test("peer receive handles chunking, malformed frames and forgets replies on restart", { timeout: 2000 }, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-peer-receive-"));
+  const endpoint = new ClaudePeerEndpoint({ homeDirectory: root });
+  let client;
+  t.after(async () => { client?.destroy(); await endpoint.stop(); fs.rmSync(root, { recursive: true, force: true }); });
+  await endpoint.start({ socketDirectory: root });
+  client = net.connect(endpoint.socketPath);
+  await new Promise((resolve, reject) => { client.once("connect", resolve); client.once("error", reject); });
+  const frame = JSON.stringify(buildClaudeFrame({ text: "EXACT", fromSocket: "/target" }));
+  client.write("bad json\n\n" + frame.slice(0, 20));
+  client.end(frame.slice(20) + "\n");
+  assert.equal((await endpoint.waitForReply("/target", "r", { timeoutMs: 500 })).text, "EXACT");
+  await endpoint.stop();
+  await endpoint.start({ socketDirectory: root });
+  await assert.rejects(endpoint.waitForReply("/target", "new", { timeoutMs: 10 }), { code: "REPLY_TIMEOUT" });
+});
+
 test("Claude peer endpoint sends measured NDJSON shape and receives one reply", { timeout: 2_000 }, async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-peer-test-"));
   const home = path.join(root, "home");

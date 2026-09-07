@@ -49,7 +49,7 @@ export class CodexAppServerClient {
     return new CodexAppServerClient(socket, { onServerRequest, onNotification });
   }
 
-  async initialize({ signal } = {}) {
+  async initialize({ signal, timeoutMs = 5_000 } = {}) {
     const result = await this.request("initialize", {
       clientInfo: { name: "waga", title: "Waga native session bridge", version: VERSION },
       capabilities: {
@@ -62,20 +62,25 @@ export class CodexAppServerClient {
           "thread/realtime/transcript/delta",
         ],
       },
-    }, { signal });
+    }, { signal, timeoutMs });
     this.notify("initialized");
     return result;
   }
 
-  request(method, params, { signal } = {}) {
+  request(method, params, { signal, timeoutMs = 30_000 } = {}) {
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
       if (signal?.aborted) return reject(signal.reason ?? new Error("aborted"));
-      const abort = () => { this.#pending.delete(id); reject(signal.reason ?? new Error("aborted")); };
+      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) return reject(new TypeError("RPC timeout must be between 0 and 2147483647ms"));
+      const timer = setTimeout(() => {
+        this.#pending.get(id)?.reject(new AppServerError("CODEX_RPC_TIMEOUT", `Codex RPC ${method} timed out; submission outcome may be unknown`));
+        this.#pending.delete(id);
+      }, timeoutMs);
+      const abort = () => { clearTimeout(timer); this.#pending.delete(id); reject(signal.reason ?? new Error("aborted")); };
       signal?.addEventListener("abort", abort, { once: true });
       this.#pending.set(id, {
-        resolve: (value) => { signal?.removeEventListener("abort", abort); resolve(value); },
-        reject: (error) => { signal?.removeEventListener("abort", abort); reject(error); },
+        resolve: (value) => { clearTimeout(timer); signal?.removeEventListener("abort", abort); resolve(value); },
+        reject: (error) => { clearTimeout(timer); signal?.removeEventListener("abort", abort); reject(error); },
       });
       try {
         this.#send({ method, id, params });
@@ -104,7 +109,7 @@ export class CodexAppServerClient {
     if (this.#closed || this.#socket.readyState !== WebSocket.OPEN) {
       throw new AppServerError("CODEX_APP_SERVER_CLOSED", "Codex App Server client is not open");
     }
-    this.#socket.send(JSON.stringify(message));
+    this.#socket.send(JSON.stringify(message), (error) => { if (error) this.#failAll(error); });
   }
 
   #onMessage(message) {

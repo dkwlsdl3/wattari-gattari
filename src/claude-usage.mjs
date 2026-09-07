@@ -44,6 +44,7 @@ function curlUsage(accessToken) {
     });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.once("error", reject);
+    child.stdin.on("error", reject);
     child.once("close", (code) => {
       if (code !== 0) return reject(new Error(`Claude usage request failed: ${stderr.trim() || `curl exited ${code}`}`));
       const marker = stdout.lastIndexOf("\n");
@@ -64,7 +65,7 @@ export async function readClaudeUsage({ homeDirectory = os.homedir(), now = Date
     const credentials = JSON.parse(await fs.readFile(path.join(homeDirectory, ".claude", ".credentials.json"), "utf8"));
     const oauth = credentials?.claudeAiOauth;
     if (typeof oauth?.accessToken !== "string" || !oauth.accessToken) return null;
-    if (/[\r\n"]/u.test(oauth.accessToken)) return null;
+    if (/[\u0000-\u0020\u007f"\\]/u.test(oauth.accessToken)) return null;
     if (Number.isFinite(oauth.expiresAt) && now() >= oauth.expiresAt - 60_000) return null;
     const response = await request(oauth.accessToken);
     if (response.status !== 200) return null;

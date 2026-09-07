@@ -17,6 +17,29 @@ class FakeSocket extends EventEmitter {
   terminate() { this.readyState = WebSocket.CLOSED; this.emit("close"); }
 }
 
+test("RPC timeout releases the request and listener without replaying a submission", async (t) => {
+  const socket = new FakeSocket();
+  const client = new CodexAppServerClient(socket);
+  t.after(() => client.close());
+  const controller = new AbortController();
+  await assert.rejects(client.request("turn/start", {}, { signal: controller.signal, timeoutMs: 10 }), { code: "CODEX_RPC_TIMEOUT" });
+  assert.equal(getEventListeners(controller.signal, "abort").length, 0);
+  assert.equal(socket.sent.length, 1);
+  const answer = client.request("read", {}, { timeoutMs: 100 });
+  socket.emit("message", Buffer.from(JSON.stringify({ id: socket.sent[0].id, result: "late" })), false);
+  socket.emit("message", Buffer.from(JSON.stringify({ id: socket.sent[1].id, result: "current" })), false);
+  assert.equal(await answer, "current");
+});
+
+test("RPC asynchronous write failure rejects its pending request", async (t) => {
+  const socket = new FakeSocket();
+  const failure = new Error("async write failed");
+  socket.send = (_text, callback) => queueMicrotask(() => callback?.(failure));
+  const client = new CodexAppServerClient(socket);
+  t.after(() => client.close());
+  await assert.rejects(client.request("read", {}, { timeoutMs: 100 }), (error) => error === failure);
+});
+
 test("Codex App Server client initializes and declines native approvals", async () => {
   const socket = new FakeSocket();
   const client = new CodexAppServerClient(socket);

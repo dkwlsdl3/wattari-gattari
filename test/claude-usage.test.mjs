@@ -18,6 +18,37 @@ test("Claude usage parser reads the measured OAuth response shape", () => {
   assert.equal(parseClaudeUsage({}), null);
 });
 
+test("Claude usage validates windows independently and clamps only numeric percentages", () => {
+  for (const utilization of [null, "50", Infinity, NaN, undefined]) assert.equal(parseClaudeUsage({ seven_day: { utilization } }), null);
+  assert.deepEqual(parseClaudeUsage({ five_hour: { utilization: -5, resets_at: "invalid" }, seven_day: { utilization: 120 } }, 7), {
+    fiveHour: { usedPercent: 0, remainingPercent: 100, resetsAt: null },
+    weekly: { usedPercent: 100, remainingPercent: 0, resetsAt: null }, observedAt: 7,
+  });
+});
+
+test("Claude usage rejects unsafe credentials and exact expiry boundary without making requests", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-usage-auth-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(root, ".claude"));
+  const file = path.join(root, ".claude", ".credentials.json");
+  let requests = 0;
+  const options = { homeDirectory: root, now: () => 1000, request: async () => { requests++; return { status: 401 }; } };
+  for (const token of ["", "line\nbreak", 'quote"', "escape\\", "tab\t", "space token", "nul\0"]) {
+    fs.writeFileSync(file, JSON.stringify({ claudeAiOauth: { accessToken: token, expiresAt: 100000 } }));
+    assert.equal(await readClaudeUsage(options), null);
+  }
+  fs.writeFileSync(file, JSON.stringify({ claudeAiOauth: { accessToken: "valid", expiresAt: 61000 } }));
+  assert.equal(await readClaudeUsage(options), null);
+  assert.equal(requests, 0);
+  fs.writeFileSync(file, JSON.stringify({ claudeAiOauth: { accessToken: "valid", expiresAt: 61001 } }));
+  const body = JSON.stringify({ seven_day: { utilization: 10 } });
+  for (const response of [{ status: 401, body }, { status: 429, body }, { status: 500, body }, { status: 200, body: "not JSON" }]) {
+    assert.equal(await readClaudeUsage({ ...options, request: async () => response }), null);
+  }
+  assert.equal(await readClaudeUsage({ ...options, request: async () => { throw new Error("network down"); } }), null);
+  assert.equal(JSON.parse(fs.readFileSync(file)).claudeAiOauth.expiresAt, 61001);
+});
+
 test("Claude usage reader reuses valid credentials without exposing or rewriting them", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-claude-usage-"));
   const credentialDirectory = path.join(root, ".claude");

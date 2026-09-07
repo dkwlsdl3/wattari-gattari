@@ -53,6 +53,30 @@ function answerIn(items, turnId) {
   return items.find((entry) => entry.turnId === turnId && entry.item?.type === "agentMessage" && entry.item.text)?.item.text ?? null;
 }
 
+// Cursor shapes follow the installed App Server's generated v2 schema.
+async function* pages(read, method, params) {
+  const seen = new Set();
+  let cursor;
+  do {
+    const page = await read(method, { ...params, ...(cursor ? { cursor } : {}) });
+    if (!Array.isArray(page?.data) || (page.nextCursor != null && (typeof page.nextCursor !== "string" || !page.nextCursor))) {
+      throw Object.assign(new Error(`Invalid Codex page: ${method}`), { code: "CODEX_PAGE_INVALID" });
+    }
+    yield page.data;
+    cursor = page.nextCursor;
+    if (cursor && seen.has(cursor)) throw Object.assign(new Error(`Repeated Codex cursor: ${method}`), { code: "CODEX_PAGE_INVALID" });
+    if (cursor) seen.add(cursor);
+  } while (cursor);
+}
+
+async function findInPages(read, method, params, match) {
+  for await (const data of pages(read, method, params)) {
+    const value = match(data);
+    if (value) return value;
+  }
+  return null;
+}
+
 async function mapSettled(values, concurrency, operation) {
   const results = new Array(values.length);
   let nextIndex = 0;
@@ -116,12 +140,7 @@ export class CodexProvider {
     return this.#withClient(async (client) => {
       const usageRefresh = includeUsage ? this.#refreshUsage(client) : Promise.resolve();
       const loadedIds = [];
-      let cursor = null;
-      do {
-        const page = await client.request("thread/loaded/list", { cursor, limit: 100 });
-        loadedIds.push(...page.data);
-        cursor = page.nextCursor;
-      } while (cursor);
+      for await (const data of pages((...args) => client.request(...args), "thread/loaded/list", { cursor: null, limit: 100 })) loadedIds.push(...data);
 
       const uniqueIds = [...new Set(loadedIds)].sort();
       this.#recordLoadedIds(uniqueIds);
@@ -133,7 +152,9 @@ export class CodexProvider {
         return result.thread;
       });
       const loaded = reads.filter((result) => result.status === "fulfilled").map((result) => result.value);
-      if (uniqueIds.length && !loaded.length) throw reads.find((result) => result.status === "rejected").reason;
+      // A partial read must not authorize the dock to close missing session views.
+      const failed = reads.find((result) => result.status === "rejected");
+      if (failed) throw failed.reason;
 
       const requestedCwd = cwd ? path.resolve(cwd) : null;
       const roots = loaded
@@ -278,28 +299,27 @@ export class CodexProvider {
       const turnId = started.turn.id;
       const replyDeadline = this.#now() + answerTimeout;
       const replyError = Object.assign(new Error(`Codex session did not ${untilIdle ? "complete" : "reply"} within ${answerTimeout}ms`), { code: "REPLY_TIMEOUT" });
+      const replyRead = (method, params) => read(method, params, replyDeadline, replyError);
+      const findReply = () => findInPages(replyRead, "thread/items/list", { threadId: session.nativeId, turnId, limit: 100, sortDirection: "desc" }, (data) => answerIn(data, turnId));
       while (this.#now() < replyDeadline) {
         if (untilIdle) {
-          const turns = await read("thread/turns/list", {
+          const turn = await findInPages(replyRead, "thread/turns/list", {
             threadId: session.nativeId,
             limit: 100,
             sortDirection: "desc",
             itemsView: "summary",
-          }, replyDeadline, replyError);
-          const turn = turns.data.find((candidate) => candidate.id === turnId);
+          }, (data) => data.find((candidate) => candidate.id === turnId));
           if (turn?.status === "failed" || turn?.status === "interrupted") {
             throw Object.assign(new Error(`Codex turn ${turn.status}: ${turnId}`), { code: "TARGET_ERROR" });
           }
           if (turn?.status === "completed") {
-            const page = await read("thread/items/list", { threadId: session.nativeId, turnId, limit: 100, sortDirection: "desc" }, replyDeadline, replyError);
-            const reply = answerIn(page.data, turnId);
+            const reply = await findReply();
             if (!reply) throw Object.assign(new Error(`Codex turn completed without a reply: ${turnId}`), { code: "REPLY_MISSING" });
             onProgress({ state: "replied", target: session.id });
             return { target: session.id, requestId, turnId, reply, exchangeCount: 1, autoForwarded: false };
           }
         } else {
-          const page = await read("thread/items/list", { threadId: session.nativeId, turnId, limit: 100, sortDirection: "desc" }, replyDeadline, replyError);
-          const reply = answerIn(page.data, turnId);
+          const reply = await findReply();
           if (reply) {
             onProgress({ state: "replied", target: session.id });
             return { target: session.id, requestId, turnId, reply, exchangeCount: 1, autoForwarded: false };

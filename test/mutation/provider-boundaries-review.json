@@ -1,0 +1,167 @@
+{
+  "observedAt": "2026-09-07T02:53:56.684Z",
+  "scope": "Remaining provider transport and usage contracts; targeted fault injection, not full generated mutation coverage",
+  "node": "v24.15.0",
+  "command": [
+    "/usr/bin/node",
+    "--test",
+    "--test-reporter=tap",
+    "--test-timeout=4000",
+    "test/codex-provider.test.mjs",
+    "test/codex-app-server.test.mjs",
+    "test/claude-peer.test.mjs",
+    "test/claude-provider.test.mjs",
+    "test/claude-usage.test.mjs",
+    "test/provider-waiting.test.mjs"
+  ],
+  "hashes": {
+    "src/claude-usage.mjs": "548ff28273e110dc8cc9bd102048ca12e9d5c294629ae1248c852e76c121654f",
+    "src/codex-app-server.mjs": "085a58bd95cb6e9cc8601220ee96f817039b6be9d8f59d4cf03b483dd66f6de6",
+    "src/providers/claude-peer.mjs": "82cf3fa6804b81e201c72d5763ea51784104a2ac95d8e57ff18682933c67cf8b",
+    "src/providers/claude.mjs": "45ac079338804eda1418651124e573ee80abe8918c74a2b0ffad5f3902393565",
+    "src/providers/codex.mjs": "2593f95fa310b3af1c5d5ec4fcd4a3b1b8baa5633f4e320928b89c89a1fd6a05",
+    "test/claude-peer.test.mjs": "1012aa9d99cd0e3a2e96b061efc6434ad781bbd5af011e5b20efe56a56d224d4",
+    "test/claude-provider.test.mjs": "a3f3693b1cc718dab8752193fbb374c5a2822d962233a917c0ca335aa22563f8",
+    "test/claude-usage.test.mjs": "7c6b934ef09a9c2e73152ef7bebd20eec022b228300521df2b7a6351e2e62a3b",
+    "test/codex-app-server.test.mjs": "df060fe82397800c24492118ab160941cd3f5108e072f972c0792c31b4f0ee6c",
+    "test/codex-provider.test.mjs": "73f6fce22ed4fa06832024018f389db923eb6aa8219fae823ae0070da0fc5394",
+    "test/provider-waiting.test.mjs": "fb041d2fce5f1155543e9d394023c95c9608665025b9cecb82b6e4e9020e06b2"
+  },
+  "results": [
+    {
+      "id": "ignore-next-page",
+      "file": "src/providers/codex.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 78
+    },
+    {
+      "id": "accept-cursor-loop",
+      "file": "src/providers/codex.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 78
+    },
+    {
+      "id": "accept-partial-snapshot",
+      "file": "src/providers/codex.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 78
+    },
+    {
+      "id": "wrong-answer-turn",
+      "file": "src/providers/codex.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 78
+    },
+    {
+      "id": "wrong-completion-turn",
+      "file": "src/providers/codex.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 78
+    },
+    {
+      "id": "skip-initialize",
+      "file": "src/providers/codex.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 78
+    },
+    {
+      "id": "skip-client-close",
+      "file": "src/providers/codex.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 78
+    },
+    {
+      "id": "keep-child-sessions",
+      "file": "src/providers/codex.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 78
+    },
+    {
+      "id": "allow-late-rpc",
+      "file": "src/codex-app-server.mjs",
+      "status": "test-timeout",
+      "code": 1,
+      "signal": null,
+      "tests": 78
+    },
+    {
+      "id": "ignore-async-send-error",
+      "file": "src/codex-app-server.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 78
+    },
+    {
+      "id": "leak-peer-connections",
+      "file": "src/providers/claude-peer.mjs",
+      "status": "test-timeout",
+      "code": 1,
+      "signal": null,
+      "tests": 78
+    },
+    {
+      "id": "keep-peer-history",
+      "file": "src/providers/claude-peer.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 78
+    },
+    {
+      "id": "ignore-peer-stop-waiters",
+      "file": "src/providers/claude-peer.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 78
+    },
+    {
+      "id": "accept-expiring-credential",
+      "file": "src/claude-usage.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 78
+    },
+    {
+      "id": "accept-unauthorized-usage",
+      "file": "src/claude-usage.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 78
+    },
+    {
+      "id": "lose-usage-window",
+      "file": "src/claude-usage.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 78
+    }
+  ],
+  "artifacts": "/tmp/waga-qa-completion",
+  "limitations": [
+    "Native agent sessions and HTTP OAuth service not exercised; recorded fixtures plus fake boundaries and real disposable Unix sockets",
+    "Claude until-idle waits for peer reply plus observed idle, not a correlated native turn or guaranteed final transcript answer",
+    "RPC submission timeout is an unknown delivery outcome, never an automatic retry",
+    "Remaining sections have separate review records"
+  ]
+}

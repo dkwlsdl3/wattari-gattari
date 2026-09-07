@@ -9,7 +9,7 @@ const PROTOCOL_VERSION = 1;
 
 function processStart(pid) {
   try {
-    return execFileSync("/bin/ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8" }).trim();
+    return execFileSync("/bin/ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8", timeout: 5_000 }).trim();
   } catch {
     return "";
   }
@@ -25,7 +25,7 @@ function safeMessageText(value) {
 
 function claudeVersionHint() {
   try {
-    const output = execFileSync("claude", ["--version"], { encoding: "utf8" });
+    const output = execFileSync("claude", ["--version"], { encoding: "utf8", timeout: 5_000 });
     return /^\d+\.\d+\.\d+/.exec(output.trim())?.[0] ?? "unknown";
   } catch {
     return "unknown";
@@ -94,7 +94,8 @@ export class ClaudePeerEndpoint {
   #keyPath = null;
   #ownedPaths = new Set();
   #records = [];
-  #listeners = new Set();
+  #listeners = new Map();
+  #connections = new Set();
   #exitCleanup;
 
   constructor({ homeDirectory = os.homedir(), name = `waga-${process.pid}`, cwd = process.cwd() } = {}) {
@@ -165,6 +166,12 @@ export class ClaudePeerEndpoint {
       const client = net.connect({ path: targetSocket }, () => {
         client.end(`${JSON.stringify(frame)}\n`, resolve);
       });
+      this.#connections.add(client);
+      client.setTimeout(5_000, () => client.destroy(Object.assign(new Error("Claude peer send timed out; delivery may be unknown"), { code: "CLAUDE_PEER_SEND_TIMEOUT" })));
+      client.once("close", () => {
+        this.#connections.delete(client);
+        reject(Object.assign(new Error("Claude peer connection closed"), { code: "CLAUDE_PEER_CLOSED" }));
+      });
       client.once("error", reject);
     });
     return frame.msg_id;
@@ -201,7 +208,7 @@ export class ClaudePeerEndpoint {
         clearTimeout(timer);
         unsubscribe();
         resolve(record);
-      });
+      }, () => { clearTimeout(timer); unsubscribe(); reject(Object.assign(new Error("Claude peer endpoint closed"), { code: "CLAUDE_PEER_CLOSED" })); });
     });
   }
 
@@ -219,7 +226,7 @@ export class ClaudePeerEndpoint {
         clearTimeout(timer);
         unsubscribe();
         this.#disposition(record).then(resolve, reject);
-      });
+      }, () => { clearTimeout(timer); unsubscribe(); reject(Object.assign(new Error("Claude peer endpoint closed"), { code: "CLAUDE_PEER_CLOSED" })); });
     });
   }
 
@@ -227,12 +234,16 @@ export class ClaudePeerEndpoint {
     process.removeListener("exit", this.#exitCleanup);
     const server = this.#server;
     this.#server = null;
+    for (const stop of [...this.#listeners.values()]) stop();
+    for (const socket of this.#connections) socket.destroy();
+    this.#connections.clear();
+    this.#records = [];
     if (server) await new Promise((resolve) => server.close(resolve));
     this.#removeOwnedFiles();
   }
 
-  #listen(listener) {
-    this.#listeners.add(listener);
+  #listen(listener, onStop) {
+    this.#listeners.set(listener, onStop);
     return () => this.#listeners.delete(listener);
   }
 
@@ -247,6 +258,9 @@ export class ClaudePeerEndpoint {
   }
 
   #accept(socket) {
+    this.#connections.add(socket);
+    socket.on("error", () => socket.destroy());
+    socket.once("close", () => this.#connections.delete(socket));
     let buffer = "";
     socket.setEncoding("utf8");
     socket.on("data", (chunk) => {
@@ -263,7 +277,8 @@ export class ClaudePeerEndpoint {
         let record;
         try { record = parseClaudeFrame(line); } catch { continue; }
         this.#records.push(record);
-        for (const listener of [...this.#listeners]) listener(record);
+        if (this.#records.length > 1024) this.#records.shift();
+        for (const listener of [...this.#listeners.keys()]) listener(record);
       }
     });
   }
