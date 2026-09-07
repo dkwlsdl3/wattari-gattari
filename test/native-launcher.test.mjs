@@ -35,7 +35,8 @@ test("native session commands attach exact provider sessions", async () => {
   const codex = await nativeSessionCommand({ provider: "codex", nativeId: "thread-1", cwd: "/work" }, { codexProvider });
   assert.deepEqual(codex, {
     command: "codex",
-    args: ["resume", "thread-1", "--remote", "unix:///tmp/codex.sock", "-C", path.resolve("/work")],
+    args: ["resume", "thread-1", "--remote", "unix:///tmp/codex.sock", "-C", path.resolve("/work"),
+      "-c", 'tui.terminal_title=["thread-id"]'],
     cwd: path.resolve("/work"),
   });
 });

@@ -46,7 +46,8 @@ export async function nativeSessionCommand(session, { codexProvider = new CodexP
   }
   return {
     command: "codex",
-    args: ["resume", session.nativeId, "--remote", `unix://${daemon.socketPath}`, "-C", cwd],
+    args: ["resume", session.nativeId, "--remote", `unix://${daemon.socketPath}`, "-C", cwd,
+      "-c", 'tui.terminal_title=["thread-id"]'],
     cwd,
   };
 }

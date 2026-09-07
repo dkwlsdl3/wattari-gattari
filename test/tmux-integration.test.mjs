@@ -63,14 +63,14 @@ test("real isolated tmux reuses, revives, and removes one retained session view"
   });
   const session = {
     id: "codex:waga-proof-session",
-    nativeId: "waga-proof-session",
+    nativeId: "01a07a2e-c4ce-75c1-9fb4-02192b587721",
     provider: "codex",
     name: "integration proof",
     cwd: root,
   };
   const command = (marker) => ({
     command: process.execPath,
-    args: ["-e", `console.log(${JSON.stringify(marker)}); setInterval(() => {}, 1000)`],
+    args: ["-e", `process.stdout.write('\x1b]0;${session.nativeId.slice(0, 29)}...\x07'); console.log(${JSON.stringify(marker)}); setInterval(() => {}, 1000)`],
     cwd: root,
   });
 
@@ -128,6 +128,44 @@ test("real isolated tmux reuses, revives, and removes one retained session view"
   await workspace.focusOrOpen(claudeSession, claudeCommand);
   assert.equal(await panePid(), repairedPid, "repaired view must return to the fast reuse path");
   await workspace.closeSessionView(claudeSession);
+
+  // Codex 0.153.2 switches threads in the same frontend, keeping its argv.
+  // /agents keeps the old OSC title; opening another thread replaces that title.
+  const otherId = "01a07a2e-cabf-7fe0-84f7-f4557a6be9a4";
+  const codexCode = `process.stdin.setRawMode(true); process.stdin.resume();
+    const title = id => process.stdout.write('\\x1b]0;' + id.slice(0,29) + '...\\x07');
+    title(${JSON.stringify(session.nativeId)});
+    console.log('WAGA_PROOF_CODEX_ONE');
+    process.stdin.on('data', input => {
+      process.stdout.write('\\x1b[2J\\x1b[H');
+      if(input.toString() === 'a') console.log('  Agent command center\\n  0 need input   0 working   2 ready');
+      else {title(${JSON.stringify(otherId)}); console.log('WAGA_PROOF_CODEX_TWO');}
+    });`;
+  const codexCommand = { command: process.execPath, args: ["-e", codexCode], cwd: root };
+  const codexView = await workspace.focusOrOpen(session, codexCommand);
+  const codexFrame = async () => (await call(["capture-pane", "-p", "-t", codexView.windowId])).stdout;
+  const codexPid = async () => (await call(["display-message", "-p", "-t", codexView.windowId, "#{pane_pid}"])).stdout.trim();
+  await waitFor(async () => (await codexFrame()).includes("WAGA_PROOF_CODEX_ONE"));
+  let retainedPid = await codexPid();
+  await workspace.focusOrOpen(session, codexCommand);
+  assert.equal(await codexPid(), retainedPid, "Codex unchanged view must be reused");
+  for (const openOther of [false, true]) {
+    await call(["send-keys", "-t", codexView.windowId, "a"]);
+    await waitFor(async () => (await codexFrame()).includes("Agent command center"));
+    if (openOther) {
+      await call(["send-keys", "-t", codexView.windowId, "b"]);
+      await waitFor(async () => (await codexFrame()).includes("WAGA_PROOF_CODEX_TWO"));
+    }
+    assert.equal(await codexPid(), retainedPid, "native navigation does not change Codex PID");
+    await call(["select-window", "-t", `${sessionName}:overview`]);
+    await workspace.focusOrOpen(session, codexCommand);
+    assert.notEqual(await codexPid(), retainedPid, "Codex navigation must invalidate the retained frontend");
+    await waitFor(async () => (await codexFrame()).includes("WAGA_PROOF_CODEX_ONE"));
+    retainedPid = await codexPid();
+    await workspace.focusOrOpen(session, codexCommand);
+    assert.equal(await codexPid(), retainedPid, "repaired Codex view must be reused");
+  }
+  await workspace.closeSessionView(session);
 
   assert.deepEqual(await workspace.leave(), { closeOverview: true });
   assert.notEqual((await call(["has-session", "-t", sessionName], { check: false })).code, 0);

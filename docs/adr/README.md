@@ -51,6 +51,10 @@ Dock은 프로젝트별 접이식 목록, 검색·필터, 수동 순서, 새 세
 - Dock에서 실행 중인 세션을 다시 열면 기존 window를 재사용합니다. Claude는 열기 직전에
   Linux `/proc`에서 frontend가 요청한 `attach` 명령과 일치하는지 확인합니다. native `←`로
   Agents View에 이동했거나 식별할 수 없으면 해당 창만 재접속합니다. 주기적 감시는 없습니다.
+  Codex는 실행별 `tui.terminal_title=["thread-id"]`와 선택 시 읽는 화면 상단 두 줄로
+  다른 세션·`/agents` 화면을 구분합니다. 0.153.2의 제목은 UUID 29자와 `...`이므로
+  알려진 목록에 같은 접두사가 있거나 식별에 실패하면 재접속합니다. 이 표식은 UI 재사용
+  힌트이며 메시지 대상에는 항상 전체 ID를 사용합니다. 전역 설정과 transcript는 수정하지 않습니다.
   종료된 창과 `Alt+Enter` 강제 재접속도 정확한 `attach`/`resume` 명령으로 frontend를 교체합니다.
 - 격리 tmux server의 `Alt+A`는 세션 window와 분리된 provider Agents View를 열고,
   `Alt+G`는 Dock으로 돌아갑니다.

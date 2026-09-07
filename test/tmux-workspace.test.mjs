@@ -210,6 +210,7 @@ test("focusOrOpen reuses live mapped sessions and creates only missing views", a
     calls.push(args);
     if (args[0] === "list-windows") return { stdout: list, stderr: "", code: 0 };
     if (args[0] === "capture-pane") return { stdout: "ready\n", stderr: "", code: 0 };
+    if (args[0] === "display-message" && args.at(-1) === "#{pane_title}") return { stdout: "01a07a2e-c4ce-75c1-9fb4-02192...\n", code: 0 };
     if (args[0] === "new-window") { list += "@3\tclaude:new\n"; return { stdout: "@3\n", stderr: "", code: 0 }; }
     return { stdout: "", stderr: "", code: 0 };
   };
@@ -221,7 +222,7 @@ test("focusOrOpen reuses live mapped sessions and creates only missing views", a
     nodePath: "/usr/bin/node",
     sessionHostPath: "/app/native-session-host.mjs",
   });
-  assert.deepEqual(await workspace.focusOrOpen({ id: "codex:known" }, { command: "codex", args: [], cwd: "/tmp" }), { reused: true, windowId: "@2" });
+  assert.deepEqual(await workspace.focusOrOpen({ id: "codex:known", nativeId: "01a07a2e-c4ce-75c1-9fb4-02192b587721" }, { command: "codex", args: [], cwd: "/tmp" }), { reused: true, windowId: "@2" });
   assert.deepEqual(await workspace.focusOrOpen({ id: "claude:known", provider: "claude", projectCwd: "/project" }, { command: "claude", args: ["attach", "known"], cwd: "/work" }), { reused: true, windowId: "@4" });
   assert.deepEqual(await workspace.focusOrOpen({ id: "claude:new", provider: "claude", name: "Review", cwd: "/tmp" }, { command: "claude", args: ["attach", "12345678"], cwd: "/tmp" }), { reused: false, windowId: "@3" });
   assert.equal(calls.filter((args) => args[0] === "new-window").length, 1);

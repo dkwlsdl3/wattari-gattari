@@ -24,8 +24,12 @@
     ]
   },
   "lifecycle": {
-    "tests": ["test/native-process.test.mjs", "test/tmux-workspace.test.mjs", "test/tmux-integration.test.mjs", "test/direct-workspace.test.mjs", "test/native-session-host.test.mjs", "test/native-launcher.test.mjs", "test/session-dock.test.mjs", "test/claude-view.test.mjs"],
+    "tests": ["test/native-process.test.mjs", "test/tmux-workspace.test.mjs", "test/tmux-integration.test.mjs", "test/direct-workspace.test.mjs", "test/native-session-host.test.mjs", "test/native-launcher.test.mjs", "test/session-dock.test.mjs", "test/claude-view.test.mjs", "test/codex-view.test.mjs"],
     "mutations": [
+      {"id":"ignore-codex-view-target","file":"src/tmux-workspace.mjs","from":"!retainedCodexViewMatches(session.nativeId, title.stdout, frame.stdout, knownNativeIds)","to":"false"},
+      {"id":"reuse-codex-agents-screen","file":"src/providers/codex-view.mjs","from":"firstLine !== \"Agent command center\"","to":"true"},
+      {"id":"trust-codex-title-prefix-collision","file":"src/providers/codex-view.mjs","from":"knownNativeIds.some((id) => id !== nativeId && typeof id === \"string\" && `${id.slice(0, 29)}...` === marker)","to":"false"},
+      {"id":"reject-unchanged-codex-title","file":"src/providers/codex-view.mjs","from":"marker !== nativeId && marker !== `${nativeId.slice(0, 29)}...`","to":"marker !== nativeId"},
       {"id":"respawn-live-view","file":"src/tmux-workspace.mjs","from":"existing && !existing.paneDead && !force && !changedView","to":"false"},
       {"id":"ignore-force-reattach","file":"src/tmux-workspace.mjs","from":"existing && !existing.paneDead && !force && !changedView","to":"existing && !existing.paneDead && !changedView"},
       {"id":"reuse-navigated-claude-view","file":"src/tmux-workspace.mjs","from":"!force && !changedView","to":"!force"},

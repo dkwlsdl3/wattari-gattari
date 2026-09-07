@@ -481,7 +481,7 @@ test("Alt+Enter forces an exact native session reattach", async () => {
   input.emit("keypress", "", { name: "return", meta: true });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(calls[0][2], { force: true });
+  assert.deepEqual(calls[0][2], { force: true, knownNativeIds: [sessions[0].nativeId] });
   pressAlt(input, "q");
   assert.equal(await running, 0);
 });

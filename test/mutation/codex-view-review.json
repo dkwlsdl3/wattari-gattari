@@ -1,0 +1,278 @@
+{
+  "observedOn": "2026-09-07",
+  "baselineCommit": "f122af2",
+  "nativeVersion": "Codex CLI 0.153.2",
+  "scope": "Codex retained frontend navigation and lifecycle regression; Claude rename research did not change its local-alias implementation.",
+  "evidence": [
+    "Isolated CODEX_HOME, local App Server Unix socket, private tmux server, and waga-proof sessions/cwd only. Provider points to closed loopback port; no paid model response or existing user session is used.",
+    "Before fix, probe.mjs assertion failed: selecting session one returned the OSC title of session two after /agents navigation.",
+    "Native Codex /agents and thread navigation keep the same frontend PID. Overview retains the previous thread title; opening another thread updates it.",
+    "After fix, actual Codex passed unchanged/repaired PID reuse, one -> agents -> two -> Dock -> one, and one -> agents -> Dock -> one.",
+    "Actual Codex thread/name/set changed the name displayed in native Agents during the live proof session.",
+    "Normal CI uses captured title/header fixtures plus a real isolated tmux and native-lookalike process, not an installed/authenticated Codex requirement."
+  ],
+  "verification": {
+    "tests": 237,
+    "passed": 237,
+    "failed": 0,
+    "skipped": 0,
+    "checkPassed": true,
+    "packDryRunFiles": 40,
+    "diffCheckPassed": true,
+    "benchmarkPassed": true,
+    "readOnlyTitleAndTwoRowCheckP95Ms": 2.908548,
+    "readOnlyCheckSamples": 30
+  },
+  "limitations": [
+    "Codex 0.153.2 emits a 29-character UUID prefix plus three dots. Known prefix collisions cause reattach; unknown collisions outside the discovery snapshot are not proven distinguishable.",
+    "Title and two-row header are version-specific UI hints, never message-routing identities. Resume and messaging continue to use full native IDs.",
+    "Concurrent native navigation from another terminal after inspection is not atomic with tmux selection.",
+    "The per-invocation title override changes Waga-launched Codex terminal titles, not global settings. User title customization during the TUI may cause conservative reattach.",
+    "Timing measures only the added two local tmux reads, excluding native startup/reconnect and visual rendering.",
+    "The existing host-signal mutant is detected by a test timeout; the other 17 mutants fail ordinarily. This is selected fault injection, not exhaustive mutation coverage.",
+    "Claude SDK transcript title mutation is not proof of live Agents-view synchronization; active user logs, session input, and global settings were not modified."
+  ],
+  "nativeProofScript": "/tmp/waga-proof-codex-navigation-JvOGyb/probe.mjs",
+  "artifactDirectory": "/tmp/waga-proof-codex-view-mutation-20260907",
+  "mutation": {
+    "group": "lifecycle",
+    "observedAt": "2026-09-07T04:50:30.622Z",
+    "node": "v24.15.0",
+    "method": "targeted source replacement, not exhaustive Stryker generation",
+    "command": [
+      "/usr/bin/node",
+      "--test",
+      "--test-reporter=tap",
+      "--test-timeout=4000",
+      "test/native-process.test.mjs",
+      "test/tmux-workspace.test.mjs",
+      "test/tmux-integration.test.mjs",
+      "test/direct-workspace.test.mjs",
+      "test/native-session-host.test.mjs",
+      "test/native-launcher.test.mjs",
+      "test/session-dock.test.mjs",
+      "test/claude-view.test.mjs",
+      "test/codex-view.test.mjs"
+    ],
+    "processTimeoutMs": 20000,
+    "hashes": {
+      "src/bridge/deadline.mjs": "1172d87e41f6ba3387822eeb2fa5af268808a5f4b2013dd4652889bcf74b011b",
+      "src/bridge/envelope.mjs": "1833f80916d12e01148050540dd8ab2714fb19543b6a26abdaac148aeb3a3b25",
+      "src/claude-usage.mjs": "548ff28273e110dc8cc9bd102048ca12e9d5c294629ae1248c852e76c121654f",
+      "src/cli-options.mjs": "a986845f3b1950dbf800a13c9b7da8137a3650e528ab9afab60cc333136c114c",
+      "src/cli.mjs": "f87586de97224f9adaa38d2d45726a42aa12bf8468e7d5878005a7754a8549a8",
+      "src/codex-app-server.mjs": "e37b1ece971da697c1e391be9ffabd67922fa73c4f4fdf764a815d4c574f1b78",
+      "src/demo-dock.mjs": "43ed54cee1f7dcd1d983a2429aaff49c731ac7c5aa4c9059da2595ea515a7c80",
+      "src/demo.mjs": "43af178beb63989a65dcd219e48fe89b572b0608f097d708196558f72fcce6d0",
+      "src/direct-workspace.mjs": "0da44d773eb2111e7c82129c2df28192a644a7dac61a013a4fb75fe45ca0deff",
+      "src/dock-order.mjs": "f305a3ccc72c0a533f31766c0215101876871d0e7508cba920a20cd8f8539c25",
+      "src/doctor.mjs": "c39c5311c4d8711415f05aab2648c1f0de24fba17745db8262b31df0e31401fe",
+      "src/event-log.mjs": "00501b713e79e07d443d888ac67bcb98f63a3c371ffa1a2dd43ab479ef096de6",
+      "src/managed-session-instructions.mjs": "160f75fb566e04f7f35eb9ec684f08fdada29d3a79e8481e7b93ebe6f723538c",
+      "src/native-launcher.mjs": "3130a497397f3129cb2c4b5460a4b5ea20a45bb47f42ee1f5349f38658bb38c9",
+      "src/native-session-host.mjs": "5c198aafa92883acdddf4a670bb41669accd5ae0d5c9de3791629a31117fe2d7",
+      "src/overview.mjs": "a81d95f47b36dd44e252cd2cc28c0a6ec511c1e1ba4d1b53b586b338380df236",
+      "src/product.mjs": "f8205524d3809d6c85048f27f07c111cc722dab9613d635a1a27eb660d3fa9f4",
+      "src/providers/claude-peer.mjs": "82cf3fa6804b81e201c72d5763ea51784104a2ac95d8e57ff18682933c67cf8b",
+      "src/providers/claude-view.mjs": "a8f50d3d2976b5bf89f4b0c5e81d7e2439caf49de70051baaeb2af0406dd290f",
+      "src/providers/claude.mjs": "45ac079338804eda1418651124e573ee80abe8918c74a2b0ffad5f3902393565",
+      "src/providers/codex-view.mjs": "0d1cdba6e18c54bb05f1fd3e14be003550440ed8f55a9c8a6adecee495435eb5",
+      "src/providers/codex.mjs": "a1c6437f905a27676fc95241feb80ecb2b8642791747a39dcfe247534d9778bc",
+      "src/session-alias-catalog.mjs": "746a7d873dea728f30aa1786414877aa54a3d4e0830be99080042761e23a6ddc",
+      "src/session-bridge.mjs": "149f0d29c716462f5822b731127f6e23635fad0d30508179672dd59e27653d88",
+      "src/session-dock.mjs": "743a2cd79038cf108fbe69b5c5f2f54e7fa02b682156f3826c5515a1d619ca62",
+      "src/tmux-workspace.mjs": "72c06f8b5ee3e326bfe59c4d314f6eb6ea760e388e831691c7d3c46b33213ca1",
+      "test/claude-peer.test.mjs": "1012aa9d99cd0e3a2e96b061efc6434ad781bbd5af011e5b20efe56a56d224d4",
+      "test/claude-provider.test.mjs": "a3f3693b1cc718dab8752193fbb374c5a2822d962233a917c0ca335aa22563f8",
+      "test/claude-usage.test.mjs": "b30cac21b8403bdbdb44dd647bfbcb58d2300d171e261c96bdbb6efa7050315c",
+      "test/claude-view.test.mjs": "57541734c99e391045ff3988bca3da61749d29901e9c8bee154b0074f55ccc37",
+      "test/cli-options.test.mjs": "5cbf9cded61bb0e4de7b747154ec9e6cb6524a07319df78ae3b02f4afdb6f110",
+      "test/cli.test.mjs": "f4e6429de4ca753df5dac3017f896104af38da8b0394a9dab12012e50dcd2cbc",
+      "test/codex-app-server.test.mjs": "b67150dc6aefa283f81d3a9070f8655f89a79298bbba3cdf95d7f9f56f49a6e1",
+      "test/codex-provider.test.mjs": "1accec196a80f403316701b1b5164e995575a22e2efed5b73f993272554478a8",
+      "test/codex-view.test.mjs": "5f0a4963eb364b9541b1982fe1c5b89898851d549819a66f3b7730ba35664eb6",
+      "test/deadline.test.mjs": "2fd5d502b91e3f3877996877726c9d7b964064c40ca810ae32a7da4c97c3bbc1",
+      "test/direct-workspace.test.mjs": "35a356b09ce7d9f8c62d632fd6c16f87c5138cf9cb9b1686ff9cecd2941d23e6",
+      "test/dock-order.test.mjs": "9014f963f5d4f3efbf818182cb837796cba55383d38a486744b935d8cd7fe20a",
+      "test/doctor.test.mjs": "de66428d71f612dab955bd45a7a8d37bee9cab5dbc09254f340c260a20531f2b",
+      "test/envelope.test.mjs": "2121fc058d05529e0ceb4cceb22dc319387e00985a07c832dd95f3cbe17dad2a",
+      "test/event-log.test.mjs": "16f6f1b74d73676be91832c0750db5ebc2acd6aa55b20b7ed87e009bb7d14570",
+      "test/managed-session-instructions.test.mjs": "73c3342cbbb3f9c2cf3a9b4b3d4fb77f2012073a899ed0504d78822d6f36fe1c",
+      "test/mutation/cases.json": "3d38b24302e4ce134d8186508350ba7267745455a6db233adccbdac6cdefc834",
+      "test/native-launcher.test.mjs": "30111063308ff1d6dc7948c99b0088507143e03cbbc0ef673515aec0b039888f",
+      "test/native-process.test.mjs": "68cb7c1f5ae68e63736a91d9fae86f0e11b2da5ce736b8d9085ee28b645c12dd",
+      "test/native-session-host.test.mjs": "fd156931e1b504a5be8a7cdcef81d92a236736c1419ee06dbb9b3774ce786976",
+      "test/overview-lifecycle.test.mjs": "c80a9aaf9662c89faad4f9de7821d086640f19921a35f95b211f66b91e999611",
+      "test/overview.test.mjs": "6f7c09f2444658c544444b1df84ddda8fe7f95a10c5bd34f1cf3e9120b93323f",
+      "test/provider-waiting.test.mjs": "fb041d2fce5f1155543e9d394023c95c9608665025b9cecb82b6e4e9020e06b2",
+      "test/session-alias-catalog.test.mjs": "1d9dfe4b3ad8eef09d04f20833113fa398eaf9a4356f1288d8e89650fd50d467",
+      "test/session-bridge.test.mjs": "75264a1ad78c9f3f7753e4db81d8b62f8d800851a2d8058039b97c59dd7ff571",
+      "test/session-dock.test.mjs": "bfffbfc0cc2f429682d5ab01dc2dddaab0b8363cedb0c9923e7506491e662037",
+      "test/storage-failures.test.mjs": "2cb75132aadf4cdc4a477ba815070057b494e69326cd585e3e5c2c6f9348c065",
+      "test/tmux-integration.test.mjs": "06cf2c7c19a925ed62fa3fab8623dc7de8db687a23b1f19e21212daefa98ee27",
+      "test/tmux-workspace.test.mjs": "cfb815e2874b29167bf0b7bea288899ed49d74537f13292bcc1e83477d8cf8db",
+      "scripts/benchmark.mjs": "b43f637decf499197d5a1f1edc728ab93857c432c102231110740c5289db33c1",
+      "scripts/mutation-check.mjs": "078ea5e5fc3446a42dc205934e3d72e121abfd748ee519d60e3fdf41ffb81b3c",
+      "package.json": "495deef535cdf566dcc6235508d8f452e671c35a96f060a45c96d770d4a527a3",
+      "package-lock.json": "e5abfb73d7a7504608ad069e79075f681ba18011f24b8513703050dbfe2cb6a5"
+    },
+    "results": [
+      {
+        "id": "ignore-codex-view-target",
+        "file": "src/tmux-workspace.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "reuse-codex-agents-screen",
+        "file": "src/providers/codex-view.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "trust-codex-title-prefix-collision",
+        "file": "src/providers/codex-view.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "reject-unchanged-codex-title",
+        "file": "src/providers/codex-view.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "respawn-live-view",
+        "file": "src/tmux-workspace.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "ignore-force-reattach",
+        "file": "src/tmux-workspace.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "reuse-navigated-claude-view",
+        "file": "src/tmux-workspace.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "ignore-claude-attach-target",
+        "file": "src/providers/claude-view.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "trust-unreadable-claude-view",
+        "file": "src/providers/claude-view.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "ignore-claude-relaunch-child",
+        "file": "src/providers/claude-view.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "ignore-claude-process-replacement",
+        "file": "src/providers/claude-view.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "close-unhealthy-view",
+        "file": "src/tmux-workspace.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "leak-failed-new-window",
+        "file": "src/tmux-workspace.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "lose-host-signal",
+        "file": "src/native-session-host.mjs",
+        "status": "test-timeout",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "lose-native-exit-code",
+        "file": "src/native-session-host.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "skip-raw-mode-restore",
+        "file": "src/direct-workspace.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "fallback-on-any-tmux-error",
+        "file": "src/session-dock.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      },
+      {
+        "id": "wrong-native-target",
+        "file": "src/native-launcher.mjs",
+        "status": "killed",
+        "code": 1,
+        "signal": null,
+        "tests": 47
+      }
+    ],
+    "baseline": {
+      "status": "survived",
+      "code": 0,
+      "signal": null,
+      "tests": 47
+    },
+    "restoredBaseline": {
+      "status": "survived",
+      "code": 0,
+      "signal": null,
+      "tests": 47
+    }
+  }
+}

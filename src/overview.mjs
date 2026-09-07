@@ -578,7 +578,11 @@ export async function runOverview({
     render();
     nativeOpen = true;
     void Promise.resolve().then(() => commandFor(target))
-      .then((command) => { if (!closed) return workspace.focusOrOpen(target, command, { force }); })
+      .then((command) => {
+        if (!closed) return workspace.focusOrOpen(target, command, {
+          force, knownNativeIds: allSessions.filter((session) => session.provider === "codex").map((session) => session.nativeId),
+        });
+      })
       .catch((error) => { warnings = [{ provider: target.provider, message: error.message }]; })
       .finally(() => { busy = false; nativeOpen = false; render(); });
   };

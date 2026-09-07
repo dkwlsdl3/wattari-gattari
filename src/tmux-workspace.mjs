@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { EventLog } from "./event-log.mjs";
 import { nativeAgentsCommand } from "./native-launcher.mjs";
 import { retainedClaudeViewMatches } from "./providers/claude-view.mjs";
+import { retainedCodexViewMatches } from "./providers/codex-view.mjs";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_SOCKET = `waga-${typeof process.getuid === "function" ? process.getuid() : "user"}`;
@@ -193,7 +194,7 @@ export class TmuxWorkspace {
     return { code: result.code, mode };
   }
 
-  async focusOrOpen(session, commandSpec, { force = false } = {}) {
+  async focusOrOpen(session, commandSpec, { force = false, knownNativeIds = [] } = {}) {
     const sessionName = this.#env.WAGA_TMUX_SESSION || (await this.#call(["display-message", "-p", "#{session_name}"])).stdout.trim();
     if (!sessionName) throw Object.assign(new Error("Waga tmux session is unavailable"), { code: "TMUX_SESSION_UNAVAILABLE" });
     const listed = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}\t#{@waga_session_id}\t#{pane_dead}"]);
@@ -202,6 +203,12 @@ export class TmuxWorkspace {
     if (existing && !existing.paneDead && !force && (session.provider ?? session.id.split(":", 1)[0]) === "claude") {
       const pane = await this.#call(["display-message", "-p", "-t", existing.windowId, "#{pane_pid}"], { check: false });
       changedView = pane.code !== 0 || !await this.#claudeViewMatches(pane.stdout.trim(), commandSpec);
+    }
+    if (existing && !existing.paneDead && !force && (session.provider ?? session.id.split(":", 1)[0]) === "codex") {
+      const title = await this.#call(["display-message", "-p", "-t", existing.windowId, "#{pane_title}"], { check: false });
+      const frame = await this.#call(["capture-pane", "-p", "-t", existing.windowId, "-S", "0", "-E", "1"], { check: false });
+      changedView = title.code !== 0 || frame.code !== 0
+        || !retainedCodexViewMatches(session.nativeId, title.stdout, frame.stdout, knownNativeIds);
     }
     if (existing && !existing.paneDead && !force && !changedView) {
       await this.#setSessionWindowMetadata(existing.windowId, session, commandSpec);

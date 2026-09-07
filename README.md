@@ -84,8 +84,11 @@ falls back to `direct`. With tmux, use prefix then `0` to return to the dock.
 Waga's isolated server also uses `Alt+G` for the dock and `Alt+A` for a separate
 provider Agents View, without replacing the session TUI window. In direct mode,
 leave the native view with `Ctrl+Z` in Claude or `Ctrl+D` in Codex.
-After native navigation with Claude's `←`, opening a session from the dock checks
-the retained frontend and reattaches when its target changed or cannot be verified.
+After native navigation with Claude's `←` or Codex's `/agents`, opening a session
+checks the retained view and reattaches when needed. Waga-launched Codex TUIs use
+a thread marker as their terminal title; global settings are not changed.
+
+`F2` changes the native Codex session name, but only a Waga-local alias for Claude.
 
 ## Peer messages
 
