@@ -1,0 +1,74 @@
+{
+  "provider": {
+    "tests": ["test/codex-provider.test.mjs", "test/codex-app-server.test.mjs", "test/claude-peer.test.mjs", "test/claude-provider.test.mjs", "test/claude-usage.test.mjs", "test/provider-waiting.test.mjs"],
+    "mutations": [
+      {"id":"ignore-next-page","file":"src/providers/codex.mjs","from":"cursor = page.nextCursor;","to":"cursor = null;"},
+      {"id":"ignore-approval-flag","file":"src/providers/codex.mjs","from":"[\"waitingOnApproval\", \"waitingOnUserInput\"].includes(flag)","to":"false"},
+      {"id":"send-to-unloaded-thread","file":"src/providers/codex.mjs","from":"if (![\"active\", \"idle\"].includes(thread.status?.type))","to":"if (false)"},
+      {"id":"leave-closing-socket","file":"src/codex-app-server.mjs","from":"if (this.#socket.readyState === WebSocket.CLOSING) { this.#socket.terminate(); return; }","to":"if (this.#socket.readyState === WebSocket.CLOSING) return;"},
+      {"id":"accept-cursor-loop","file":"src/providers/codex.mjs","from":"cursor && seen.has(cursor)","to":"false"},
+      {"id":"accept-partial-snapshot","file":"src/providers/codex.mjs","from":"if (failed) throw failed.reason;","to":"if (false) throw failed.reason;"},
+      {"id":"wrong-answer-turn","file":"src/providers/codex.mjs","from":"entry.turnId === turnId && entry.item?.type","to":"entry.item?.type"},
+      {"id":"wrong-completion-turn","file":"src/providers/codex.mjs","from":"candidate.id === turnId","to":"true"},
+      {"id":"skip-initialize","file":"src/providers/codex.mjs","from":"await client.initialize();","to":";"},
+      {"id":"skip-client-close","file":"src/providers/codex.mjs","from":"await client.close();","to":";"},
+      {"id":"keep-child-sessions","file":"src/providers/codex.mjs","from":"!thread.ephemeral && !thread.parentThreadId","to":"!thread.ephemeral"},
+      {"id":"allow-late-rpc","file":"src/codex-app-server.mjs","from":"}, timeoutMs);","to":"}, 60000);"},
+      {"id":"ignore-async-send-error","file":"src/codex-app-server.mjs","from":"if (error) this.#failAll(error);","to":"if (false) this.#failAll(error);"},
+      {"id":"leak-peer-connections","file":"src/providers/claude-peer.mjs","from":"for (const socket of this.#connections) socket.destroy();","to":";"},
+      {"id":"keep-peer-history","file":"src/providers/claude-peer.mjs","from":"this.#records = [];","to":";"},
+      {"id":"ignore-peer-stop-waiters","file":"src/providers/claude-peer.mjs","from":"for (const stop of [...this.#listeners.values()]) stop();","to":";"},
+      {"id":"accept-expiring-credential","file":"src/claude-usage.mjs","from":"now() >= oauth.expiresAt - 60_000","to":"now() > oauth.expiresAt - 60_000"},
+      {"id":"accept-unauthorized-usage","file":"src/claude-usage.mjs","from":"response.status !== 200","to":"false"},
+      {"id":"lose-usage-window","file":"src/claude-usage.mjs","from":"if (!fiveHour && !weekly)","to":"if (!fiveHour || !weekly)"}
+    ]
+  },
+  "lifecycle": {
+    "tests": ["test/native-process.test.mjs", "test/tmux-workspace.test.mjs", "test/tmux-integration.test.mjs", "test/direct-workspace.test.mjs", "test/native-session-host.test.mjs", "test/native-launcher.test.mjs", "test/session-dock.test.mjs"],
+    "mutations": [
+      {"id":"respawn-live-view","file":"src/tmux-workspace.mjs","from":"existing && !existing.paneDead && !force","to":"false"},
+      {"id":"ignore-force-reattach","file":"src/tmux-workspace.mjs","from":"existing && !existing.paneDead && !force","to":"existing && !existing.paneDead"},
+      {"id":"close-unhealthy-view","file":"src/tmux-workspace.mjs","from":"provider && healthy.has(provider) && !activeIds.has(sessionId)","to":"provider && !activeIds.has(sessionId)"},
+      {"id":"leak-failed-new-window","file":"src/tmux-workspace.mjs","from":"try { await this.#call([\"kill-window\", \"-t\", windowId]); } catch {}","to":";"},
+      {"id":"lose-host-signal","file":"src/native-session-host.mjs","from":"child.kill(signal);","to":";"},
+      {"id":"lose-native-exit-code","file":"src/native-session-host.mjs","from":"return result.code;","to":"return 0;"},
+      {"id":"skip-raw-mode-restore","file":"src/direct-workspace.mjs","from":"this.#inputStream.setRawMode(true);","to":"this.#inputStream.setRawMode(false);"},
+      {"id":"fallback-on-any-tmux-error","file":"src/session-dock.mjs","from":"if (error.code !== \"TMUX_UNAVAILABLE\") throw error;","to":";"},
+      {"id":"wrong-native-target","file":"src/native-launcher.mjs","from":"args: [\"attach\", session.nativeId]","to":"args: [\"attach\", session.id]"}
+    ]
+  },
+  "cli": {
+    "tests": ["test/cli-options.test.mjs", "test/cli.test.mjs", "test/doctor.test.mjs", "test/event-log.test.mjs"],
+    "mutations": [
+      {"id":"accept-timeout-overflow","file":"src/cli-options.mjs","from":"if (!Number.isSafeInteger(milliseconds))","to":"if (false)"},
+      {"id":"allow-negative-timeout","file":"src/cli-options.mjs","from":"!Number.isFinite(seconds) || seconds <= 0","to":"!Number.isFinite(seconds)"},
+      {"id":"omit-field-sanitizer","file":"src/cli.mjs","from":".map(field).join(\"\\t\")","to":".join(\"\\t\")"},
+      {"id":"mix-warning-into-stdout","file":"src/cli.mjs","from":"errorOutput.write(`warning\\t","to":"output.write(`warning\\t"},
+      {"id":"error-reports-success","file":"src/cli.mjs","from":"    return 1;","to":"    return 0;"},
+      {"id":"ignore-required-probe","file":"src/doctor.mjs","from":"checks.every((check) => check.ok || !check.required)","to":"true"},
+      {"id":"overwrite-log-provenance","file":"src/event-log.mjs","from":"{ ...details, timestamp, pid: this.#processId, event }","to":"{ timestamp, pid: this.#processId, event, ...details }"},
+      {"id":"follow-log-symlink","file":"src/event-log.mjs","from":" | fs.constants.O_NOFOLLOW","to":""},
+      {"id":"leak-log-descriptor","file":"src/event-log.mjs","from":"fs.closeSync(descriptor);","to":";"},
+      {"id":"discard-log-lines","file":"src/event-log.mjs","from":"fs.writeFileSync(descriptor, line);","to":";"}
+    ]
+  },
+  "overview": {
+    "tests": ["test/overview.test.mjs", "test/overview-lifecycle.test.mjs", "test/dock-order.test.mjs", "test/session-alias-catalog.test.mjs", "test/storage-failures.test.mjs"],
+    "mutations": [
+      {"id":"remove-on-first-miss","file":"src/overview.mjs","from":"const SESSION_REMOVAL_CONFIRMATIONS = 2;","to":"const SESSION_REMOVAL_CONFIRMATIONS = 1;"},
+      {"id":"hide-after-forty","file":"src/overview.mjs","from":"provider = null, limit = Infinity","to":"provider = null, limit = 40"},
+      {"id":"remove-unavailable-provider","file":"src/overview.mjs","from":"if (providerUnavailable) {","to":"if (false) {"},
+      {"id":"ignore-manual-rank","file":"src/overview.mjs","from":"return leftRank - rightRank || left.index - right.index;","to":"return left.index - right.index;"},
+      {"id":"reverse-manual-move","file":"src/overview.mjs","from":"direction === \"up\" ? visibleIndex - 1 : visibleIndex + 1","to":"direction === \"down\" ? visibleIndex - 1 : visibleIndex + 1"},
+      {"id":"paint-over-native","file":"src/overview.mjs","from":"if (closed || nativeOpen) return;","to":"if (closed) return;"},
+      {"id":"accept-late-discovery","file":"src/overview.mjs","from":"if (closed || nativeOpen || generation !== refreshGeneration) return;","to":"if (nativeOpen) return;"},
+      {"id":"lose-forced-refresh","file":"src/overview.mjs","from":"refreshQueued = true; refreshGeneration++;","to":"refreshGeneration++;"},
+      {"id":"leak-signal-listener","file":"src/overview.mjs","from":"process.off(\"SIGTERM\", cleanup);","to":";"},
+      {"id":"block-exit-on-discovery","file":"src/overview.mjs","from":"void refresh({ force: true });\n  return await completed;","to":"await refresh({ force: true });\n  return await completed;"},
+      {"id":"skip-order-persist","file":"src/dock-order.mjs","from":"this.#write(document);","to":";"},
+      {"id":"skip-alias-persist","file":"src/session-alias-catalog.mjs","from":"this.#write(document);","to":";"},
+      {"id":"leak-order-temp","file":"src/dock-order.mjs","from":"if (fs.existsSync(temporary)) fs.unlinkSync(temporary);","to":";"},
+      {"id":"leak-alias-temp","file":"src/session-alias-catalog.mjs","from":"if (fs.existsSync(temporary)) fs.unlinkSync(temporary);","to":";"}
+    ]
+  }
+}

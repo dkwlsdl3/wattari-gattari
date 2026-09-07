@@ -1,0 +1,679 @@
+{
+  "observedOn": "2026-09-07",
+  "baselineCommit": "a6a223a",
+  "scope": "All five planned review sections: prior trust review retained; remaining four sections reviewed and targeted mutations executed. Not exhaustive generated mutation coverage.",
+  "method": "Targeted source replacements in isolated copies, independent syntax check, baseline and restored baseline, full-suite follow-up for survivors.",
+  "node": "v24.15.0",
+  "tool": "scripts/mutation-check.mjs",
+  "manifest": "test/mutation/cases.json",
+  "allRunHashesEqual": true,
+  "hashes": {
+    "src/bridge/deadline.mjs": "1172d87e41f6ba3387822eeb2fa5af268808a5f4b2013dd4652889bcf74b011b",
+    "src/bridge/envelope.mjs": "1833f80916d12e01148050540dd8ab2714fb19543b6a26abdaac148aeb3a3b25",
+    "src/claude-usage.mjs": "548ff28273e110dc8cc9bd102048ca12e9d5c294629ae1248c852e76c121654f",
+    "src/cli-options.mjs": "a986845f3b1950dbf800a13c9b7da8137a3650e528ab9afab60cc333136c114c",
+    "src/cli.mjs": "f87586de97224f9adaa38d2d45726a42aa12bf8468e7d5878005a7754a8549a8",
+    "src/codex-app-server.mjs": "e37b1ece971da697c1e391be9ffabd67922fa73c4f4fdf764a815d4c574f1b78",
+    "src/demo-dock.mjs": "43ed54cee1f7dcd1d983a2429aaff49c731ac7c5aa4c9059da2595ea515a7c80",
+    "src/demo.mjs": "43af178beb63989a65dcd219e48fe89b572b0608f097d708196558f72fcce6d0",
+    "src/direct-workspace.mjs": "0da44d773eb2111e7c82129c2df28192a644a7dac61a013a4fb75fe45ca0deff",
+    "src/dock-order.mjs": "f305a3ccc72c0a533f31766c0215101876871d0e7508cba920a20cd8f8539c25",
+    "src/doctor.mjs": "c39c5311c4d8711415f05aab2648c1f0de24fba17745db8262b31df0e31401fe",
+    "src/event-log.mjs": "00501b713e79e07d443d888ac67bcb98f63a3c371ffa1a2dd43ab479ef096de6",
+    "src/managed-session-instructions.mjs": "160f75fb566e04f7f35eb9ec684f08fdada29d3a79e8481e7b93ebe6f723538c",
+    "src/native-launcher.mjs": "2d11872b89844a5ba721ec14d11b9da38c7e40206831d90e282eaf2c7169d519",
+    "src/native-session-host.mjs": "5c198aafa92883acdddf4a670bb41669accd5ae0d5c9de3791629a31117fe2d7",
+    "src/overview.mjs": "08419f6d59cd122de617ea281d585963f2923bf5b999d8042e70e45da4f66852",
+    "src/product.mjs": "f8205524d3809d6c85048f27f07c111cc722dab9613d635a1a27eb660d3fa9f4",
+    "src/providers/claude-peer.mjs": "82cf3fa6804b81e201c72d5763ea51784104a2ac95d8e57ff18682933c67cf8b",
+    "src/providers/claude.mjs": "45ac079338804eda1418651124e573ee80abe8918c74a2b0ffad5f3902393565",
+    "src/providers/codex.mjs": "a1c6437f905a27676fc95241feb80ecb2b8642791747a39dcfe247534d9778bc",
+    "src/session-alias-catalog.mjs": "746a7d873dea728f30aa1786414877aa54a3d4e0830be99080042761e23a6ddc",
+    "src/session-bridge.mjs": "149f0d29c716462f5822b731127f6e23635fad0d30508179672dd59e27653d88",
+    "src/session-dock.mjs": "743a2cd79038cf108fbe69b5c5f2f54e7fa02b682156f3826c5515a1d619ca62",
+    "src/tmux-workspace.mjs": "87b7b544403974a85901a73315604946aacad29f9b38f35b6f9ff0a3f97adc39",
+    "test/claude-peer.test.mjs": "1012aa9d99cd0e3a2e96b061efc6434ad781bbd5af011e5b20efe56a56d224d4",
+    "test/claude-provider.test.mjs": "a3f3693b1cc718dab8752193fbb374c5a2822d962233a917c0ca335aa22563f8",
+    "test/claude-usage.test.mjs": "b30cac21b8403bdbdb44dd647bfbcb58d2300d171e261c96bdbb6efa7050315c",
+    "test/cli-options.test.mjs": "5cbf9cded61bb0e4de7b747154ec9e6cb6524a07319df78ae3b02f4afdb6f110",
+    "test/cli.test.mjs": "f4e6429de4ca753df5dac3017f896104af38da8b0394a9dab12012e50dcd2cbc",
+    "test/codex-app-server.test.mjs": "b67150dc6aefa283f81d3a9070f8655f89a79298bbba3cdf95d7f9f56f49a6e1",
+    "test/codex-provider.test.mjs": "1accec196a80f403316701b1b5164e995575a22e2efed5b73f993272554478a8",
+    "test/deadline.test.mjs": "2fd5d502b91e3f3877996877726c9d7b964064c40ca810ae32a7da4c97c3bbc1",
+    "test/direct-workspace.test.mjs": "35a356b09ce7d9f8c62d632fd6c16f87c5138cf9cb9b1686ff9cecd2941d23e6",
+    "test/dock-order.test.mjs": "9014f963f5d4f3efbf818182cb837796cba55383d38a486744b935d8cd7fe20a",
+    "test/doctor.test.mjs": "de66428d71f612dab955bd45a7a8d37bee9cab5dbc09254f340c260a20531f2b",
+    "test/envelope.test.mjs": "2121fc058d05529e0ceb4cceb22dc319387e00985a07c832dd95f3cbe17dad2a",
+    "test/event-log.test.mjs": "16f6f1b74d73676be91832c0750db5ebc2acd6aa55b20b7ed87e009bb7d14570",
+    "test/managed-session-instructions.test.mjs": "73c3342cbbb3f9c2cf3a9b4b3d4fb77f2012073a899ed0504d78822d6f36fe1c",
+    "test/mutation/cases.json": "6d8748bb847e768c418351d409c45a3e1ae8277656f57f664f517cb0eab5361a",
+    "test/native-launcher.test.mjs": "3be9060abb52e9b803a659aa5c7aa86382fc6eaba69699594a46aaf17b8c2169",
+    "test/native-process.test.mjs": "68cb7c1f5ae68e63736a91d9fae86f0e11b2da5ce736b8d9085ee28b645c12dd",
+    "test/native-session-host.test.mjs": "fd156931e1b504a5be8a7cdcef81d92a236736c1419ee06dbb9b3774ce786976",
+    "test/overview-lifecycle.test.mjs": "c80a9aaf9662c89faad4f9de7821d086640f19921a35f95b211f66b91e999611",
+    "test/overview.test.mjs": "0f56e862c0a20357ab6373d1626c40c6bb337b3b72def2cf06ed75f9ea13ad3c",
+    "test/provider-waiting.test.mjs": "fb041d2fce5f1155543e9d394023c95c9608665025b9cecb82b6e4e9020e06b2",
+    "test/session-alias-catalog.test.mjs": "1d9dfe4b3ad8eef09d04f20833113fa398eaf9a4356f1288d8e89650fd50d467",
+    "test/session-bridge.test.mjs": "75264a1ad78c9f3f7753e4db81d8b62f8d800851a2d8058039b97c59dd7ff571",
+    "test/session-dock.test.mjs": "bfffbfc0cc2f429682d5ab01dc2dddaab0b8363cedb0c9923e7506491e662037",
+    "test/storage-failures.test.mjs": "2cb75132aadf4cdc4a477ba815070057b494e69326cd585e3e5c2c6f9348c065",
+    "test/tmux-integration.test.mjs": "c3e89ebc0fc67c4a98535ddd39bc41556431ff3afae0194e4e17147eb1ef1c1a",
+    "test/tmux-workspace.test.mjs": "b8e26cd2e0034452f1120a1c06ce9bfcf7fbb155b1678cfb22d7f6251aba503a",
+    "scripts/benchmark.mjs": "b43f637decf499197d5a1f1edc728ab93857c432c102231110740c5289db33c1",
+    "scripts/mutation-check.mjs": "078ea5e5fc3446a42dc205934e3d72e121abfd748ee519d60e3fdf41ffb81b3c",
+    "package.json": "495deef535cdf566dcc6235508d8f452e671c35a96f060a45c96d770d4a527a3",
+    "package-lock.json": "e5abfb73d7a7504608ad069e79075f681ba18011f24b8513703050dbfe2cb6a5"
+  },
+  "mutationSummary": {
+    "total": 52,
+    "killed": 49,
+    "testTimeouts": 3,
+    "processTimeouts": 0,
+    "survived": 0,
+    "runnerErrors": 0
+  },
+  "groups": [
+    {
+      "group": "provider",
+      "command": [
+        "/usr/bin/node",
+        "--test",
+        "--test-reporter=tap",
+        "--test-timeout=4000",
+        "test/codex-provider.test.mjs",
+        "test/codex-app-server.test.mjs",
+        "test/claude-peer.test.mjs",
+        "test/claude-provider.test.mjs",
+        "test/claude-usage.test.mjs",
+        "test/provider-waiting.test.mjs"
+      ],
+      "baseline": {
+        "status": "survived",
+        "code": 0,
+        "signal": null,
+        "tests": 84
+      },
+      "restoredBaseline": {
+        "status": "survived",
+        "code": 0,
+        "signal": null,
+        "tests": 84
+      },
+      "results": [
+        {
+          "id": "ignore-next-page",
+          "file": "src/providers/codex.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "ignore-approval-flag",
+          "file": "src/providers/codex.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "send-to-unloaded-thread",
+          "file": "src/providers/codex.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "leave-closing-socket",
+          "file": "src/codex-app-server.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "accept-cursor-loop",
+          "file": "src/providers/codex.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "accept-partial-snapshot",
+          "file": "src/providers/codex.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "wrong-answer-turn",
+          "file": "src/providers/codex.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "wrong-completion-turn",
+          "file": "src/providers/codex.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "skip-initialize",
+          "file": "src/providers/codex.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "skip-client-close",
+          "file": "src/providers/codex.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "keep-child-sessions",
+          "file": "src/providers/codex.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "allow-late-rpc",
+          "file": "src/codex-app-server.mjs",
+          "status": "test-timeout",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "ignore-async-send-error",
+          "file": "src/codex-app-server.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "leak-peer-connections",
+          "file": "src/providers/claude-peer.mjs",
+          "status": "test-timeout",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "keep-peer-history",
+          "file": "src/providers/claude-peer.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "ignore-peer-stop-waiters",
+          "file": "src/providers/claude-peer.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "accept-expiring-credential",
+          "file": "src/claude-usage.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "accept-unauthorized-usage",
+          "file": "src/claude-usage.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        },
+        {
+          "id": "lose-usage-window",
+          "file": "src/claude-usage.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 84
+        }
+      ],
+      "artifactDirectory": "rechecked-provider"
+    },
+    {
+      "group": "overview",
+      "command": [
+        "/usr/bin/node",
+        "--test",
+        "--test-reporter=tap",
+        "--test-timeout=4000",
+        "test/overview.test.mjs",
+        "test/overview-lifecycle.test.mjs",
+        "test/dock-order.test.mjs",
+        "test/session-alias-catalog.test.mjs",
+        "test/storage-failures.test.mjs"
+      ],
+      "baseline": {
+        "status": "survived",
+        "code": 0,
+        "signal": null,
+        "tests": 49
+      },
+      "restoredBaseline": {
+        "status": "survived",
+        "code": 0,
+        "signal": null,
+        "tests": 49
+      },
+      "results": [
+        {
+          "id": "remove-on-first-miss",
+          "file": "src/overview.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 49
+        },
+        {
+          "id": "hide-after-forty",
+          "file": "src/overview.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 49
+        },
+        {
+          "id": "remove-unavailable-provider",
+          "file": "src/overview.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 49
+        },
+        {
+          "id": "ignore-manual-rank",
+          "file": "src/overview.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 49
+        },
+        {
+          "id": "reverse-manual-move",
+          "file": "src/overview.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 49
+        },
+        {
+          "id": "paint-over-native",
+          "file": "src/overview.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 49
+        },
+        {
+          "id": "accept-late-discovery",
+          "file": "src/overview.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 49
+        },
+        {
+          "id": "lose-forced-refresh",
+          "file": "src/overview.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 49
+        },
+        {
+          "id": "leak-signal-listener",
+          "file": "src/overview.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 49
+        },
+        {
+          "id": "block-exit-on-discovery",
+          "file": "src/overview.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 49
+        },
+        {
+          "id": "skip-order-persist",
+          "file": "src/dock-order.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 49
+        },
+        {
+          "id": "skip-alias-persist",
+          "file": "src/session-alias-catalog.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 49
+        },
+        {
+          "id": "leak-order-temp",
+          "file": "src/dock-order.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 49
+        },
+        {
+          "id": "leak-alias-temp",
+          "file": "src/session-alias-catalog.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 49
+        }
+      ],
+      "artifactDirectory": "rechecked-overview"
+    },
+    {
+      "group": "lifecycle",
+      "command": [
+        "/usr/bin/node",
+        "--test",
+        "--test-reporter=tap",
+        "--test-timeout=4000",
+        "test/native-process.test.mjs",
+        "test/tmux-workspace.test.mjs",
+        "test/tmux-integration.test.mjs",
+        "test/direct-workspace.test.mjs",
+        "test/native-session-host.test.mjs",
+        "test/native-launcher.test.mjs",
+        "test/session-dock.test.mjs"
+      ],
+      "baseline": {
+        "status": "survived",
+        "code": 0,
+        "signal": null,
+        "tests": 39
+      },
+      "restoredBaseline": {
+        "status": "survived",
+        "code": 0,
+        "signal": null,
+        "tests": 39
+      },
+      "results": [
+        {
+          "id": "respawn-live-view",
+          "file": "src/tmux-workspace.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 39
+        },
+        {
+          "id": "ignore-force-reattach",
+          "file": "src/tmux-workspace.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 39
+        },
+        {
+          "id": "close-unhealthy-view",
+          "file": "src/tmux-workspace.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 39
+        },
+        {
+          "id": "leak-failed-new-window",
+          "file": "src/tmux-workspace.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 39
+        },
+        {
+          "id": "lose-host-signal",
+          "file": "src/native-session-host.mjs",
+          "status": "test-timeout",
+          "code": 1,
+          "signal": null,
+          "tests": 39
+        },
+        {
+          "id": "lose-native-exit-code",
+          "file": "src/native-session-host.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 39
+        },
+        {
+          "id": "skip-raw-mode-restore",
+          "file": "src/direct-workspace.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 39
+        },
+        {
+          "id": "fallback-on-any-tmux-error",
+          "file": "src/session-dock.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 39
+        },
+        {
+          "id": "wrong-native-target",
+          "file": "src/native-launcher.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 39
+        }
+      ],
+      "artifactDirectory": "rechecked-lifecycle"
+    },
+    {
+      "group": "cli",
+      "command": [
+        "/usr/bin/node",
+        "--test",
+        "--test-reporter=tap",
+        "--test-timeout=4000",
+        "test/cli-options.test.mjs",
+        "test/cli.test.mjs",
+        "test/doctor.test.mjs",
+        "test/event-log.test.mjs"
+      ],
+      "baseline": {
+        "status": "survived",
+        "code": 0,
+        "signal": null,
+        "tests": 28
+      },
+      "restoredBaseline": {
+        "status": "survived",
+        "code": 0,
+        "signal": null,
+        "tests": 28
+      },
+      "results": [
+        {
+          "id": "accept-timeout-overflow",
+          "file": "src/cli-options.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 28
+        },
+        {
+          "id": "allow-negative-timeout",
+          "file": "src/cli-options.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 28
+        },
+        {
+          "id": "omit-field-sanitizer",
+          "file": "src/cli.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 28
+        },
+        {
+          "id": "mix-warning-into-stdout",
+          "file": "src/cli.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 28
+        },
+        {
+          "id": "error-reports-success",
+          "file": "src/cli.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 28
+        },
+        {
+          "id": "ignore-required-probe",
+          "file": "src/doctor.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 28
+        },
+        {
+          "id": "overwrite-log-provenance",
+          "file": "src/event-log.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 28
+        },
+        {
+          "id": "follow-log-symlink",
+          "file": "src/event-log.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 28
+        },
+        {
+          "id": "leak-log-descriptor",
+          "file": "src/event-log.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 28
+        },
+        {
+          "id": "discard-log-lines",
+          "file": "src/event-log.mjs",
+          "status": "killed",
+          "code": 1,
+          "signal": null,
+          "tests": 28
+        }
+      ],
+      "artifactDirectory": "rechecked-cli"
+    }
+  ],
+  "functionReview": {
+    "src/session-bridge.mjs": "Prior trust-review.json covers provider selection, discover, resolve, create, archive, rename, send and ask. Source unchanged in this pass; full regression rerun.",
+    "src/bridge/envelope.mjs": "Prior trust review covers validation, escaping, request metadata and untrusted instructions. Source unchanged; full regression rerun.",
+    "src/managed-session-instructions.mjs": "Prior trust review covers provider instruction injection and relay/approval limits. Source unchanged; full regression rerun.",
+    "src/bridge/deadline.mjs": "Prior waiting review covers strict deadline, overflow, signal and timer cleanup. Used for usage timeout too; full regression rerun.",
+    "src/providers/codex.mjs": "parseDaemonVersion/parseCodexUsage, publicStatus, answerIn, pages/findInPages, mapSettled, isRootSession/toSession, list/cache/event snapshots, create/archive/rename/send/ask, daemonInfo/withClient/assertDaemonAvailable: cursor matching, incomplete discovery, loaded state, approval flags, RPC lifecycle and usage bound covered. Generated schema is evidence for pagination/status shape, not native model completion proof.",
+    "src/providers/claude.mjs": "Canonical project/worktree path, PID/registry join, parsers/status mapping, list/cache, create/archive/rename/send/ask/waitUntilIdle reviewed against existing tests. Native final-answer correlation limitation is explicit, not claimed solved.",
+    "src/providers/claude-peer.mjs": "processStart/version commands bounded; frame escaping/parsing, directory/target guards, start/send/waitForReply/waitForDisposition/stop/listen/disposition/accept/owned-file cleanup reviewed. Actual isolated Unix socket chunking, restart, held status, identity collision and stopping connected clients exercised.",
+    "src/codex-app-server.mjs": "connectUnixWebSocket/initialize/request/notify/close/send/onMessage/handleServerRequest/failAll/deniedServerRequest: fake frame tests plus real disposable Unix WebSocket handshake, timeout and close; signal cleanup, one submission and no approval bypass.",
+    "src/claude-usage.mjs": "parseWindow/parseClaudeUsage/readClaudeUsage/curlUsage: independently valid windows, clamps, expiry and status boundaries, credential preservation; fake curl executable tests default subprocess argv/stdin and failure paths without HTTP.",
+    "src/overview.mjs": "Order/reconciliation/move/filter/tree, formatting/status/usage/frame helpers and runOverview closures reviewed. Deferred discovery and native-open/resize/close races, forced refresh coalescing, storage warning and >40-session visibility tested. Rendering tests are string/EventEmitter checks, not a visual terminal proof.",
+    "src/dock-order.mjs": "canonicalWorkspace/validate/default path/load/saveWorkspace/read/write: private atomic replacement, malformed-state refusal, sequential writer re-read and rename failure cleanup.",
+    "src/session-alias-catalog.mjs": "validate/default path/load/set/read/write: same failure preservation boundaries; no claim of cross-process locking.",
+    "src/tmux-workspace.mjs": "Source fingerprint, result normalization, shell quoting, name/window parsing, enter/focusOrOpen/focusAgentsViewFromWindow/closeSessionView/reconcileSessionViews/shouldRefreshOverview/leave and metadata/frame/config/call helpers reviewed with mocks; real isolated tmux exercises normal reuse/dead revive/close/leave. Bounded control process and new session-view setup rollback tested.",
+    "src/direct-workspace.mjs": "defaultLaunch/focusOrOpen/leave/reconcile/close/refresh contract: argv, terminal hand-off/finally restore, failed launch and exit logging tested; temporary test state cleaned.",
+    "src/native-launcher.mjs": "nativeAgentsCommand/nativeSessionCommand/openNativeAgents/defaultLaunch: exact provider id, cwd and native daemon boundary retained. No real model frontend started.",
+    "src/native-session-host.mjs": "parseArgs/defaultLaunch/runNativeSessionHost/direct entry: actual disposable child process SIGTERM/SIGHUP forwarding, exit code 23, missing executable, invalid argv and diagnostic event order.",
+    "src/session-dock.mjs": "enterDirectDock/enterSessionDock: direct composition, optional tmux fallback only for unavailable executable; other failures must propagate.",
+    "src/cli-options.mjs": "parseCliArgs: defaults, aliases, backend/provider selection, separate positive safe timeout values, required operands and surplus open argument refusal.",
+    "src/cli.mjs": "Usage/default adapters/writeList/runCli/direct entry: dispatch, output separation, JSON preservation, runtime versus argument exit codes, and terminal-control neutralization in list fields.",
+    "src/doctor.mjs": "command/defaultDoctorProbes/runDoctor: bounded default probes inspected; injected probe failure/throw continues all required checks, optional tmux does not fail exit.",
+    "src/event-log.mjs": "default path/record: private append, no symlink following, immutable provenance, regular-file guard, descriptor finally cleanup and rotation recreation.",
+    "src/product.mjs, src/demo.mjs, src/demo-dock.mjs": "Constants/demo entrypoints excluded from mutation campaign; syntax and normal demo run are in npm run check.",
+    "scripts/benchmark.mjs": "Read warmup/sample/percentile/budget dispatch; benchmark excludes native providers and real terminal rendering.",
+    "scripts/mutation-check.mjs": "Checkout-isolated copies, exclusive new output directory, exact-one replacement, source syntax check, baseline gate, process group timeout/cleanup, survivor follow-up and report/hash persistence. Reports do not recursively hash prior review records."
+  },
+  "verification": {
+    "tests": 229,
+    "passed": 229,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "coverage": {
+      "lines": 94.78,
+      "branches": 86.69,
+      "functions": 92.16
+    },
+    "benchmark": {
+      "sessions": 1000,
+      "bridgeP95Ms": 0.040375,
+      "frameP95Ms": 1.832139,
+      "passed": true
+    },
+    "packDryRunFiles": 38,
+    "diffCheckPassed": true
+  },
+  "findingsAndTestWeaknesses": [
+    "RPC and peer socket lifecycle failures reproduced before fixes; stalled RPC and idle inbound peer connections detected by test deadlines.",
+    "Paginated turn/items lookup and repeated cursors, partial discovery safety, approval flags and unloaded target gating fixed.",
+    "Initial discovery exit, stale refresh, native-screen overwrite, forced refresh loss and signal listener leaks reproduced and fixed.",
+    "The first-forty display limit silently hid remaining sessions; a sixty-session regression verifies the default is unbounded.",
+    "Mutation removed HTTP status guard but tests still passed because all error responses had unusable bodies; valid-shaped bodies on 401/429/500 now kill it.",
+    "An overview assertion failure left a refresh interval running; shared afterEach cleanup converted process timeout to a meaningful failure.",
+    "A runtime JSON.parse SyntaxError was initially labeled a runner error. Source syntax is now checked independently; TAP testCodeFailure remains an ordinary detection.",
+    "tmux control timeout and newly created frontend rollback, CLI timeout overflow/extra args/control characters, log symlink/provenance addressed.",
+    "Final runner review corrected survivor full-suite argv slicing so no focused test filename remains; all four campaigns rerun against the corrected runner."
+  ],
+  "limitations": [
+    "52 targeted mutants are not the original 5061 generated candidates. Prior Stryker results retain their original hashes and are not pooled into this score.",
+    "Three mutants are detected by test deadlines, not ordinary assertions; raw TAP and separate classification are retained.",
+    "No live Claude/Codex agent session, native daemon, credential or user global configuration was modified. No native model or real OAuth HTTP response was requested.",
+    "Claude peer replies are source-socket matched; idle observation does not prove a correlated native turn or final transcript answer.",
+    "Store writes use atomic rename and re-read before writing but do not serialize simultaneous cross-process writers.",
+    "TTY rendering and real provider latency remain unverified; injected process/transport boundaries are stated explicitly.",
+    "Failures while setting up or rolling back a frontend can have unknown external outcomes; no destructive broad cleanup or automatic resend is introduced."
+  ],
+  "artifacts": "/tmp/waga-qa-completion",
+  "schemaEvidence": "codex-cli 0.153.2 generate-json-schema --experimental; archived selected v2 schemas, no daemon contact"
+}
