@@ -375,9 +375,12 @@ export async function runOverview({
   let renameTask = null;
   let provider = null;
   let refreshing = false;
+  let refreshQueued = false;
+  let refreshGeneration = 0;
   let notice = "세션을 불러오는 중입니다.";
   let closed = false;
   let busy = false;
+  let nativeOpen = false;
   let pendingArchiveId = null;
   const archivedSessionIds = new Set();
 
@@ -395,6 +398,7 @@ export async function runOverview({
     selectedKey = nodes[selected]?.key ?? null;
   };
   const render = () => {
+    if (closed || nativeOpen) return;
     const sessions = visibleSessions();
     const nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd: defaultCwd });
     reconcileSelection(nodes);
@@ -418,13 +422,19 @@ export async function runOverview({
   };
 
   const refresh = async ({ whileBusy = false, force = false } = {}) => {
-    if (refreshing || closed || (busy && !whileBusy)) return;
+    if (closed || (busy && !whileBusy)) return;
+    if (refreshing) {
+      if (force) { refreshQueued = true; refreshGeneration++; }
+      return;
+    }
     refreshing = true;
+    const generation = ++refreshGeneration;
     let renderAfter = false;
     try {
       if (!force && workspace.shouldRefreshOverview && !await workspace.shouldRefreshOverview()) return;
       renderAfter = true;
       const discovered = await bridge.discover(filterCwd ? { cwd: path.resolve(filterCwd), includeUsage: true } : { includeUsage: true });
+      if (closed || nativeOpen || generation !== refreshGeneration) return;
       const snapshot = reconcileDiscoveredSessions(
         allSessions.filter((session) => !archivedSessionIds.has(session.id)),
         { ...discovered, sessions: discovered.sessions.filter((session) => !archivedSessionIds.has(session.id)) },
@@ -450,6 +460,10 @@ export async function runOverview({
     } finally {
       refreshing = false;
       if (!closed && renderAfter) render();
+      if (refreshQueued && !closed) {
+        refreshQueued = false;
+        void refresh({ force: true, whileBusy: true });
+      }
     }
   };
 
@@ -562,10 +576,11 @@ export async function runOverview({
     busy = true;
     notice = force ? `${target.name} 세션에 다시 연결하는 중입니다.` : `${target.name} 세션을 여는 중입니다.`;
     render();
-    void commandFor(target)
-      .then((command) => workspace.focusOrOpen(target, command, { force }))
+    nativeOpen = true;
+    void Promise.resolve().then(() => commandFor(target))
+      .then((command) => { if (!closed) return workspace.focusOrOpen(target, command, { force }); })
       .catch((error) => { warnings = [{ provider: target.provider, message: error.message }]; })
-      .finally(() => { busy = false; render(); });
+      .finally(() => { busy = false; nativeOpen = false; render(); });
   };
 
   const onKeypress = (text, key = {}) => {
@@ -722,7 +737,13 @@ export async function runOverview({
     closed = true;
     clearInterval(timer);
     inputStream.off("keypress", onKeypress);
+    inputStream.off("end", cleanup);
+    inputStream.off("close", cleanup);
     outputStream.off("resize", onResize);
+    if (listenForSignals) {
+      process.off("SIGTERM", cleanup);
+      process.off("SIGHUP", cleanup);
+    }
     if (inputStream.isTTY) inputStream.setRawMode(false);
     outputStream.write(`${ESC}?25h${ESC}?1049l`);
     resolveRun(0);
@@ -732,7 +753,7 @@ export async function runOverview({
     process.once("SIGHUP", cleanup);
   }
   inputStream.once("end", cleanup);
-  await refresh({ force: true });
   inputStream.once("close", cleanup);
+  void refresh({ force: true });
   return await completed;
 }

@@ -1,0 +1,140 @@
+{
+  "observedAt": "2026-09-07T02:56:35.600Z",
+  "node": "v24.15.0",
+  "scope": "Overview lifecycle, stale discovery, order and alias persistence",
+  "method": "targeted source replacement, not exhaustive Stryker generation",
+  "command": [
+    "/usr/bin/node",
+    "--test",
+    "--test-reporter=tap",
+    "--test-timeout=4000",
+    "test/overview.test.mjs",
+    "test/overview-lifecycle.test.mjs",
+    "test/dock-order.test.mjs",
+    "test/session-alias-catalog.test.mjs",
+    "test/storage-failures.test.mjs"
+  ],
+  "hashes": {
+    "src/dock-order.mjs": "f305a3ccc72c0a533f31766c0215101876871d0e7508cba920a20cd8f8539c25",
+    "src/overview.mjs": "b218cd694e3859efac8f0d8aed8ba02c4c8a4196353faebb9bb4845543b42e81",
+    "src/session-alias-catalog.mjs": "746a7d873dea728f30aa1786414877aa54a3d4e0830be99080042761e23a6ddc",
+    "test/dock-order.test.mjs": "9014f963f5d4f3efbf818182cb837796cba55383d38a486744b935d8cd7fe20a",
+    "test/overview-lifecycle.test.mjs": "c80a9aaf9662c89faad4f9de7821d086640f19921a35f95b211f66b91e999611",
+    "test/overview.test.mjs": "b295429d7d53953135039cf9d0415b471616f901f42b75253f72c0e476c9ac76",
+    "test/session-alias-catalog.test.mjs": "1d9dfe4b3ad8eef09d04f20833113fa398eaf9a4356f1288d8e89650fd50d467",
+    "test/storage-failures.test.mjs": "2cb75132aadf4cdc4a477ba815070057b494e69326cd585e3e5c2c6f9348c065"
+  },
+  "results": [
+    {
+      "id": "remove-on-first-miss",
+      "file": "src/overview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 48
+    },
+    {
+      "id": "remove-unavailable-provider",
+      "file": "src/overview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 48
+    },
+    {
+      "id": "ignore-manual-rank",
+      "file": "src/overview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 48
+    },
+    {
+      "id": "reverse-manual-move",
+      "file": "src/overview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 48
+    },
+    {
+      "id": "paint-over-native",
+      "file": "src/overview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 48
+    },
+    {
+      "id": "accept-late-discovery",
+      "file": "src/overview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 48
+    },
+    {
+      "id": "lose-forced-refresh",
+      "file": "src/overview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 48
+    },
+    {
+      "id": "leak-signal-listener",
+      "file": "src/overview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 48
+    },
+    {
+      "id": "block-exit-on-discovery",
+      "file": "src/overview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 48
+    },
+    {
+      "id": "skip-order-persist",
+      "file": "src/dock-order.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 48
+    },
+    {
+      "id": "skip-alias-persist",
+      "file": "src/session-alias-catalog.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 48
+    },
+    {
+      "id": "leak-order-temp",
+      "file": "src/dock-order.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 48
+    },
+    {
+      "id": "leak-alias-temp",
+      "file": "src/session-alias-catalog.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 48
+    }
+  ],
+  "artifacts": "/tmp/waga-qa-completion/overview-mutations-final",
+  "limitations": [
+    "TTY input/output are fake EventEmitters; actual screen rendering not measured",
+    "Atomic storage rename failure and sequential interleaved writers tested; simultaneous cross-process writes are not serialized",
+    "Targeted mutations, not every generated source mutation",
+    "Existing tests now clean overview loops on assertion failure, converting a process timeout to an assertion kill"
+  ]
+}

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import test from "node:test";
+import test, { afterEach } from "node:test";
 
 import {
   applyOverviewOrder,
@@ -13,9 +13,22 @@ import {
   nativeReturnHint,
   reconcileDiscoveredSessions,
   reconcileOverviewOrder,
-  runOverview,
+  runOverview as startOverview,
   selectOverviewSessions,
 } from "../src/overview.mjs";
+
+const runningOverviews = new Set();
+function runOverview(options) {
+  const running = startOverview(options);
+  runningOverviews.add({ input: options.inputStream, running });
+  return running;
+}
+afterEach(async () => {
+  const pending = [...runningOverviews];
+  runningOverviews.clear();
+  for (const { input } of pending) { input.emit("end"); input.emit("close"); }
+  await Promise.all(pending.map(({ running }) => running));
+});
 
 const sessions = [
   { id: "codex:1", provider: "codex", status: "idle", name: "API 검토", cwd: "/work/api", updatedAt: 20 },
