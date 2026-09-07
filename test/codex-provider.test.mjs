@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
 
 import { CodexProvider, parseCodexUsage, parseDaemonVersion } from "../src/providers/codex.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../src/managed-session-instructions.mjs";
 
 process.env.XDG_STATE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "waga-codex-test-state-"));
+const testStateDirectory = process.env.XDG_STATE_HOME;
+after(() => fs.rmSync(testStateDirectory, { recursive: true, force: true }));
 
 function harness(responder, options = {}) {
   const calls = [];
@@ -70,6 +72,49 @@ test("Codex partial thread read failure is not reported as a healthy complete sn
   });
   await assert.rejects(provider.list(), { code: "READ_FAILED" });
   assert.equal(calls.at(-1)[0], "close");
+});
+
+test("Codex maps generated native approval and user-input flags without calling them ready", async () => {
+  // Codex 0.153.2 generated ThreadStatus/ThreadActiveFlag schema.
+  for (const [status, expected] of [
+    [{ type: "active", activeFlags: ["waitingOnApproval"] }, "needs-input"],
+    [{ type: "active", activeFlags: ["waitingOnUserInput"] }, "needs-input"],
+    [{ type: "active", activeFlags: [] }, "working"],
+    [{ type: "notLoaded" }, "unavailable"],
+    [{ type: "systemError" }, "error"],
+    [{ type: "idle" }, "idle"],
+  ]) {
+    const { provider } = harness((method) => method === "thread/loaded/list" ? { data: ["t"] } : { thread: { id: "t", cwd: "/work", status } });
+    assert.equal((await provider.list())[0].status, expected);
+  }
+});
+
+test("Codex ask refuses a target that is no longer loaded without submitting", async () => {
+  const { provider, calls } = harness((method) => {
+    if (method === "thread/read") return { thread: { status: { type: "notLoaded" } } };
+    if (method === "turn/start") throw new Error("must not submit");
+    throw new Error(method);
+  });
+  await assert.rejects(provider.ask({ id: "codex:t", nativeId: "t" }, "hello", { requestId: "r" }), { code: "TARGET_UNAVAILABLE" });
+  assert.equal(calls.some(([method]) => method === "turn/start"), false);
+});
+
+test("hung Codex usage cannot indefinitely hold up session discovery", async () => {
+  let aborted = false;
+  const provider = new CodexProvider({
+    usageTimeoutMs: 10, eventLog: { record() {} },
+    run: async () => ({ stdout: JSON.stringify({ status: "running", socketPath: "/tmp/proof.sock" }) }),
+    clientFactory: async () => ({
+      initialize: async () => {}, close: async () => {},
+      request: async (method, _params, { signal } = {}) => {
+        if (method === "account/rateLimits/read") { signal?.addEventListener("abort", () => { aborted = true; }); return new Promise(() => {}); }
+        return { data: [], nextCursor: null };
+      },
+    }),
+  });
+  assert.deepEqual(await provider.list({ includeUsage: true }), []);
+  assert.equal(aborted, true);
+  assert.equal(provider.usageSnapshot(), null);
 });
 
 test("Codex connection recovery retries discovery but never repeats initialized operations", async () => {

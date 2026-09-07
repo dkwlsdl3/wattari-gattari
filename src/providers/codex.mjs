@@ -44,9 +44,9 @@ export function parseCodexUsage(result, observedAt = Date.now()) {
 }
 
 function publicStatus(status) {
-  if (status?.type === "active") return "working";
+  if (status?.type === "active") return status.activeFlags?.some((flag) => ["waitingOnApproval", "waitingOnUserInput"].includes(flag)) ? "needs-input" : "working";
   if (status?.type === "systemError") return "error";
-  return "idle";
+  return status?.type === "idle" ? "idle" : "unavailable";
 }
 
 function answerIn(items, turnId) {
@@ -121,18 +121,20 @@ export class CodexProvider {
   #daemonCacheMs;
   #daemonCache = null;
   #usageCacheMs;
+  #usageTimeoutMs;
   #usageCache = null;
   #usageRefresh = null;
   #eventLog;
   #loadedIds = null;
 
-  constructor({ run = defaultRun, clientFactory, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now, daemonCacheMs = 30_000, usageCacheMs = USAGE_CACHE_MS, eventLog = new EventLog() } = {}) {
+  constructor({ run = defaultRun, clientFactory, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now, daemonCacheMs = 30_000, usageCacheMs = USAGE_CACHE_MS, usageTimeoutMs = 1_000, eventLog = new EventLog() } = {}) {
     this.#run = run;
     this.#clientFactory = clientFactory ?? ((socketPath) => CodexAppServerClient.connectUnixWebSocket({ socketPath }));
     this.#wait = wait;
     this.#now = now;
     this.#daemonCacheMs = daemonCacheMs;
     this.#usageCacheMs = usageCacheMs;
+    this.#usageTimeoutMs = usageTimeoutMs;
     this.#eventLog = eventLog;
   }
 
@@ -183,7 +185,10 @@ export class CodexProvider {
     if (this.#usageRefresh) return this.#usageRefresh;
     this.#usageRefresh = Promise.resolve().then(async () => {
       try {
-        const result = await client.request("account/rateLimits/read");
+        const result = await readBeforeDeadline((signal) => client.request("account/rateLimits/read", undefined, { signal }), {
+          deadline: checkedAt + this.#usageTimeoutMs, now: this.#now,
+          error: Object.assign(new Error("Codex usage read timed out"), { code: "CODEX_USAGE_TIMEOUT" }),
+        });
         const value = parseCodexUsage(result, checkedAt);
         this.#usageCache = { checkedAt, value: value ?? this.#usageCache?.value ?? null };
       } catch {
@@ -279,6 +284,7 @@ export class CodexProvider {
       while (true) {
         const { thread } = await read("thread/read", { threadId: session.nativeId, includeTurns: false }, waitDeadline, busyError);
         if (thread.status?.type === "systemError") throw Object.assign(new Error(`Codex target is in systemError state: ${session.id}`), { code: "TARGET_ERROR" });
+        if (!["active", "idle"].includes(thread.status?.type)) throw Object.assign(new Error(`Codex target is unavailable: ${session.id}`), { code: "TARGET_UNAVAILABLE" });
         if (thread.status?.type !== "active") break;
         if (!waiting) { onProgress({ state: "waiting", target: session.id }); waiting = true; }
         await this.#wait(Math.min(pollIntervalMs, Math.max(1, waitDeadline - this.#now())));

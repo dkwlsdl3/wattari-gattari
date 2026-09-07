@@ -1,9 +1,42 @@
 import assert from "node:assert/strict";
 import { EventEmitter, getEventListeners } from "node:events";
+import fs from "node:fs";
+import http from "node:http";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
-import { WebSocket } from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 
 import { CodexAppServerClient } from "../src/codex-app-server.mjs";
+
+test("real disposable Unix WebSocket connects, initializes, times out and closes", { timeout: 3000 }, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-rpc-"));
+  const socketPath = path.join(root, "rpc.sock");
+  const server = http.createServer();
+  const ws = new WebSocketServer({ server });
+  let client;
+  const received = [];
+  t.after(async () => {
+    await client?.close();
+    for (const socket of ws.clients) socket.terminate();
+    await new Promise((resolve) => ws.close(resolve));
+    await new Promise((resolve) => server.close(resolve));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  ws.on("connection", (socket) => socket.on("message", (data) => {
+    const message = JSON.parse(data);
+    received.push(message);
+    if (message.method === "initialize") socket.send(JSON.stringify({ id: message.id, result: { userAgent: "proof" } }));
+  }));
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(socketPath, resolve); });
+  await assert.rejects(CodexAppServerClient.connectUnixWebSocket({ socketPath: "relative" }), { code: "CODEX_SOCKET_PATH_INVALID" });
+  client = await CodexAppServerClient.connectUnixWebSocket({ socketPath });
+  assert.equal((await client.initialize()).userAgent, "proof");
+  await assert.rejects(client.request("proof/read", {}, { timeoutMs: 10 }), { code: "CODEX_RPC_TIMEOUT" });
+  assert.deepEqual(received.map(({ method }) => method), ["initialize", "initialized", "proof/read"]);
+  await client.close();
+  await assert.rejects(client.request("closed", {}), { code: "CODEX_APP_SERVER_CLOSED" });
+});
 
 class FakeSocket extends EventEmitter {
   readyState = WebSocket.OPEN;
@@ -206,4 +239,15 @@ test("RPC notification and error paths do not require optional callbacks or an a
   const pending = assert.rejects(client.request("read", {}), { code: "CODEX_WS_BINARY_MESSAGE" });
   socket.emit("message", Buffer.from([0]), true);
   await pending;
+});
+
+test("close terminates an already-closing transport instead of leaving its handshake timer alive", async () => {
+  const socket = new FakeSocket();
+  socket.readyState = WebSocket.CLOSING;
+  let terminated = 0;
+  socket.terminate = () => { terminated++; socket.readyState = WebSocket.CLOSED; socket.emit("close"); };
+  const client = new CodexAppServerClient(socket);
+  await client.close();
+  await client.close();
+  assert.equal(terminated, 1);
 });

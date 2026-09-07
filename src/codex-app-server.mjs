@@ -97,7 +97,8 @@ export class CodexAppServerClient {
     if (this.#closed) return;
     this.#closed = true;
     this.#failAll(new AppServerError("CODEX_APP_SERVER_CLOSED", "Codex App Server client closed"));
-    if ([WebSocket.CLOSED, WebSocket.CLOSING].includes(this.#socket.readyState)) return;
+    if (this.#socket.readyState === WebSocket.CLOSED) return;
+    if (this.#socket.readyState === WebSocket.CLOSING) { this.#socket.terminate(); return; }
     await new Promise((resolve) => {
       const timer = setTimeout(() => { this.#socket.terminate(); resolve(); }, 1_000);
       this.#socket.once("close", () => { clearTimeout(timer); resolve(); });

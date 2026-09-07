@@ -72,3 +72,27 @@ test("Claude usage reader reuses valid credentials without exposing or rewriting
   assert.equal(usage.weekly.remainingPercent, 2);
   assert.equal(fs.readFileSync(credentialsPath, "utf8"), original);
 });
+
+test("default usage transport passes credentials through stdin and handles executable failures", { timeout: 3000 }, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-curl-"));
+  const previousPath = process.env.PATH;
+  t.after(() => { process.env.PATH = previousPath; fs.rmSync(root, { recursive: true, force: true }); });
+  fs.mkdirSync(path.join(root, ".claude"));
+  fs.writeFileSync(path.join(root, ".claude", ".credentials.json"), JSON.stringify({ claudeAiOauth: { accessToken: "proof-token", expiresAt: 100000 } }));
+  process.env.PATH = root;
+  const curl = path.join(root, "curl");
+  const install = (code) => fs.writeFileSync(curl, `#!${process.execPath}\n${code}\n`, { mode: 0o700 });
+  install(`let input = ''; process.stdin.on('data', chunk => input += chunk); process.stdin.on('end', () => {
+    const args = process.argv.slice(2);
+    if (args.some(arg => arg.includes('proof-token')) || !args.includes('--config') || !args.includes('--max-time') || !input.includes('Authorization: Bearer proof-token')) process.exit(9);
+    process.stdout.write(JSON.stringify({seven_day:{utilization:33}})+'\\n200');
+  });`);
+  const options = { homeDirectory: root, now: () => 1000 };
+  assert.equal((await readClaudeUsage(options)).weekly.remainingPercent, 67);
+  for (const code of ["process.exit(7);", "process.stdout.write('no status');", "process.stdout.write('{}\\n401');"]) {
+    install(code);
+    assert.equal(await readClaudeUsage(options), null);
+  }
+  fs.unlinkSync(curl);
+  assert.equal(await readClaudeUsage(options), null);
+});
