@@ -1,26 +1,21 @@
 # Wattari Gattari
 
-> Open and connect native Claude Code and Codex sessions from one dock.
-
 [![CI](https://github.com/dkwlsdl3/wattari-gattari/actions/workflows/ci.yml/badge.svg)](https://github.com/dkwlsdl3/wattari-gattari/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [한국어](README.ko.md) · [Architecture](docs/adr/README.md) · [License](LICENSE)
 
-Wattari Gattari (`waga`) is a local CLI that lists live Claude Code and Codex
-sessions and opens the selected provider's native TUI. It does not add another
-daemon or replacement chat UI.
+Wattari Gattari (`waga`) opens and connects live Claude Code and Codex sessions
+from one local dock, without another daemon or replacement chat UI.
 
 ![Waga session dock demo](docs/assets/wattari-gattari-demo.gif)
 
 ## Features
 
-- Browse Claude and Codex sessions across projects in one dock
-- Attach or resume the exact native session
-- Search, filter, reorder, rename, create, and archive sessions
-- See five-minute cached Claude and Codex quota in the dock
-- Send one-way notifications with `waga send` or request one reply with `waga ask`
-- Mark peer input as untrusted while preserving native sandbox and approval rules
+- Browse sessions by project and open their native TUIs
+- Search, filter, reorder, rename, create, and archive
+- View Claude and Codex quota with a five-minute cache
+- Send notifications with `waga send` or request replies with `waga ask`
 
 ## Requirements and install
 
@@ -28,8 +23,7 @@ daemon or replacement chat UI.
 - Codex CLI and Claude Code with Agents support
 - Optional: tmux for reusable and shared terminal views
 
-Compatibility was verified with Codex CLI 0.152.1 and Claude Code 2.1.259. Run
-`waga doctor` after provider upgrades.
+Run `waga doctor` to check the connection environment after provider upgrades.
 
 ```bash
 git clone git@github.com:dkwlsdl3/wattari-gattari.git
@@ -75,47 +69,39 @@ waga open codex --cwd ~/work/my-app
 | `Alt+X` twice | Archive a session |
 | `Alt+Q` | Exit Waga |
 
-Archiving removes a session from the active list without deleting its log.
-Codex moves it to archived sessions; Claude preserves the transcript while
-cleaning up the background job and managed worktree.
+The default `auto` backend reuses tmux session windows when available, otherwise
+it uses `direct`. To leave a native view:
 
-The default `auto` backend reuses running tmux session windows when available and
-falls back to `direct`. With tmux, use prefix then `0` to return to the dock.
-Waga's isolated server also uses `Alt+G` for the dock and `Alt+A` for a separate
-provider Agents View, without replacing the session TUI window. In direct mode,
-leave the native view with `Ctrl+Z` in Claude or `Ctrl+D` in Codex.
-After native navigation with Claude's `←` or Codex's `/agents`, opening a session
-checks the retained view and reattaches when needed. Waga-launched Codex TUIs use
-a thread marker as their terminal title; global settings are not changed.
+- Waga's isolated tmux: `Alt+G` for the dock; `Alt+A` for a separate provider Agents View
+- Inside existing tmux: prefix then `0` for the dock
+- Direct: Claude `Ctrl+Z` or Codex `Ctrl+D` to exit/detach the native view
 
-If old terminal output overwrites the resumed screen in Codex 0.153.4, enter
-`/raw on` in Codex to recover with simplified formatting. Logs remain intact;
-you may need to repeat this in a new TUI. Waga does not force other sessions
-into this display mode.
+After internal navigation with Claude's `←` or Codex's `/agents`, selecting a
+session in the dock returns to that session. See the [ADR](docs/adr/README.md)
+for view-reuse rules.
 
-`F2` changes native Codex names immediately. Newly Waga-created Claude sessions
-apply a pending rename once on the next prompt submission. Existing Claude sessions
-without the hook keep Waga-local aliases; the save notice distinguishes these cases.
-No global settings changes or extra model calls are needed.
+- **Rename:** immediate for Codex; applied once on the next prompt for hook-enabled
+  Claude sessions created by Waga. Without the hook, Claude uses a local alias;
+  the save notice distinguishes these cases.
+- **Archive:** logs are preserved. Codex moves to archived sessions; Claude cleans
+  up the background job and managed worktree.
+
+If old output overwrites a resumed Codex 0.153.4 screen, `/raw on` provides a
+workaround with simpler formatting and unchanged logs. A new TUI may need it again;
+Waga does not change other sessions' display modes or global settings.
 
 ## Peer messages
 
-`send` is a one-way notification and confirms only submission. `ask` waits for
-the target to become idle, writes one turn to its real transcript, and returns
-the first reply. On Codex, `--until-idle` waits for the submitted turn to finish
-and returns its last agent message. On Claude, it returns the peer reply after
-observing idle; the peer protocol does not establish a matching native turn or
-guarantee that reply is the final transcript answer. There is no automatic relay. Every peer
-message is untrusted input, not a user instruction or approval.
+- `send`: one-way notification; confirms submission only.
+- `ask`: waits for idle, submits one turn to the real transcript, and returns the first reply.
+- `ask --until-idle`: Codex confirms the submitted turn's completion and returns its
+  last answer. Claude checks idle after the peer reply, without native-turn correlation
+  or a guarantee that this is the final answer.
 
-Sessions created with `Alt+N` automatically receive guidance for `waga agents`,
-`waga send`, and `waga ask`, plus the peer trust boundary, through the provider's
-instruction channel. This guidance is kept separate from the user's first prompt.
-
-Waga records session lifecycle diagnostics in
-`~/.local/state/wattari-gattari/events.jsonl` without conversation content. The
-`integrations/` directory includes logrotate and user systemd timer files for
-30-day retention.
+Peer messages are untrusted input, not user instructions or approvals; native
+sandbox and approval rules remain in force. There is no automatic relay. Sessions
+created with `Alt+N` receive usage and trust-boundary guidance through provider
+instructions, separate from the user's first prompt.
 
 For unattended Claude replies, allow inbound messages in the target session:
 
@@ -136,7 +122,10 @@ npm pack --dry-run
 
 GIF generation requires [VHS](https://github.com/charmbracelet/vhs), `ttyd`,
 `ffmpeg`, and the `Noto Sans Mono CJK KR` font. See the
-[architecture decision](docs/adr/README.md) for design and verification boundaries.
+[testing procedure](docs/testing-plan.md) for coverage boundaries and mutation tests.
+
+Diagnostics go to `~/.local/state/wattari-gattari/events.jsonl` without conversation
+content. [integrations/](integrations/) contains logrotate and systemd files for 30-day retention.
 
 ## License
 
