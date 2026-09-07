@@ -1,0 +1,72 @@
+{
+  "observedOn": "2026-09-07",
+  "baselineCommit": "1dfda45c340c1e5165792616d1b18cbebb5981e5",
+  "scope": "Provider read deadlines, Claude idle-state gating and shared usage-cache recovery; not the whole provider block",
+  "sourceSha256": {
+    "src/bridge/deadline.mjs": "1172d87e41f6ba3387822eeb2fa5af268808a5f4b2013dd4652889bcf74b011b",
+    "src/providers/claude.mjs": "45ac079338804eda1418651124e573ee80abe8918c74a2b0ffad5f3902393565",
+    "src/providers/codex.mjs": "d262396ea790364cafe905f49eb570d655052b989514925d25a4f11f65bcbebf"
+  },
+  "testSha256": {
+    "test/deadline.test.mjs": "2fd5d502b91e3f3877996877726c9d7b964064c40ca810ae32a7da4c97c3bbc1",
+    "test/provider-waiting.test.mjs": "fb041d2fce5f1155543e9d394023c95c9608665025b9cecb82b6e4e9020e06b2"
+  },
+  "reproducedAndFixed": [
+    "Both providers could submit work after their busy-wait deadline when a late read reported idle; Codex could also accept a late reply.",
+    "Stalled idle/reply reads could bypass the poll-loop timeout. A shared deadline helper now bounds reads, propagates abort to Codex RPC or the Claude read-only CLI adapter, and clears its timer. It does not interrupt remote work or retry submission.",
+    "Claude treated needs-input and unavailable as idle. Only idle now passes; needs-input waits without granting approval and unavailable rejects before endpoint creation.",
+    "Claude completion waiting could report TARGET_BUSY_TIMEOUT after submission. It now shares the remaining reply budget and reports REPLY_TIMEOUT.",
+    "A synchronously throwing injected usage adapter could leave the refresh promise latched forever in both providers. Schedule adapter execution after assigning the in-flight promise. Default adapters are async: this reproducer covers the injection contract, not a proven live outage.",
+    "The new deadline helper splits durations above Node's maximum timer delay instead of overflowing to 1ms."
+  ],
+  "regressionEvidence": {
+    "initialNewTests": { "tests": 9, "failedBeforeFix": 9, "passedAfterFix": 9 },
+    "oldProviderReplay": { "tests": 20, "passed": 6, "failed": 14, "cancelled": 0, "skipped": 0, "note": "Only the two provider files were replaced with baseline source in an isolated copy; the newly added deadline helper remained for its own tests." }
+  },
+  "functionReview": {
+    "readBeforeDeadline": "Past/exact/just-before deadlines, sync and async failure, stalled reads, abort reason, late rejection, timer cleanup and long-delay chunking. Fake time makes boundary checks deterministic.",
+    "ClaudeProvider.list/defaultRun": "Signal forwarded through the real list method to an injected read-only CLI runner; no live CLI process was aborted during verification.",
+    "ClaudeProvider.#waitUntilIdle": "Strict idle, approval waiting, unavailable/missing targets, decoys, current socket selection, bounded backoff and one progress event per phase. list identity invariant is id=claude:sessionId.",
+    "ClaudeProvider.ask": "Pre-submit deadline, no duplicate send, reply budget shared with completion, approval-to-idle transitions and endpoint finally-stop. Native final-answer provenance remains outside this block.",
+    "CodexProvider.ask": "Late idle/reply rejection and stalled thread/read, thread/items/list and thread/turns/list. Abort only the local request, close the client, no interrupt/archive/resend. Existing matching-turn and completion tests also rerun.",
+    "Both #refreshUsage methods": "Exact cache-expiry boundary, synchronous exception recovery, shared in-flight requests, negative caching and preservation of last-good value/observedAt after rejected or invalid refreshes. Refresh frequency remains unchanged."
+  },
+  "stryker": {
+    "version": "10.0.0", "node": "24.15.0", "runner": "command", "coverageAnalysis": "off", "workers": 1,
+    "timeoutMS": 2500, "timeoutFactor": 2,
+    "ranges": ["src/bridge/deadline.mjs", "src/providers/claude.mjs:123-138", "src/providers/claude.mjs:201-215", "src/providers/codex.mjs:159-175"],
+    "command": "node --test --test-reporter=tap --test-timeout=1000 test/deadline.test.mjs test/provider-waiting.test.mjs",
+    "first": { "focusedTests": 20, "mutants": 111, "killed": 96, "processTimeouts": 1, "survived": 14, "errors": 0, "wallSeconds": 39 },
+    "final": { "focusedTests": 23, "mutants": 121, "killed": 112, "processTimeouts": 1, "survived": 8, "errors": 0, "wallSeconds": 40 },
+    "comparisonNote": "The helper grew by ten mutants for long-duration timer safety; totals are not identical scopes. The unchanged provider mutation subset improved from 77 killed/1 timeout/14 survived to 84 killed/1 timeout/7 survived.",
+    "snapshotNote": "Exact test snapshots are archived. The final Stryker snapshot precedes replacing a vacuous test calls assertion with an endpoint-creation counter. The final-tree replay below includes that stronger assertion.",
+    "classificationNote": "Stryker Killed also includes Node test-timeout failures; the mechanical replay separates them below."
+  },
+  "finalTreeReplay": {
+    "mutants": 121, "focusedTests": 23, "perTestTimeoutMs": 1000, "processTimeoutMs": 5000, "syntaxCheckedEach": true,
+    "killed": 99, "testTimeouts": 13, "processTimeouts": 1, "survived": 8, "unresolvedSyntaxOrRunnerErrors": 0,
+    "syntaxRepair": "Two raw LogicalOperator substitutions initially failed parsing because JavaScript forbids mixing && and ?? without parentheses. Replayed IDs 43 and 115 with the AST-equivalent grouping Stryker uses; both failed tests. Initial syntax failures were not counted as detections.",
+    "timeoutReview": "ID 60 replaces the entire body of while(true) with an empty block. This is a non-yielding infinite loop, stopped by the process ceiling and reported separately from assertions/test deadlines.",
+    "baselineAndRestoredPassed": true,
+    "fullSuiteReplay": { "survivorsRetested": 8, "stillSurvived": 8, "testsPerRun": 192, "perTestTimeoutMs": 2000, "restoredPassed": true }
+  },
+  "survivorReview": [
+    { "id": "11", "file": "src/bridge/deadline.mjs", "classification": "accepted-low-risk", "reason": "At exactly the maximum Node timer duration, >= adds one zero-delay scheduling hop before abort. Late results still reject; this is a timer-granularity difference, not universally equivalent." },
+    { "id": "44", "file": "src/providers/claude.mjs", "classification": "equivalent-for-contract", "reason": "Without a cached value the removed optional chain throws into the adjacent catch, which stores the same checkedAt/null cache result." },
+    { "id": "54", "file": "src/providers/claude.mjs", "classification": "accepted-low-risk", "reason": "Only the busy-timeout diagnostic becomes empty; the error code and no-submission behavior remain checked." },
+    { "id": "67", "file": "src/providers/claude.mjs", "classification": "equivalent-for-discovered-sessions", "reason": "Discovered id is derived from sessionId, so both equalities agree for valid bridge inputs. Arbitrarily inconsistent injected session objects are outside this equivalence claim." },
+    { "id": "68", "file": "src/providers/claude.mjs", "classification": "equivalent-for-discovered-sessions", "reason": "Keeping only sessionId equality preserves matching under the discovered-session identity invariant; decoy and missing-target rejection are checked." },
+    { "id": "70", "file": "src/providers/claude.mjs", "classification": "equivalent-for-discovered-sessions", "reason": "Keeping only derived id equality preserves matching under the same invariant." },
+    { "id": "81", "file": "src/providers/claude.mjs", "classification": "accepted-low-risk", "reason": "Only the unavailable-target explanation is empty; public error code and no endpoint creation remain checked." },
+    { "id": "116", "file": "src/providers/codex.mjs", "classification": "equivalent-for-contract", "reason": "Same adjacent-catch behavior as Claude mutant 44; no externally different cache result." }
+  ],
+  "verification": { "tests": 192, "passed": 192, "failed": 0, "cancelled": 0, "skipped": 0, "lineCoverage": 91.66, "branchCoverage": 80.52, "functionCoverage": 90.46, "deadlineHelperCoverage": "100/100/100", "benchmarkPassed": true, "packDryRunFiles": 37 },
+  "artifacts": "Downloads/waga-qa-waiting-2026-09-07-D3h9ks: raw reports, test snapshots, configs, locked tooling, before-fix replay, mutation replay scripts/TAP logs and standard verification logs",
+  "limitations": [
+    "The deadlines cover idle/reply reads, not the entire CLI command: discovery, connection/initialization, submission acknowledgement and endpoint shutdown have separate remaining review boundaries.",
+    "No native agent session, daemon, user configuration or actual credentials were modified; remote agent behavior and Claude final-answer provenance are not proven by these mocks.",
+    "Response pagination, peer receive/shutdown and usage transport/authentication/parser failures remain in TODO.md. Usage-cache recovery here assumes the reader eventually settles.",
+    "The benchmark measures in-memory processing only, not provider/TUI latency.",
+    "This is a selected mutation scope, not a provider-wide reliability score. Hash, dependency, environment or configuration changes require reassessment; tests are not frozen."
+  ]
+}

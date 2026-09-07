@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { buildPeerEnvelope } from "../bridge/envelope.mjs";
+import { readBeforeDeadline } from "../bridge/deadline.mjs";
 import { readClaudeUsage } from "../claude-usage.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
 import { defaultClaudeAliasPath, SessionAliasCatalog } from "../session-alias-catalog.mjs";
@@ -14,8 +15,8 @@ const execFileAsync = promisify(execFile);
 const SHORT_ID = /^[0-9a-f]{8}$/i;
 const USAGE_CACHE_MS = 5 * 60_000;
 
-async function defaultRun(args, { cwd } = {}) {
-  return execFileAsync("claude", args, { cwd, encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 30_000 });
+async function defaultRun(args, { cwd, signal } = {}) {
+  return execFileAsync("claude", args, { cwd, signal, encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 30_000 });
 }
 
 function canonical(value) {
@@ -83,13 +84,13 @@ export class ClaudeProvider {
     this.#usageCacheMs = usageCacheMs;
   }
 
-  async list({ cwd, includeUsage = false } = {}) {
+  async list({ cwd, includeUsage = false, signal } = {}) {
     if (includeUsage) void this.#refreshUsage();
     const expectedCwd = cwd ? canonical(cwd) : null;
     const aliases = this.#aliases.load();
     const args = ["agents", "--json"];
     if (expectedCwd) args.push("--cwd", expectedCwd);
-    const { stdout } = await this.#run(args, { cwd: expectedCwd ?? undefined });
+    const { stdout } = await this.#run(args, { cwd: expectedCwd ?? undefined, ...(signal ? { signal } : {}) });
     const sessions = [];
     for (const row of parseClaudeAgents(stdout)) {
       if (!processAlive(row.pid)) continue;
@@ -123,7 +124,7 @@ export class ClaudeProvider {
     const checkedAt = this.#now();
     if (this.#usageCache && checkedAt - this.#usageCache.checkedAt < this.#usageCacheMs) return;
     if (this.#usageRefresh) return this.#usageRefresh;
-    this.#usageRefresh = (async () => {
+    this.#usageRefresh = Promise.resolve().then(async () => {
       try {
         const value = await this.#usageReader();
         this.#usageCache = { checkedAt, value: value ?? this.#usageCache?.value ?? null };
@@ -132,7 +133,7 @@ export class ClaudeProvider {
       } finally {
         this.#usageRefresh = null;
       }
-    })();
+    });
     return this.#usageRefresh;
   }
 
@@ -182,11 +183,13 @@ export class ClaudeProvider {
       onProgress({ state: "submitted", target: session.id });
       const answerTimeout = replyTimeoutMs ?? fallbackTimeout;
       const replyDeadline = this.#now() + answerTimeout;
-      const reply = await endpoint.waitForReply(current.socketPath, messageId, { timeoutMs: answerTimeout });
+      const completionError = Object.assign(new Error(`Claude session did not ${untilIdle ? "complete" : "reply"} within ${answerTimeout}ms`), { code: "REPLY_TIMEOUT" });
+      const reply = await readBeforeDeadline(() => endpoint.waitForReply(current.socketPath, messageId, { timeoutMs: answerTimeout }), {
+        deadline: replyDeadline, now: this.#now, error: completionError,
+      });
       if (untilIdle) {
         const remaining = replyDeadline - this.#now();
-        if (remaining <= 0) throw Object.assign(new Error(`Claude session did not complete within ${answerTimeout}ms`), { code: "REPLY_TIMEOUT" });
-        await this.#waitUntilIdle(current, { timeoutMs: remaining, onProgress, waitingState: "working" });
+        await this.#waitUntilIdle(current, { timeoutMs: remaining, onProgress, waitingState: "working", timeoutError: completionError });
       }
       onProgress({ state: "replied", target: session.id });
       return { target: session.id, requestId, messageId, reply: reply.text, exchangeCount: 1, autoForwarded: false };
@@ -195,17 +198,17 @@ export class ClaudeProvider {
     }
   }
 
-  async #waitUntilIdle(session, { timeoutMs, onProgress, waitingState = "waiting" }) {
+  async #waitUntilIdle(session, { timeoutMs, onProgress, waitingState = "waiting", timeoutError }) {
     const deadline = this.#now() + timeoutMs;
+    const error = timeoutError ?? Object.assign(new Error(`Claude target stayed busy for ${timeoutMs}ms`), { code: "TARGET_BUSY_TIMEOUT" });
     let waiting = false;
     let pollIntervalMs = 500;
     while (true) {
-      const sessions = await this.list({ cwd: session.projectCwd });
+      const sessions = await readBeforeDeadline((signal) => this.list({ cwd: session.projectCwd, signal }), { deadline, now: this.#now, error });
       const current = sessions.find((candidate) => candidate.id === session.id || candidate.sessionId === session.sessionId);
-      if (!current) throw Object.assign(new Error(`Claude target is unavailable: ${session.id}`), { code: "TARGET_UNAVAILABLE" });
-      if (current.status !== "working") return current;
+      if (!current || !["idle", "working", "needs-input"].includes(current.status)) throw Object.assign(new Error(`Claude target is unavailable: ${session.id}`), { code: "TARGET_UNAVAILABLE" });
+      if (current.status === "idle") return current;
       if (!waiting) { onProgress({ state: waitingState, target: session.id }); waiting = true; }
-      if (this.#now() >= deadline) throw Object.assign(new Error(`Claude target stayed busy for ${timeoutMs}ms`), { code: "TARGET_BUSY_TIMEOUT" });
       await this.#wait(Math.min(pollIntervalMs, Math.max(1, deadline - this.#now())));
       pollIntervalMs = Math.min(5_000, pollIntervalMs * 2);
     }

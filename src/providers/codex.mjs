@@ -3,6 +3,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { buildPeerEnvelope } from "../bridge/envelope.mjs";
+import { readBeforeDeadline } from "../bridge/deadline.mjs";
 import { CodexAppServerClient } from "../codex-app-server.mjs";
 import { EventLog } from "../event-log.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
@@ -159,7 +160,7 @@ export class CodexProvider {
     const checkedAt = this.#now();
     if (this.#usageCache && checkedAt - this.#usageCache.checkedAt < this.#usageCacheMs) return;
     if (this.#usageRefresh) return this.#usageRefresh;
-    this.#usageRefresh = (async () => {
+    this.#usageRefresh = Promise.resolve().then(async () => {
       try {
         const result = await client.request("account/rateLimits/read");
         const value = parseCodexUsage(result, checkedAt);
@@ -169,7 +170,7 @@ export class CodexProvider {
       } finally {
         this.#usageRefresh = null;
       }
-    })();
+    });
     return this.#usageRefresh;
   }
 
@@ -248,14 +249,17 @@ export class CodexProvider {
       const busyTimeout = waitTimeoutMs ?? fallbackTimeout;
       const answerTimeout = replyTimeoutMs ?? fallbackTimeout;
       const waitDeadline = this.#now() + busyTimeout;
+      const busyError = Object.assign(new Error(`Codex target stayed busy for ${busyTimeout}ms`), { code: "TARGET_BUSY_TIMEOUT" });
+      const read = (method, params, deadline, error) => readBeforeDeadline(
+        (signal) => client.request(method, params, { signal }), { deadline, now: this.#now, error },
+      );
       let waiting = false;
       let pollIntervalMs = 250;
       while (true) {
-        const { thread } = await client.request("thread/read", { threadId: session.nativeId, includeTurns: false });
+        const { thread } = await read("thread/read", { threadId: session.nativeId, includeTurns: false }, waitDeadline, busyError);
         if (thread.status?.type === "systemError") throw Object.assign(new Error(`Codex target is in systemError state: ${session.id}`), { code: "TARGET_ERROR" });
         if (thread.status?.type !== "active") break;
         if (!waiting) { onProgress({ state: "waiting", target: session.id }); waiting = true; }
-        if (this.#now() >= waitDeadline) throw Object.assign(new Error(`Codex target stayed busy for ${busyTimeout}ms`), { code: "TARGET_BUSY_TIMEOUT" });
         await this.#wait(Math.min(pollIntervalMs, Math.max(1, waitDeadline - this.#now())));
         pollIntervalMs = Math.min(2_000, pollIntervalMs * 2);
       }
@@ -273,39 +277,39 @@ export class CodexProvider {
       onProgress({ state: "submitted", target: session.id });
       const turnId = started.turn.id;
       const replyDeadline = this.#now() + answerTimeout;
+      const replyError = Object.assign(new Error(`Codex session did not ${untilIdle ? "complete" : "reply"} within ${answerTimeout}ms`), { code: "REPLY_TIMEOUT" });
       while (this.#now() < replyDeadline) {
         if (untilIdle) {
-          const turns = await client.request("thread/turns/list", {
+          const turns = await read("thread/turns/list", {
             threadId: session.nativeId,
             limit: 100,
             sortDirection: "desc",
             itemsView: "summary",
-          });
+          }, replyDeadline, replyError);
           const turn = turns.data.find((candidate) => candidate.id === turnId);
           if (turn?.status === "failed" || turn?.status === "interrupted") {
             throw Object.assign(new Error(`Codex turn ${turn.status}: ${turnId}`), { code: "TARGET_ERROR" });
           }
           if (turn?.status === "completed") {
-            const page = await client.request("thread/items/list", { threadId: session.nativeId, turnId, limit: 100, sortDirection: "desc" });
+            const page = await read("thread/items/list", { threadId: session.nativeId, turnId, limit: 100, sortDirection: "desc" }, replyDeadline, replyError);
             const reply = answerIn(page.data, turnId);
             if (!reply) throw Object.assign(new Error(`Codex turn completed without a reply: ${turnId}`), { code: "REPLY_MISSING" });
             onProgress({ state: "replied", target: session.id });
             return { target: session.id, requestId, turnId, reply, exchangeCount: 1, autoForwarded: false };
           }
         } else {
-          const page = await client.request("thread/items/list", { threadId: session.nativeId, turnId, limit: 100, sortDirection: "desc" });
+          const page = await read("thread/items/list", { threadId: session.nativeId, turnId, limit: 100, sortDirection: "desc" }, replyDeadline, replyError);
           const reply = answerIn(page.data, turnId);
           if (reply) {
             onProgress({ state: "replied", target: session.id });
             return { target: session.id, requestId, turnId, reply, exchangeCount: 1, autoForwarded: false };
           }
         }
-        const { thread } = await client.request("thread/read", { threadId: session.nativeId, includeTurns: false });
+        const { thread } = await read("thread/read", { threadId: session.nativeId, includeTurns: false }, replyDeadline, replyError);
         if (thread.status?.type === "systemError") throw Object.assign(new Error(`Codex turn failed: ${turnId}`), { code: "TARGET_ERROR" });
         await this.#wait(Math.min(250, Math.max(1, replyDeadline - this.#now())));
       }
-      const action = untilIdle ? "complete" : "reply";
-      throw Object.assign(new Error(`Codex session did not ${action} within ${answerTimeout}ms`), { code: "REPLY_TIMEOUT" });
+      throw replyError;
     });
   }
 
