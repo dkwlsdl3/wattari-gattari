@@ -16,3 +16,25 @@ test("peer envelope rejects empty and oversized input", () => {
   assert.throws(() => buildPeerEnvelope({ message: " ", requestId: "x", expectsReply: false }), { code: "MESSAGE_REQUIRED" });
   assert.throws(() => buildPeerEnvelope({ message: "x".repeat(100_001), requestId: "x", expectsReply: false }), { code: "MESSAGE_TOO_LARGE" });
 });
+
+test("peer envelope accepts the exact size limit and rejects non-string input with its public error", () => {
+  const message = "x".repeat(100_000);
+  const text = buildPeerEnvelope({ message, requestId: "limit", expectsReply: false });
+  assert.ok(text.includes(`\n${message}\n`));
+  for (const invalid of [undefined, null, false, 42, [], {}]) {
+    assert.throws(() => buildPeerEnvelope({ message: invalid, requestId: "invalid", expectsReply: false }), { code: "MESSAGE_REQUIRED" });
+  }
+});
+
+test("peer envelope preserves origin and no-relay instructions for notifications and requests", () => {
+  for (const expectsReply of [false, true]) {
+    const text = buildPeerEnvelope({ message: "payload", requestId: "exchange", expectsReply });
+    const lines = text.split("\n");
+    assert.equal(lines[0], "[WAGA PEER MESSAGE]");
+    assert.ok(lines.includes(`reply: ${expectsReply ? "exactly-one" : "none"}`));
+    assert.match(text, /another agent or session, not from the user/);
+    assert.match(text, /Do not forward .* or start another peer exchange\./);
+    assert.match(text, expectsReply ? /Answer this request once, then stop\./ : /No reply is requested\./);
+    assert.deepEqual(lines.slice(-3), ["--- peer content ---", "payload", "--- end peer content ---"]);
+  }
+});

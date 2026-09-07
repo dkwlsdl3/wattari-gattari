@@ -60,6 +60,30 @@ test("ambiguous unprefixed name fails with exact candidates", async () => {
   await assert.rejects(bridge.send("same", "hello"), { code: "TARGET_AMBIGUOUS" });
 });
 
+test("send resolves each exact identity among decoys and never sends to a missing or partial target", async () => {
+  const calls = [];
+  const target = { id: "codex:target", nativeId: "native-target", sessionId: "thread-target", provider: "codex", name: "review" };
+  const decoy = { id: "codex:other", nativeId: "native-other", sessionId: "thread-other", provider: "codex", name: "other" };
+  const bridge = new SessionBridge({ providers: [provider("codex", [decoy, target], calls)] });
+
+  for (const identity of [target.id, target.nativeId, target.sessionId, target.name]) {
+    calls.length = 0;
+    const result = await bridge.send(identity, "check this", { cwd: "/work/project" });
+    assert.equal(result.target, target.id);
+    assert.equal(typeof result.requestId, "string");
+    assert.ok(result.requestId.length > 0);
+    assert.deepEqual(calls, [
+      ["list", { cwd: "/work/project" }],
+      ["send", target, "check this", { requestId: result.requestId, expectsReply: false }],
+    ]);
+  }
+  for (const missing of ["codex:missing", "native-", "thread-", "rev"]) {
+    calls.length = 0;
+    await assert.rejects(bridge.send(missing, "must not be sent"), { code: "SESSION_NOT_FOUND" });
+    assert.deepEqual(calls, [["list", { cwd: undefined }]]);
+  }
+});
+
 test("create delegates one prompt to the selected native provider", async () => {
   const calls = [];
   const bridge = new SessionBridge({ providers: [provider("claude", [], calls), provider("codex", [], calls)] });
