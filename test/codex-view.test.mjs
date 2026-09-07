@@ -22,8 +22,18 @@ test("Codex view refuses missing, malformed, short, or unknown title formats", (
   }
   assert.equal(retainedCodexViewMatches(undefined, marker(one), chat), false);
   assert.equal(retainedCodexViewMatches("not-a-thread", "not-a-thread", chat), false);
-  assert.equal(retainedCodexViewMatches(one, marker(one), " \n"), false);
+  assert.equal(retainedCodexViewMatches(one, marker(one), ""), false);
   assert.equal(retainedCodexViewMatches(one, marker(one), undefined), false);
+});
+
+test("Codex blank top rows do not override a matching thread title", () => {
+  // Codex 0.153.4 resume proof: capture-pane -S 0 -E 1 returned two blank rows.
+  for (const frame of ["\n\n", " \n"]) {
+    assert.equal(retainedCodexViewMatches(one, marker(one), frame), true);
+    assert.equal(retainedCodexViewMatches(one, one, frame), true);
+    assert.equal(retainedCodexViewMatches(one, marker(two), frame), false);
+    assert.equal(retainedCodexViewMatches(one, "", frame), false);
+  }
 });
 
 test("Codex truncated titles with known prefix collisions are not reused", () => {

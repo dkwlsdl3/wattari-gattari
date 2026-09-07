@@ -88,6 +88,11 @@ After native navigation with Claude's `←` or Codex's `/agents`, opening a sess
 checks the retained view and reattaches when needed. Waga-launched Codex TUIs use
 a thread marker as their terminal title; global settings are not changed.
 
+If old terminal output overwrites the resumed screen in Codex 0.153.4, enter
+`/raw on` in Codex to recover with simplified formatting. Logs remain intact;
+you may need to repeat this in a new TUI. Waga does not force other sessions
+into this display mode.
+
 `F2` changes native Codex names immediately. Newly Waga-created Claude sessions
 apply a pending rename once on the next prompt submission. Existing Claude sessions
 without the hook keep Waga-local aliases; the save notice distinguishes these cases.

@@ -139,6 +139,7 @@ test("real isolated tmux reuses, revives, and removes one retained session view"
     process.stdin.on('data', input => {
       process.stdout.write('\\x1b[2J\\x1b[H');
       if(input.toString() === 'a') console.log('  Agent command center\\n  0 need input   0 working   2 ready');
+      else if(input.toString() === 'c') console.log('\\n\\n\\nWAGA_PROOF_BLANK_TOP');
       else {title(${JSON.stringify(otherId)}); console.log('WAGA_PROOF_CODEX_TWO');}
     });`;
   const codexCommand = { command: process.execPath, args: ["-e", codexCode], cwd: root };
@@ -149,6 +150,13 @@ test("real isolated tmux reuses, revives, and removes one retained session view"
   let retainedPid = await codexPid();
   await workspace.focusOrOpen(session, codexCommand);
   assert.equal(await codexPid(), retainedPid, "Codex unchanged view must be reused");
+  await call(["send-keys", "-t", codexView.windowId, "c"]);
+  await waitFor(async () => (await codexFrame()).includes("WAGA_PROOF_BLANK_TOP"));
+  assert.equal((await call(["capture-pane", "-p", "-t", codexView.windowId, "-S", "0", "-E", "1"])).stdout, "\n\n");
+  await call(["select-window", "-t", `${sessionName}:overview`]);
+  await workspace.focusOrOpen(session, codexCommand);
+  assert.equal(await codexPid(), retainedPid, "blank top rows must not respawn the same native thread");
+  assert.ok((await codexFrame()).includes("WAGA_PROOF_BLANK_TOP"), "retain the actual native frame");
   for (const openOther of [false, true]) {
     await call(["send-keys", "-t", codexView.windowId, "a"]);
     await waitFor(async () => (await codexFrame()).includes("Agent command center"));

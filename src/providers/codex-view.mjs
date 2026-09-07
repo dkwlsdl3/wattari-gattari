@@ -7,8 +7,10 @@ export function retainedCodexViewMatches(nativeId, title, frame, knownNativeIds 
   const marker = String(title).trim();
   if (marker !== nativeId && marker !== `${nativeId.slice(0, 29)}...`) return false;
   if (marker !== nativeId && knownNativeIds.some((id) => id !== nativeId && typeof id === "string" && `${id.slice(0, 29)}...` === marker)) return false;
-  if (typeof frame !== "string") return false;
+  if (typeof frame !== "string" || frame.length === 0) return false;
   const firstLine = String(frame).trimStart().split("\n", 1)[0].trim();
   // /agents retains the previous thread's title (and PID) in this version.
-  return Boolean(firstLine) && firstLine !== "Agent command center";
+  // Blank top rows also occur in the same thread (including broken history
+  // redraws). They are not evidence of navigation and must not trigger resume.
+  return firstLine !== "Agent command center";
 }
