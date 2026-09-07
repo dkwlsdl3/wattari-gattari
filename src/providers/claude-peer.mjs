@@ -92,6 +92,7 @@ export class ClaudePeerEndpoint {
   #socketPath = null;
   #registryPath = null;
   #keyPath = null;
+  #ownedPaths = new Set();
   #records = [];
   #listeners = new Set();
   #exitCleanup;
@@ -112,7 +113,7 @@ export class ClaudePeerEndpoint {
     fs.mkdirSync(sessionsDirectory, { recursive: true, mode: 0o700 });
     this.#socketPath = path.join(socketDirectory, `${process.pid}.sock`);
     this.#registryPath = path.join(sessionsDirectory, `${process.pid}.json`);
-    if (fs.existsSync(this.#socketPath) || fs.existsSync(this.#registryPath)) {
+    if (fs.lstatSync(this.#socketPath, { throwIfNoEntry: false }) || fs.lstatSync(this.#registryPath, { throwIfNoEntry: false })) {
       throw Object.assign(new Error(`Refusing to replace an existing Claude peer identity for pid ${process.pid}`), { code: "CLAUDE_PEER_COLLISION" });
     }
 
@@ -127,9 +128,10 @@ export class ClaudePeerEndpoint {
         this.#server.once("error", reject);
         this.#server.listen(this.#socketPath, resolve);
       });
+      this.#ownedPaths.add(this.#socketPath);
       fs.chmodSync(this.#socketPath, 0o600);
       const now = Date.now();
-      fs.writeFileSync(this.#registryPath, JSON.stringify({
+      this.#writeOwnedFile(this.#registryPath, JSON.stringify({
         pid: process.pid,
         sessionId: crypto.randomUUID(),
         cwd: this.#cwd,
@@ -146,8 +148,8 @@ export class ClaudePeerEndpoint {
         name: this.#name,
         nameSource: "derived",
         status: "idle",
-      }), { mode: 0o600 });
-      fs.writeFileSync(this.#keyPath, JSON.stringify({ peerToken, procStart: started }), { mode: 0o600 });
+      }));
+      this.#writeOwnedFile(this.#keyPath, JSON.stringify({ peerToken, procStart: started }));
       process.once("exit", this.#exitCleanup);
     } catch (error) {
       await this.stop();
@@ -266,10 +268,18 @@ export class ClaudePeerEndpoint {
     });
   }
 
+  #writeOwnedFile(file, content) {
+    const descriptor = fs.openSync(file, "wx", 0o600);
+    this.#ownedPaths.add(file);
+    try { fs.writeFileSync(descriptor, content); }
+    finally { fs.closeSync(descriptor); }
+  }
+
   #removeOwnedFiles() {
-    for (const file of [this.#socketPath, this.#registryPath, this.#keyPath]) {
-      if (!file) continue;
+    for (const file of this.#ownedPaths) {
       try { fs.rmSync(file, { force: true }); } catch {}
     }
+    this.#ownedPaths.clear();
+    this.#socketPath = this.#registryPath = this.#keyPath = null;
   }
 }

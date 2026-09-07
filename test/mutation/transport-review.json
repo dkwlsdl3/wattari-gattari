@@ -1,0 +1,80 @@
+{
+  "observedOn": "2026-09-07",
+  "baselineCommit": "6b400f382b41fd6f001bff3a1f0c7bca6296acf6",
+  "scope": "RPC request dispatch/settlement and peer identity ownership; not the complete provider block",
+  "sourceSha256": {
+    "src/codex-app-server.mjs": "f41fdf7be172c4496edd0fb38c419b6a91f29ce707b7b89447cff4da4658059d",
+    "src/providers/claude-peer.mjs": "8bac36cf80d0f6daed368a3b1fe9937a65117c4cdda243333a3700f5d67df9a8"
+  },
+  "testSha256": {
+    "test/codex-app-server.test.mjs": "6dabb15fcc150863bb1e23aca4a52919c78d2406dcc178be517e3abee00c6b67",
+    "test/claude-peer.test.mjs": "488a17131d87d8cd33a12c66df62b76e4b3d4ea8330f66c68d0ca3df257e9bc2"
+  },
+  "reproducedAndFixed": [
+    "ClaudeProvider.send finally-stop deleted a pre-existing socket/registry after start rejected an identity collision. Track only successfully created paths; exclusive file creation also rejects a registry race and dangling symlink.",
+    "A parsed null RPC frame threw from the message event handler instead of being ignored.",
+    "A synchronous RPC send exception left its pending entry and abort listener behind.",
+    "A server-request callback resolving after close caused a second send exception and an unhandled rejection. Build one response, send once, and fail pending requests if sending fails."
+  ],
+  "functionReview": {
+    "CodexAppServerClient.constructor": "Malformed JSON and non-object frames, binary rejection, late socket errors and remote close. Fake WebSocket boundary; real Unix WebSocket handshake remains outside scope.",
+    "CodexAppServerClient.request": "Distinct IDs, exact params, out-of-order/unknown/duplicate replies, pre-abort, later abort, send throw and cleanup once. Optional signal remains optional.",
+    "CodexAppServerClient.#onMessage": "Result/error routing, notifications, ID zero, unknown IDs and missing method; no callback required for notifications.",
+    "CodexAppServerClient.#handleServerRequest": "Custom result, thrown Error, fallback denial, unsupported method, close-before-resolution and failed send without retry.",
+    "CodexAppServerClient.#failAll": "Pending rejection and listener/map cleanup, including repeated close/error events. No internal Map introspection: repeated cleanup is observed through signal listener calls.",
+    "ClaudePeerEndpoint.start": "Actual disposable Unix socket, existing socket+registry collision, dangling registry symlink and injected registry creation race. Native provider sessions are not used.",
+    "ClaudePeerEndpoint.#writeOwnedFile": "Exclusive creation, private file modes, valid contents, partial write failure and descriptor closure.",
+    "ClaudePeerEndpoint.stop/#removeOwnedFiles": "Owned socket/registry/key removal, exit listener removal, repeated stop, restart and preservation of identities created by a new owner after stop.",
+    "ClaudeProvider.send caller": "Real caller finally-stop path exercised through a collision; no message reaches a native session.",
+    "test cleanup": "Register both existing socket-test cleanup hooks before listen/start can fail; bound those tests to 2000ms. Do not assert incidental asynchronous response ordering."
+  },
+  "stryker": {
+    "version": "10.0.0",
+    "node": "24.15.0",
+    "runner": "command",
+    "coverageAnalysis": "off",
+    "workers": 1,
+    "timeoutMS": 5000,
+    "timeoutFactor": 2,
+    "ranges": ["src/codex-app-server.mjs:70-87", "src/codex-app-server.mjs:110-144", "src/providers/claude-peer.mjs:116-118", "src/providers/claude-peer.mjs:133-134", "src/providers/claude-peer.mjs:271-284"],
+    "command": "node --test --test-reporter=tap test/codex-app-server.test.mjs test/claude-peer.test.mjs",
+    "first": { "focusedTests": 14, "mutants": 116, "killed": 43, "timeouts": 36, "survived": 37, "errors": 0, "wallSeconds": 216 },
+    "strengthened": { "focusedTests": 18, "mutants": 116, "killed": 59, "timeouts": 47, "survived": 10, "errors": 0, "wallSeconds": 276 },
+    "snapshotNote": "Both runs use the recorded source hashes. The strengthened Stryker test snapshot precedes the final cleanup-hook move and response-order relaxation; exact snapshots are archived. Final test hashes above apply to the separate mechanical replay below."
+  },
+  "finalTreeReplay": {
+    "command": "node --test --test-reporter=tap --test-timeout=1500 test/codex-app-server.test.mjs test/claude-peer.test.mjs",
+    "mutants": 116,
+    "syntaxCheckedEach": true,
+    "focusedTests": 18,
+    "initialProcessTimeoutMs": 5000,
+    "initial": { "killed": 65, "testTimeouts": 34, "processTimeouts": 7, "survived": 10, "syntaxOrRunnerErrors": 0 },
+    "extendedProcessDeadlineReplay": { "mutantsRetested": 7, "processTimeoutMs": 20000, "testTimeouts": 7, "processTimeouts": 0, "baselineAndRestoredPassed": true },
+    "finalClassification": { "killed": 65, "testTimeouts": 41, "processTimeouts": 0, "survived": 10, "syntaxOrRunnerErrors": 0 },
+    "timeoutReview": "The seven process deadlines were exhausted by multiple sequential 1500ms test timeouts, not syntax errors. Replaying those same seven with a 20s process ceiling completed and reported testTimeoutFailure. They remain deadline detections, not ordinary assertion kills.",
+    "baselineAndRestoredPassed": true,
+    "fullSuiteSurvivors": { "retested": 10, "stillSurvived": 10, "testsPerRun": 169, "perTestTimeoutMs": 2000, "restoredPassed": true }
+  },
+  "survivorReview": [
+    { "id": "1", "classification": "equivalent-for-contract", "reason": "Decrementing numeric RPC IDs still provides distinct IDs; positive ascending numbering is not part of the adapter contract." },
+    { "id": "7", "classification": "accepted-low-risk", "reason": "Only the pre-abort fallback error explanation is empty when the signal reason is nullish; rejection remains." },
+    { "id": "12", "classification": "accepted-low-risk", "reason": "Only the later-abort fallback error explanation is empty; cancellation and cleanup remain." },
+    { "id": "31", "classification": "equivalent-for-contract", "reason": "The send-error pending entry exists unless already settled by a synchronous event. In that case the Promise executor also ignores a subsequent throw; externally settled outcome is unchanged." },
+    { "id": "40", "classification": "equivalent-for-contract", "reason": "Removing only the typeof check still ignores parsed primitives through absent id/method properties; null remains separately rejected." },
+    { "id": "46", "classification": "accepted-low-risk", "reason": "An id-less malformed hybrid with method plus result/error can be dropped instead of treated as a notification. Valid RPC responses and notifications are unchanged; not universally equivalent." },
+    { "id": "83", "classification": "equivalent-for-contract", "reason": "The internal METHOD_NOT_FOUND code is not exposed: the handler preserves its message but converts every exception to wire code -32603." },
+    { "id": "105", "classification": "accepted-low-risk", "reason": "Collision explanation becomes empty; public CLAUDE_PEER_COLLISION and preservation of existing files remain checked." },
+    { "id": "119", "classification": "equivalent-for-contract", "reason": "Removing force only introduces ENOENT for an absent path; this per-file cleanup already catches it and continues." },
+    { "id": "120", "classification": "equivalent-for-contract", "reason": "force:false has the same absent-path behavior as mutant 119 under the existing per-file catch." }
+  ],
+  "verification": { "tests": 169, "passed": 169, "failed": 0, "cancelled": 0, "skipped": 0, "lineCoverage": 91.56, "branchCoverage": 78.07, "functionCoverage": 90.21, "benchmarkPassed": true, "packDryRunFiles": 36 },
+  "artifacts": "Downloads/waga-qa-transport-2026-09-07-lwAoWT: raw reports, exact test snapshots, configs, locked tooling, mechanical replay scripts, TAP logs and standard verification logs",
+  "limitations": [
+    "Timeout detection is reported separately from ordinary test failure; no combined score is presented as product reliability.",
+    "Ranges select only part of two files. Command runner does not distinguish uncovered mutants from survivors; this is not a provider-wide audit.",
+    "Live native agents, daemon handshake/restart, actual TUI behavior and model compliance were not tested. Existing user sessions and logs were not modified.",
+    "Provider ask completion/correlation/timeouts, usage caches, peer receive buffering/open-client shutdown and remaining connection boundaries stay in TODO.md.",
+    "The benchmark covers in-memory discovery and frame construction, not network/provider latency.",
+    "Hashes, dependencies, environment, test selection or config changes require reassessment; tests are not frozen."
+  ]
+}

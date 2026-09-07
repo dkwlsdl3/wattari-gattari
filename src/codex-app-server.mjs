@@ -77,7 +77,12 @@ export class CodexAppServerClient {
         resolve: (value) => { signal?.removeEventListener("abort", abort); resolve(value); },
         reject: (error) => { signal?.removeEventListener("abort", abort); reject(error); },
       });
-      this.#send({ method, id, params });
+      try {
+        this.#send({ method, id, params });
+      } catch (error) {
+        this.#pending.get(id)?.reject(error);
+        this.#pending.delete(id);
+      }
     });
   }
 
@@ -103,6 +108,7 @@ export class CodexAppServerClient {
   }
 
   #onMessage(message) {
+    if (!message || typeof message !== "object" || Array.isArray(message)) return;
     if (message.id !== undefined && ("result" in message || "error" in message)) {
       const pending = this.#pending.get(message.id);
       if (!pending) return;
@@ -116,13 +122,19 @@ export class CodexAppServerClient {
   }
 
   async #handleServerRequest(message) {
+    let response;
     try {
       let result = this.#onServerRequest ? await this.#onServerRequest({ method: message.method, params: message.params }) : undefined;
       if (result === undefined) result = deniedServerRequest(message.method);
       if (result === null) throw new AppServerError("METHOD_NOT_FOUND", `Waga does not handle server request ${message.method}`);
-      this.#send({ id: message.id, result });
+      response = { id: message.id, result };
     } catch (error) {
-      this.#send({ id: message.id, error: { code: -32603, message: error.message } });
+      response = { id: message.id, error: { code: -32603, message: error.message } };
+    }
+    try {
+      this.#send(response);
+    } catch (error) {
+      this.#failAll(error);
     }
   }
 
