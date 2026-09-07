@@ -1,0 +1,29 @@
+{
+  "observedAt": "2026-09-07",
+  "scope": "Claude per-launch title hook, pending rename, native-name following and F2 notices",
+  "method": "8 targeted fault injections; not exhaustive mutation coverage",
+  "baselineTests": 59,
+  "killed": 8,
+  "survived": 0,
+  "timeouts": 0,
+  "runnerErrors": 0,
+  "restoredBaselineTests": 59,
+  "sourceHashes": {
+    "src/claude-title-hook.mjs": "8be8c4a329eafe04eef7adc9a1780d3a1bdac1b7b33779719407291510300a81",
+    "src/claude-title-sync.mjs": "b6adb16ace789380e6a8ed80ec44e5bb6f39c7618943435b8338c27d738ab015",
+    "src/overview.mjs": "7d05acb8f3cdd01f57573392366c88ea3384442d41e769f827cad07514ea8a84",
+    "src/providers/claude.mjs": "582b8645cd8137ff90d02a690037735e8392b17f09e6982223f3f7a048a23440"
+  },
+  "testHashes": {
+    "test/claude-provider.test.mjs": "bf72c0768c5b1265d8b7021597385ca1ebfbe9d83ef53b23e4d67fffc560d875",
+    "test/claude-title-sync.test.mjs": "68557225ec177430fecbddde5167860a2d9f13f3d3d7d0b445ab067f0a4e0e91",
+    "test/overview.test.mjs": "b7ba553eeeb5b8fbc4119c145fc1a5c1ae618e0bb30efe2ad7b8b7c2ea511367"
+  },
+  "nativeProof": {
+    "version": "Claude Code 2.1.263",
+    "artifacts": "/tmp/waga-proof-title-e2e-Zuwjbq",
+    "result": "Provider.create installed per-launch hooks. Provider.rename displayed a pending name, then next prompt updated attached TUI, native Agents JSON and rendered Agents row. Later native /rename survived another prompt and Waga discovery followed it. No sticky alias file was created.",
+    "cleanup": "Stopped only disposable session, private tmux and isolated daemon; verified both owned PIDs exited and isolated session list was empty.",
+    "limitations": "Dummy authentication and loopback API endpoint: prompts stopped with Not logged in after hooks. Successful model turns, Remote Control/Desktop and full backend restart were not tested. Receipt means emitted, not confirmed applied; retry F2 on failure. Startup hook registers capability only. Existing global settings and user sessions were untouched."
+  }
+}

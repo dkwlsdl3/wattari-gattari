@@ -7,6 +7,7 @@ import test from "node:test";
 
 import { ClaudeProvider, parseClaudeAgents, parseClaudeBackgroundId } from "../src/providers/claude.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../src/managed-session-instructions.mjs";
+import { ClaudeTitleSync } from "../src/claude-title-sync.mjs";
 
 test("Claude agents parser rejects drifted output", () => {
   assert.throws(() => parseClaudeAgents("{}"), { code: "CLAUDE_AGENTS_INVALID" });
@@ -27,6 +28,7 @@ test("Claude background parser accepts the measured CLI output", () => {
 test("Claude create starts an official background agent in the requested workspace", async () => {
   let invocation;
   const provider = new ClaudeProvider({
+    titleSync: { settings: () => '{"hooks":{}}' },
     run: async (args, options) => {
       invocation = { args, options };
       return { stdout: "backgrounded · 1234abcd · task\n" };
@@ -35,7 +37,7 @@ test("Claude create starts an official background agent in the requested workspa
   const result = await provider.create("review this change", { cwd: "/work/project" });
   assert.deepEqual(result, { provider: "claude", nativeId: "1234abcd" });
   assert.deepEqual(invocation, {
-    args: ["--bg", "--append-system-prompt", WAGA_SESSION_INSTRUCTIONS, "--", "review this change"],
+    args: ["--bg", "--settings", '{"hooks":{}}', "--append-system-prompt", WAGA_SESSION_INSTRUCTIONS, "--", "review this change"],
     options: { cwd: "/work/project" },
   });
 });
@@ -64,7 +66,7 @@ test("Claude rename stores a Waga display alias", async () => {
   };
   const provider = new ClaudeProvider({ aliasCatalog });
   const result = await provider.rename({ id: "claude:full-id" }, "  review UI  ");
-  assert.deepEqual(result, { target: "claude:full-id", renamed: true, name: "review UI" });
+  assert.deepEqual(result, { target: "claude:full-id", renamed: true, name: "review UI", nameSync: "local" });
   assert.deepEqual(calls, [["claude:full-id", "review UI"]]);
 });
 
@@ -93,6 +95,35 @@ test("Claude provider joins agents JSON to the live peer registry", async (t) =>
   const answer = await provider.ask(listed[0], "hello", { requestId: "r", timeoutMs: 9 });
   assert.equal(answer.reply, "OK");
   assert.match(endpointCalls.find(([kind]) => kind === "send")[1], /trust: untrusted/);
+});
+
+test("Claude discovery shows pending titles then follows native names instead of old aliases", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-title-provider-"));
+  const server = net.createServer();
+  t.after(() => { server.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  const socketPath = path.join(root, "target.sock");
+  await new Promise((resolve) => server.listen(socketPath, resolve));
+  const sessionId = "26bce3ae-3d65-4f9a-b3a1-bb8c6d3bc247";
+  const row = { id: "26bce3ae", sessionId, cwd: root, pid: process.pid, name: "native", status: "idle" };
+  fs.mkdirSync(path.join(root, ".claude", "sessions"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".claude", "sessions", `${process.pid}.json`), JSON.stringify({ ...row, peerProtocol: 1, messagingSocketPath: socketPath }));
+  const titleSync = new ClaudeTitleSync(path.join(root, "sync"));
+  const provider = new ClaudeProvider({ homeDirectory: root, titleSync, aliasCatalog: { load: () => new Map([[`claude:${sessionId}`, "legacy"]]) }, run: async () => ({ stdout: JSON.stringify([row]) }) });
+  assert.equal((await provider.list())[0].name, "legacy");
+  titleSync.hook({ session_id: sessionId, hook_event_name: "SessionStart" });
+  const ready = (await provider.list())[0];
+  assert.equal(ready.name, "native");
+  await provider.rename(ready, "pending");
+  const pending = (await provider.list())[0];
+  assert.equal(pending.name, "pending");
+  assert.equal(pending.nameSync, "pending");
+  titleSync.hook({ session_id: sessionId, hook_event_name: "UserPromptSubmit" });
+  row.name = "pending";
+  assert.equal((await provider.list())[0].nameSync, "native");
+  row.name = "native changed later";
+  assert.equal((await provider.list())[0].name, row.name);
+  fs.writeFileSync(path.join(root, "sync", `${sessionId}.ready.json`), "invalid");
+  assert.equal((await provider.list()).length, 1);
 });
 
 test("Claude provider fetches optional usage at most once per cache window", async () => {

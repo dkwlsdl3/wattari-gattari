@@ -861,7 +861,7 @@ test("overview creates a provider-owned session from its one-line composer", asy
   assert.equal(await running, 0);
 });
 
-test("F2 renames the selected session and keeps provider identity visible", async (t) => {
+for (const nameSync of [undefined, "pending", "local"]) test(`F2 renames the selected session and explains ${nameSync ?? "native"} sync`, async (t) => {
   const input = ttyInput();
   t.after(() => input.emit("end"));
   const output = capturedOutput();
@@ -875,7 +875,7 @@ test("F2 renames the selected session and keeps provider identity visible", asyn
       renamed = { target, name, options };
       discovered = discovered.map((session) => session.id === target ? { ...session, name } : session);
       resolveRename();
-      return { target, renamed: true, name };
+      return { target, renamed: true, name, nameSync };
     },
   };
   const workspace = {
@@ -897,6 +897,8 @@ test("F2 renames the selected session and keeps provider identity visible", asyn
   assert.deepEqual(renamed, { target: "claude:full-id", name: "검토 세션", options: {} });
   assert.equal(selectedSessionName(output), "검토");
   assert.match(plain(output.writes.at(-1)), /이름을 '검토 세션'\(으\)로 변경했습니다/);
+  if (nameSync === "pending") assert.match(plain(output.writes.at(-1)), /다음 프롬프트/);
+  if (nameSync === "local") assert.match(plain(output.writes.at(-1)), /로컬 이름만/);
   pressAlt(input, "q");
   assert.equal(await running, 0);
 });

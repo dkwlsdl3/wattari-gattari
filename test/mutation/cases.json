@@ -1,4 +1,17 @@
 {
+  "title": {
+    "tests": ["test/claude-title-sync.test.mjs", "test/claude-provider.test.mjs", "test/overview.test.mjs"],
+    "mutations": [
+      {"id":"skip-title-receipt","file":"src/claude-title-sync.mjs","from":"write(this.#file(id, \"receipt\"), { id: request.id });","to":";"},
+      {"id":"consume-before-prompt","file":"src/claude-title-sync.mjs","from":"if (input.hook_event_name !== \"UserPromptSubmit\" || !this.available(id)) return null;","to":"if (!this.available(id)) return null;"},
+      {"id":"ignore-pending-title","file":"src/claude-title-sync.mjs","from":"return { name: request.name, nameSync: \"pending\" };","to":"return { name: nativeName, nameSync: \"native\" };"},
+      {"id":"forget-hook-registration","file":"src/claude-title-sync.mjs","from":"write(this.#file(id, \"ready\"), { version: 1 });","to":";"},
+      {"id":"allow-subagent-title","file":"src/claude-title-sync.mjs","from":" || input.agent_id","to":""},
+      {"id":"prefer-sticky-alias","file":"src/providers/claude.mjs","from":"synced?.name ?? aliases.get(`claude:${row.sessionId}`) ?? nativeName","to":"aliases.get(`claude:${row.sessionId}`) ?? synced?.name ?? nativeName"},
+      {"id":"omit-launch-hooks","file":"src/providers/claude.mjs","from":"\"--settings\", this.#titleSync.settings(), ","to":""},
+      {"id":"misreport-local-rename","file":"src/providers/claude.mjs","from":"nameSync: \"local\" };","to":"nameSync: \"pending\" };"}
+    ]
+  },
   "provider": {
     "tests": ["test/codex-provider.test.mjs", "test/codex-app-server.test.mjs", "test/claude-peer.test.mjs", "test/claude-provider.test.mjs", "test/claude-usage.test.mjs", "test/provider-waiting.test.mjs"],
     "mutations": [

@@ -88,7 +88,10 @@ After native navigation with Claude's `←` or Codex's `/agents`, opening a sess
 checks the retained view and reattaches when needed. Waga-launched Codex TUIs use
 a thread marker as their terminal title; global settings are not changed.
 
-`F2` changes the native Codex session name, but only a Waga-local alias for Claude.
+`F2` changes native Codex names immediately. Newly Waga-created Claude sessions
+apply a pending rename once on the next prompt submission. Existing Claude sessions
+without the hook keep Waga-local aliases; the save notice distinguishes these cases.
+No global settings changes or extra model calls are needed.
 
 ## Peer messages
 

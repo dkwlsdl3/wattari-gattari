@@ -34,6 +34,7 @@ node scripts/mutation-check.mjs provider /absolute/new-provider-report
 node scripts/mutation-check.mjs overview /absolute/new-overview-report
 node scripts/mutation-check.mjs lifecycle /absolute/new-lifecycle-report
 node scripts/mutation-check.mjs cli /absolute/new-cli-report
+node scripts/mutation-check.mjs title /absolute/new-title-report
 ```
 
 출력 폴더는 아직 존재하지 않아야 합니다. 실행기는 임시 복사본에서

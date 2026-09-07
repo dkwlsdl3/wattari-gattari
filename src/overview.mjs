@@ -558,11 +558,13 @@ export async function runOverview({
     const scope = filterCwd ? { cwd: path.resolve(filterCwd) } : {};
     void (async () => {
       try {
-        await bridge.rename(draft.session.id, draft.name, scope);
+        const result = await bridge.rename(draft.session.id, draft.name, scope);
         renameTask = null;
         selectedKey = draft.session.id;
         await refresh({ whileBusy: true, force: true });
         notice = `세션 이름을 '${draft.name}'(으)로 변경했습니다.`;
+        if (result.nameSync === "pending") notice += " Claude에는 다음 프롬프트에서 반영 요청됩니다.";
+        else if (result.nameSync === "local") notice += " Waga 로컬 이름만 변경했습니다.";
       } catch (error) {
         renameTask = { ...draft, submitting: false, error: error.message };
       } finally {

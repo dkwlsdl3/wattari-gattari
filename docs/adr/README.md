@@ -27,6 +27,11 @@ Wattari Gattari는 Claude Code와 Codex가 소유한 네이티브 세션을 발�
 
 - Claude: `claude agents --json`, native peer Unix socket, `claude --bg`,
   `claude attach`, `claude rm`을 사용합니다.
+- Claude 생성 시 실행별 `--settings`로 제목 훅을 추가합니다. 시작 훅은 기능 등록만 하고,
+  `UserPromptSubmit`은 Waga 저장소의 세션 UUID별 이름 변경 요청을 한 번 전달합니다.
+  다음 프롬프트 전까지 dock에는 대기 이름을 표시하며, 전달 뒤에는 native 목록 이름을
+  따릅니다. 훅 출력은 적용 확인이 아니므로 실패 시 F2로 재요청합니다. 전역 설정·세션 로그는
+  수정하지 않고 별도 모델 호출·폴링도 추가하지 않습니다. 기존 훅 없는 세션은 로컬 별칭입니다.
 - Codex: 기존 native App Server daemon의 Agents 소유 최상위 세션만 사용하며,
   세션 생성·resume·archive와 메시지 전달도 그 daemon에 위임합니다. 일반 CLI나
   VSCode 대화 기록은 dock에 섞지 않습니다.

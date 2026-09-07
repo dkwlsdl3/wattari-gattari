@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { buildPeerEnvelope } from "../bridge/envelope.mjs";
 import { readBeforeDeadline } from "../bridge/deadline.mjs";
 import { readClaudeUsage } from "../claude-usage.mjs";
+import { ClaudeTitleSync } from "../claude-title-sync.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
 import { defaultClaudeAliasPath, SessionAliasCatalog } from "../session-alias-catalog.mjs";
 import { ClaudePeerEndpoint } from "./claude-peer.mjs";
@@ -66,6 +67,7 @@ export class ClaudeProvider {
   #run;
   #endpointFactory;
   #aliases;
+  #titleSync;
   #wait;
   #now;
   #usageReader;
@@ -73,11 +75,12 @@ export class ClaudeProvider {
   #usageCache = null;
   #usageRefresh = null;
 
-  constructor({ homeDirectory = os.homedir(), run = defaultRun, endpointFactory, aliasCatalog = null, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now, usageReader = null, usageCacheMs = USAGE_CACHE_MS } = {}) {
+  constructor({ homeDirectory = os.homedir(), run = defaultRun, endpointFactory, aliasCatalog = null, titleSync = null, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now, usageReader = null, usageCacheMs = USAGE_CACHE_MS } = {}) {
     this.#home = homeDirectory;
     this.#run = run;
     this.#endpointFactory = endpointFactory ?? ((options) => new ClaudePeerEndpoint(options));
     this.#aliases = aliasCatalog ?? new SessionAliasCatalog(defaultClaudeAliasPath(process.env, homeDirectory));
+    this.#titleSync = titleSync ?? new ClaudeTitleSync(path.join(path.dirname(defaultClaudeAliasPath(process.env, homeDirectory)), "claude-title-sync"));
     this.#wait = wait;
     this.#now = now;
     this.#usageReader = usageReader ?? (() => readClaudeUsage({ homeDirectory: this.#home, now: this.#now }));
@@ -100,12 +103,15 @@ export class ClaudeProvider {
       if (typeof registry.messagingSocketPath !== "string" || !path.isAbsolute(registry.messagingSocketPath)) continue;
       try { if (!fs.lstatSync(registry.messagingSocketPath).isSocket()) continue; } catch { continue; }
       const sessionCwd = canonical(row.cwd);
+      const nativeName = row.name ?? registry.name ?? row.id;
+      const synced = this.#titleSync.display(row.sessionId, nativeName);
       sessions.push({
         id: `claude:${row.sessionId}`,
         nativeId: row.id,
         sessionId: row.sessionId,
         provider: this.name,
-        name: aliases.get(`claude:${row.sessionId}`) ?? row.name ?? registry.name ?? row.id,
+        name: synced?.name ?? aliases.get(`claude:${row.sessionId}`) ?? nativeName,
+        nameSync: synced?.nameSync ?? "local",
         cwd: sessionCwd,
         projectCwd: expectedCwd ?? claudeProjectCwd(sessionCwd),
         status: statusOf(row),
@@ -139,7 +145,7 @@ export class ClaudeProvider {
 
   async create(prompt, { cwd = process.cwd() } = {}) {
     const workspace = canonical(cwd);
-    const { stdout } = await this.#run(["--bg", "--append-system-prompt", WAGA_SESSION_INSTRUCTIONS, "--", prompt], { cwd: workspace });
+    const { stdout } = await this.#run(["--bg", "--settings", this.#titleSync.settings(), "--append-system-prompt", WAGA_SESSION_INSTRUCTIONS, "--", prompt], { cwd: workspace });
     return { provider: this.name, nativeId: parseClaudeBackgroundId(stdout) };
   }
 
@@ -154,8 +160,11 @@ export class ClaudeProvider {
 
   async rename(session, name) {
     const renamed = name.trim();
+    if (this.#titleSync.queue(session.sessionId, renamed)) {
+      return { target: session.id, renamed: true, name: renamed, nameSync: "pending" };
+    }
     this.#aliases.set(session.id, renamed);
-    return { target: session.id, renamed: true, name: renamed };
+    return { target: session.id, renamed: true, name: renamed, nameSync: "local" };
   }
 
   async send(session, message, { requestId }) {
