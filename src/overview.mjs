@@ -156,7 +156,7 @@ export function moveOverviewSession(orderByWorkspace, workspace, sessionId, dire
   return moved;
 }
 
-export function selectOverviewSessions(sessions, { query = "", provider = null, limit = 40 } = {}) {
+export function selectOverviewSessions(sessions, { query = "", provider = null, limit = Infinity } = {}) {
   const needle = query.trim().toLocaleLowerCase();
   return [...sessions]
     .filter((session) => !provider || session.provider === provider)

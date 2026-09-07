@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
 
 import { DirectWorkspace } from "../src/direct-workspace.mjs";
 
 process.env.XDG_STATE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "waga-direct-test-state-"));
+const testStateDirectory = process.env.XDG_STATE_HOME;
+after(() => fs.rmSync(testStateDirectory, { recursive: true, force: true }));
 
 function terminalStream() {
   const events = [];

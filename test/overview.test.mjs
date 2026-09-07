@@ -89,6 +89,12 @@ test("overview preserves supplied session order instead of sorting by status", (
   assert.deepEqual(selectOverviewSessions(sessions).map((session) => session.id), ["codex:1", "claude:2", "codex:3"]);
 });
 
+test("overview does not silently hide sessions beyond the first forty", () => {
+  const many = Array.from({ length: 60 }, (_, index) => ({ ...sessions[index % 3], id: `session-${index}` }));
+  assert.equal(selectOverviewSessions(many).length, 60);
+  assert.equal(selectOverviewSessions(many, { limit: 5 }).length, 5);
+});
+
 test("overview reconciles discovered sessions with manual workspace order", () => {
   const order = reconcileOverviewOrder(new Map([["/work/api", ["codex:old", "codex:1"]]]), sessions);
   assert.deepEqual(order.get("/work/api"), ["codex:old", "codex:1"]);

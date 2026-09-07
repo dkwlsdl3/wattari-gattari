@@ -53,7 +53,7 @@ function cleanResult(error) {
 
 async function defaultRun(args, { env = process.env } = {}) {
   try {
-    const result = await execFileAsync("tmux", args, { env, encoding: "utf8", maxBuffer: 1024 * 1024 });
+    const result = await execFileAsync("tmux", args, { env, encoding: "utf8", maxBuffer: 1024 * 1024, timeout: 5_000, killSignal: "SIGKILL" });
     return { ...result, code: 0 };
   } catch (error) {
     if (Number.isInteger(error.code) || error.code === "ENOENT") return cleanResult(error);
@@ -221,13 +221,19 @@ export class TmuxWorkspace {
       this.#sessionCommand(session, commandSpec),
     ]);
     const windowId = created.stdout.trim();
-    if (!windowId) throw Object.assign(new Error("tmux did not return the native session window id"), { code: "TMUX_WINDOW_FAILED" });
-    await this.#call(["set-window-option", "-t", windowId, "@waga_session_id", session.id]);
-    await this.#setSessionWindowMetadata(windowId, session, commandSpec);
-    await this.#call(["set-window-option", "-t", windowId, "automatic-rename", "off"]);
-    await this.#styleWindow([], windowId);
-    this.#eventLog.record("session_view_opened", { sessionId: session.id, windowId, reason: "dock_open" });
-    await this.#call(["select-window", "-t", windowId]);
+    if (!/^@[0-9]+$/.test(windowId)) throw Object.assign(new Error("tmux did not return the native session window id"), { code: "TMUX_WINDOW_FAILED" });
+    try {
+      await this.#call(["set-window-option", "-t", windowId, "@waga_session_id", session.id]);
+      await this.#setSessionWindowMetadata(windowId, session, commandSpec);
+      await this.#call(["set-window-option", "-t", windowId, "automatic-rename", "off"]);
+      await this.#styleWindow([], windowId);
+      this.#eventLog.record("session_view_opened", { sessionId: session.id, windowId, reason: "dock_open" });
+      await this.#call(["select-window", "-t", windowId]);
+    } catch (error) {
+      // Only this invocation's newly created frontend may be rolled back.
+      try { await this.#call(["kill-window", "-t", windowId]); } catch {}
+      throw error;
+    }
     return { reused: false, windowId };
   }
 

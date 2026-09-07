@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import test from "node:test";
+import test, { after } from "node:test";
 
 import {
   GLOBAL_DOCK_SESSION,
@@ -12,12 +12,31 @@ import {
 } from "../src/tmux-workspace.mjs";
 
 process.env.XDG_STATE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "waga-tmux-test-state-"));
+const testStateDirectory = process.env.XDG_STATE_HOME;
+after(() => fs.rmSync(testStateDirectory, { recursive: true, force: true }));
 
 test("workspace session names are stable, readable, and tmux-safe", () => {
   const first = workspaceSessionName("/tmp/My Project");
   assert.match(first, /^waga-my-project-[0-9a-f]{8}$/);
   assert.equal(first, workspaceSessionName("/tmp/My Project"));
   assert.notEqual(first, workspaceSessionName("/tmp/Other Project"));
+});
+
+test("failed new-window setup rolls back only the newly created frontend", async () => {
+  const calls = [];
+  const workspace = new TmuxWorkspace({
+    env: { WAGA_TMUX_SESSION: "waga-proof" }, eventLog: { record() {} },
+    run: async (args) => {
+      calls.push(args);
+      if (args[0] === "list-windows") return { code: 0, stdout: "@1\tcodex:keep\t0\n", stderr: "" };
+      if (args[0] === "new-window") return { code: 0, stdout: "@7\n", stderr: "" };
+      if (args[0] === "set-window-option") return { code: 1, stdout: "", stderr: "metadata failed" };
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  });
+  await assert.rejects(workspace.focusOrOpen({ id: "codex:new", provider: "codex" }, { command: "fake", args: [], cwd: "/tmp" }), { code: "TMUX_COMMAND_FAILED" });
+  assert.deepEqual(calls.filter(([command]) => command === "kill-window"), [["kill-window", "-t", "@7"]]);
+  assert.equal(calls.some(([command]) => command === "select-window"), false);
 });
 
 test("shellCommand safely quotes command arguments", () => {
