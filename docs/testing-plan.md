@@ -45,6 +45,14 @@ node scripts/mutation-check.mjs lifecycle /absolute/new-lifecycle-report
 
 ## 결과를 재사용할 조건
 
+`npm run mutation:status`는 저장소의 검토 기록과 현재 입력 해시·Node 버전을 읽기 전용으로
+비교합니다. 최신성(기록과 일치·재검증 필요·자료 부족)과 검출·생존·타임아웃을 따로 표시합니다.
+상세 JSON은 `npm run mutation:status -- --json`, 추가 실행 결과는
+`npm run mutation:status -- --report /absolute/report.json`으로 조회합니다 (`--report` 반복 가능).
+변이 테스트는 실행하지 않으며, 오래된 기록을 현재 통과로 간주하거나 중복 결과를 합산하지 않습니다.
+개별 사례 기록이 없으면 미실행이 아닌 **증거 없음**입니다. 테스트별 검출 기여도는 계산하지 않습니다.
+새 파일·해시·환경 정보가 누락되면 일치로 판정하지 않으며 외부 환경은 별도 검증 대상입니다.
+
 통과해도 테스트를 동결하지 않습니다. 구현·테스트·공유 의존성·lockfile·Node·검증 설정이
 바뀌면 관련 구획을 재실행합니다. 영향이 불명확하면 모든 구획을 실행하고 신뢰 경계의
 Stryker 범위도 재검토합니다. runner 오류와 미실행은 통과가 아닙니다.
