@@ -24,10 +24,15 @@
     ]
   },
   "lifecycle": {
-    "tests": ["test/native-process.test.mjs", "test/tmux-workspace.test.mjs", "test/tmux-integration.test.mjs", "test/direct-workspace.test.mjs", "test/native-session-host.test.mjs", "test/native-launcher.test.mjs", "test/session-dock.test.mjs"],
+    "tests": ["test/native-process.test.mjs", "test/tmux-workspace.test.mjs", "test/tmux-integration.test.mjs", "test/direct-workspace.test.mjs", "test/native-session-host.test.mjs", "test/native-launcher.test.mjs", "test/session-dock.test.mjs", "test/claude-view.test.mjs"],
     "mutations": [
-      {"id":"respawn-live-view","file":"src/tmux-workspace.mjs","from":"existing && !existing.paneDead && !force","to":"false"},
-      {"id":"ignore-force-reattach","file":"src/tmux-workspace.mjs","from":"existing && !existing.paneDead && !force","to":"existing && !existing.paneDead"},
+      {"id":"respawn-live-view","file":"src/tmux-workspace.mjs","from":"existing && !existing.paneDead && !force && !changedView","to":"false"},
+      {"id":"ignore-force-reattach","file":"src/tmux-workspace.mjs","from":"existing && !existing.paneDead && !force && !changedView","to":"existing && !existing.paneDead && !changedView"},
+      {"id":"reuse-navigated-claude-view","file":"src/tmux-workspace.mjs","from":"!force && !changedView","to":"!force"},
+      {"id":"ignore-claude-attach-target","file":"src/providers/claude-view.mjs","from":"commandSpec.args.some((arg, index) => argv[index + 1] !== arg)","to":"false"},
+      {"id":"trust-unreadable-claude-view","file":"src/providers/claude-view.mjs","from":"catch { return false; }","to":"catch { return true; }"},
+      {"id":"ignore-claude-relaunch-child","file":"src/providers/claude-view.mjs","from":"if ((await read(`/proc/${child}/task/${child}/children`)).trim()) return false;","to":";"},
+      {"id":"ignore-claude-process-replacement","file":"src/providers/claude-view.mjs","from":"return (await read(childrenPath)).trim() === child;","to":"return true;"},
       {"id":"close-unhealthy-view","file":"src/tmux-workspace.mjs","from":"provider && healthy.has(provider) && !activeIds.has(sessionId)","to":"provider && !activeIds.has(sessionId)"},
       {"id":"leak-failed-new-window","file":"src/tmux-workspace.mjs","from":"try { await this.#call([\"kill-window\", \"-t\", windowId]); } catch {}","to":";"},
       {"id":"lose-host-signal","file":"src/native-session-host.mjs","from":"child.kill(signal);","to":";"},

@@ -83,6 +83,8 @@ waga open codex --cwd ~/work/my-app
 격리 server에서는 `Alt+G`로 dock, `Alt+A`로 별도 provider Agents View를 엽니다.
 Agents View로 이동해도 세션 TUI window는 유지됩니다. direct backend에서는 Claude
 `Ctrl+Z`, Codex `Ctrl+D`로 native view에서 빠져나옵니다.
+Claude 내부의 `←`로 이동한 창은 Dock에서 다시 열 때 연결 대상을 확인하고 필요하면
+선택한 세션으로 재접속합니다. 식별할 수 없는 frontend도 안전하게 재접속합니다.
 
 ## 세션 간 메시지
 

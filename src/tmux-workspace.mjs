@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 
 import { EventLog } from "./event-log.mjs";
 import { nativeAgentsCommand } from "./native-launcher.mjs";
+import { retainedClaudeViewMatches } from "./providers/claude-view.mjs";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_SOCKET = `waga-${typeof process.getuid === "function" ? process.getuid() : "user"}`;
@@ -116,8 +117,9 @@ export class TmuxWorkspace {
   #sessionHostPath;
   #eventLog;
   #wait;
+  #claudeViewMatches;
 
-  constructor({ run = defaultRun, launch = defaultLaunch, env = process.env, cliPath = CLI_PATH, nodePath = process.execPath, socketName = DEFAULT_SOCKET, revision = CURRENT_REVISION, sessionHostPath = SESSION_HOST_PATH, eventLog = new EventLog(), wait = defaultWait } = {}) {
+  constructor({ run = defaultRun, launch = defaultLaunch, env = process.env, cliPath = CLI_PATH, nodePath = process.execPath, socketName = DEFAULT_SOCKET, revision = CURRENT_REVISION, sessionHostPath = SESSION_HOST_PATH, eventLog = new EventLog(), wait = defaultWait, claudeViewMatches = retainedClaudeViewMatches } = {}) {
     this.#run = run;
     this.#launch = launch;
     this.#env = env;
@@ -128,6 +130,7 @@ export class TmuxWorkspace {
     this.#sessionHostPath = sessionHostPath;
     this.#eventLog = eventLog;
     this.#wait = wait;
+    this.#claudeViewMatches = claudeViewMatches;
   }
 
   async enter({ cwd = process.cwd(), filterCwd = null } = {}) {
@@ -195,13 +198,18 @@ export class TmuxWorkspace {
     if (!sessionName) throw Object.assign(new Error("Waga tmux session is unavailable"), { code: "TMUX_SESSION_UNAVAILABLE" });
     const listed = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}\t#{@waga_session_id}\t#{pane_dead}"]);
     const existing = parseWindows(listed.stdout).find((entry) => entry.sessionId === session.id);
-    if (existing && !existing.paneDead && !force) {
+    let changedView = false;
+    if (existing && !existing.paneDead && !force && (session.provider ?? session.id.split(":", 1)[0]) === "claude") {
+      const pane = await this.#call(["display-message", "-p", "-t", existing.windowId, "#{pane_pid}"], { check: false });
+      changedView = pane.code !== 0 || !await this.#claudeViewMatches(pane.stdout.trim(), commandSpec);
+    }
+    if (existing && !existing.paneDead && !force && !changedView) {
       await this.#setSessionWindowMetadata(existing.windowId, session, commandSpec);
       await this.#call(["select-window", "-t", existing.windowId]);
       return { reused: true, windowId: existing.windowId };
     }
     if (existing) {
-      const reason = force ? "forced_reattach" : "dead_view";
+      const reason = force ? "forced_reattach" : changedView ? "native_view_changed" : "dead_view";
       this.#eventLog.record("session_view_respawn_requested", { sessionId: session.id, windowId: existing.windowId, reason });
       await this.#call([
         "respawn-window", "-k", "-t", existing.windowId, "-c", commandSpec.cwd,

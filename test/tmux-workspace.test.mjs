@@ -216,6 +216,7 @@ test("focusOrOpen reuses live mapped sessions and creates only missing views", a
   const workspace = new TmuxWorkspace({
     run,
     wait: async () => {},
+    claudeViewMatches: async () => true,
     env: { TMUX: "/tmp/tmux,1,0", WAGA_TMUX_SESSION: "waga-project-deadbeef" },
     nodePath: "/usr/bin/node",
     sessionHostPath: "/app/native-session-host.mjs",
@@ -230,6 +231,34 @@ test("focusOrOpen reuses live mapped sessions and creates only missing views", a
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("@waga_session_id")));
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("window-status-format") && args.at(-1) === ""));
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("window-status-current-format") && args.at(-1).includes("#{window_name}")));
+});
+
+test("native navigation from Claude session one to two cannot reuse session one's stale mapping", async () => {
+  const calls = [];
+  let visible = "session-two";
+  const workspace = new TmuxWorkspace({
+    env: { WAGA_TMUX_SESSION: "waga-proof-navigation" },
+    eventLog: { record() {} }, wait: async () => {},
+    claudeViewMatches: async (pid, command) => {
+      assert.equal(pid, "100");
+      assert.deepEqual(command.args, ["attach", "11111111"]);
+      return false;
+    },
+    run: async (args) => {
+      calls.push(args);
+      if (args[0] === "list-windows") return { code: 0, stdout: "@4\tclaude:session-one\t0\n" };
+      if (args[0] === "display-message") return { code: 0, stdout: "100\n" };
+      if (args[0] === "respawn-window") {
+        assert.match(args.at(-1), /'attach' '11111111'/);
+        visible = "session-one";
+      }
+      return { code: 0, stdout: "ready\n" };
+    },
+  });
+  await workspace.focusOrOpen({ id: "claude:session-one", provider: "claude" }, { command: "claude", args: ["attach", "11111111"], cwd: "/tmp" });
+  assert.equal(visible, "session-one");
+  assert.equal(calls.filter((args) => args[0] === "respawn-window").length, 1);
+  assert.ok(calls.findLastIndex((args) => args[0] === "capture-pane") < calls.findLastIndex((args) => args[0] === "select-window"));
 });
 
 test("forced focusOrOpen keeps a reattached native view hidden until its frame settles", async () => {

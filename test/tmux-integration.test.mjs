@@ -96,6 +96,39 @@ test("real isolated tmux reuses, revives, and removes one retained session view"
   assert.deepEqual(await workspace.closeSessionView(session), { closed: true, windowId: opened.windowId });
   assert.equal((await call(["list-windows", "-t", sessionName, "-F", "#{window_name}"])).stdout.trim(), "overview");
 
+  // Disposable native-lookalike: Claude 2.1.263 relaunches its attach process as
+  // agents on Left, then that frontend can display a different session on Right.
+  const agentsCode = `process.stdin.setRawMode(true); process.stdin.resume(); console.log('WAGA_PROOF_AGENTS');
+    process.stdin.on('data', () => console.log('WAGA_PROOF_SESSION_TWO'));`;
+  const attachCode = `process.stdin.setRawMode(true); process.stdin.resume(); console.log('WAGA_PROOF_SESSION_ONE');
+    process.stdin.once('data', async () => {
+      const args = ['-e', ${JSON.stringify(agentsCode)}];
+      if (process.execve) process.execve(process.execPath, [process.execPath, ...args], process.env);
+      else { process.stdin.pause(); const {spawn} = await import('node:child_process'); spawn(process.execPath, args, {stdio:'inherit'}).on('exit', code => process.exit(code ?? 1)); }
+    });`;
+  const claudeSession = { ...session, provider: "claude", id: "claude:waga-proof-navigation" };
+  const claudeCommand = { command: process.execPath, args: ["-e", attachCode], cwd: root };
+  const view = await workspace.focusOrOpen(claudeSession, claudeCommand);
+  const frame = async () => (await call(["capture-pane", "-p", "-t", view.windowId])).stdout;
+  await waitFor(async () => (await frame()).includes("WAGA_PROOF_SESSION_ONE"));
+  const panePid = async () => (await call(["display-message", "-p", "-t", view.windowId, "#{pane_pid}"])).stdout.trim();
+  const originalPid = await panePid();
+  await workspace.focusOrOpen(claudeSession, claudeCommand);
+  assert.equal(await panePid(), originalPid, "unchanged native view must not restart");
+
+  await call(["send-keys", "-t", view.windowId, "Left"]);
+  await waitFor(async () => (await frame()).includes("WAGA_PROOF_AGENTS"));
+  await call(["send-keys", "-t", view.windowId, "Right"]);
+  await waitFor(async () => (await frame()).includes("WAGA_PROOF_SESSION_TWO"));
+  await call(["select-window", "-t", `${sessionName}:overview`]);
+  await workspace.focusOrOpen(claudeSession, claudeCommand);
+  assert.notEqual(await panePid(), originalPid, "native navigation must invalidate the old frontend");
+  await waitFor(async () => (await frame()).includes("WAGA_PROOF_SESSION_ONE") && !(await frame()).includes("WAGA_PROOF_SESSION_TWO"));
+  const repairedPid = await panePid();
+  await workspace.focusOrOpen(claudeSession, claudeCommand);
+  assert.equal(await panePid(), repairedPid, "repaired view must return to the fast reuse path");
+  await workspace.closeSessionView(claudeSession);
+
   assert.deepEqual(await workspace.leave(), { closeOverview: true });
   assert.notEqual((await call(["has-session", "-t", sessionName], { check: false })).code, 0);
 });

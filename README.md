@@ -84,6 +84,8 @@ falls back to `direct`. With tmux, use prefix then `0` to return to the dock.
 Waga's isolated server also uses `Alt+G` for the dock and `Alt+A` for a separate
 provider Agents View, without replacing the session TUI window. In direct mode,
 leave the native view with `Ctrl+Z` in Claude or `Ctrl+D` in Codex.
+After native navigation with Claude's `←`, opening a session from the dock checks
+the retained frontend and reattaches when its target changed or cannot be verified.
 
 ## Peer messages
 
