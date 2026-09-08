@@ -289,7 +289,7 @@ function previewLines(session, preview, width, height) {
   const lines = [color(brand, fit(heading, width))];
   if (!session || !preview || preview.state !== "ready") {
     const text = !session ? "세션을 선택하면 최근 대화가 표시됩니다."
-      : preview?.state === "error" ? "미리보기를 읽지 못했습니다. 잠시 후 재시도합니다." : "최근 대화를 읽는 중입니다…";
+      : preview?.state === "error" ? `미리보기를 읽지 못했습니다: ${preview.error || "조회 오류"}. 잠시 후 재시도합니다.` : "최근 대화를 읽는 중입니다…";
     return [...lines, "", ...wrapPreview(text, width, height - 2).map((line) => color(THEME.muted, line))];
   }
   const inputRows = Math.max(2, Math.floor((height - 6) * 0.4));
@@ -298,7 +298,9 @@ function previewLines(session, preview, width, height) {
   lines.push(...wrapPreview(preview.input || "최근 조회 범위에 입력이 없습니다.", width, inputRows));
   lines.push("", color(THEME.primary, fit("마지막 응답 (이전 작업 포함)", width)));
   lines.push(...wrapPreview(preview.output || "최근 조회 범위에 응답이 없습니다.", width, outputRows));
-  lines.push("", color(THEME.muted, fit(`${preview.limited ? "최근 일부 · " : ""}조회 ${new Date(preview.checkedAt).toLocaleTimeString()}`, width)));
+  const checked = new Date(preview.observedAt ?? preview.checkedAt).toLocaleTimeString();
+  lines.push("", color(preview.error ? THEME.warning : THEME.muted,
+    fit(preview.error ? `${preview.error} · 이전 조회 ${checked}` : `${preview.limited ? "최근 일부 · " : ""}조회 ${checked}`, width)));
   return lines;
 }
 

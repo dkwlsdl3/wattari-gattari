@@ -2,7 +2,12 @@
   "preview": {
     "tests": ["test/session-preview.test.mjs", "test/overview-preview.test.mjs", "test/codex-provider.test.mjs", "test/session-bridge.test.mjs"],
     "mutations": [
-      {"id":"ignore-preview-cache","file":"src/session-preview.mjs","from":"if (cached && this.#now() - cached.checkedAt < this.#ttl) return;","to":"if (false) return;"},
+      {"id":"ignore-preview-cache","file":"src/session-preview.mjs","from":"if (cached && cached.cwd === session.cwd && this.#now() - cached.checkedAt < this.#ttl) return;","to":"if (false) return;"},
+      {"id":"limit-claude-preview-to-tail","file":"src/session-preview.mjs","from":"let position = end, carry = Buffer.alloc(0), oversized = false, trailing = true;","to":"start = Math.max(start, end - CHUNK_BYTES); let position = end, carry = Buffer.alloc(0), oversized = false, trailing = true;"},
+      {"id":"reread-entire-preview-log","file":"src/session-preview.mjs","from":"previous?.offset ?? 0","to":"0"},
+      {"id":"retain-truncated-preview-cache","file":"src/session-preview.mjs","from":"previous = null;","to":"previous = previous;"},
+      {"id":"drop-preview-on-read-error","file":"src/session-preview.mjs","from":"previous?.state === \"ready\" ? previous : { state: \"error\" }","to":"{ state: \"error\" }"},
+      {"id":"reuse-preview-after-cwd-change","file":"src/session-preview.mjs","from":"cached.cwd === session.cwd && ","to":""},
       {"id":"ignore-preview-visibility","file":"src/session-preview.mjs","from":"if (!await this.#visible() || controller.signal.aborted || this.#closed) return;","to":"if (controller.signal.aborted || this.#closed) return;"},
       {"id":"keep-old-preview-request","file":"src/session-preview.mjs","from":"this.#running?.abort();\n    }","to":";\n    }"},
       {"id":"read-foreign-claude-preview","file":"src/session-preview.mjs","from":"row.sessionId !== session.sessionId || ","to":""},

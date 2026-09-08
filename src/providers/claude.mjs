@@ -11,7 +11,7 @@ import { ClaudeTitleSync } from "../claude-title-sync.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
 import { defaultClaudeAliasPath, SessionAliasCatalog } from "../session-alias-catalog.mjs";
 import { ClaudePeerEndpoint } from "./claude-peer.mjs";
-import { readClaudePreview } from "../session-preview.mjs";
+import { ClaudePreviewReader } from "../session-preview.mjs";
 
 const execFileAsync = promisify(execFile);
 const SHORT_ID = /^[0-9a-f]{8}$/i;
@@ -75,6 +75,7 @@ export class ClaudeProvider {
   #usageCacheMs;
   #usageCache = null;
   #usageRefresh = null;
+  #previewReader = new ClaudePreviewReader();
 
   constructor({ homeDirectory = os.homedir(), run = defaultRun, endpointFactory, aliasCatalog = null, titleSync = null, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now, usageReader = null, usageCacheMs = USAGE_CACHE_MS } = {}) {
     this.#home = homeDirectory;
@@ -128,7 +129,7 @@ export class ClaudeProvider {
   }
 
   preview(session, { signal } = {}) {
-    return readClaudePreview(session, { homeDirectory: this.#home, signal });
+    return this.#previewReader.read(session, { homeDirectory: this.#home, signal });
   }
 
   async #refreshUsage() {

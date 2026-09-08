@@ -1,6 +1,6 @@
 {
   "group": "preview",
-  "observedAt": "2026-09-08T06:04:10.143Z",
+  "observedAt": "2026-09-08T06:29:40.023Z",
   "node": "v24.15.0",
   "method": "targeted source replacement, not exhaustive Stryker generation",
   "command": [
@@ -32,17 +32,17 @@
     "src/managed-session-instructions.mjs": "160f75fb566e04f7f35eb9ec684f08fdada29d3a79e8481e7b93ebe6f723538c",
     "src/native-launcher.mjs": "3130a497397f3129cb2c4b5460a4b5ea20a45bb47f42ee1f5349f38658bb38c9",
     "src/native-session-host.mjs": "5c198aafa92883acdddf4a670bb41669accd5ae0d5c9de3791629a31117fe2d7",
-    "src/overview.mjs": "3fd75f07f1ba470c5ac0edecccd95129e0959ee9d286376234da53f7f39eae38",
+    "src/overview.mjs": "339a11aa9f7f02ae3b9efaae9fa424b3720c7869df46755313bd964bdc9f285d",
     "src/product.mjs": "f8205524d3809d6c85048f27f07c111cc722dab9613d635a1a27eb660d3fa9f4",
     "src/providers/claude-peer.mjs": "82cf3fa6804b81e201c72d5763ea51784104a2ac95d8e57ff18682933c67cf8b",
     "src/providers/claude-view.mjs": "a8f50d3d2976b5bf89f4b0c5e81d7e2439caf49de70051baaeb2af0406dd290f",
-    "src/providers/claude.mjs": "22e76aaee19ca964697cdc6e4ad18b90918bbc22bcead1d98be2f19475c3acba",
+    "src/providers/claude.mjs": "8cf1e571c8423a1868eeef348ce02748ad67778f1e1d523fd15c16a27e336d77",
     "src/providers/codex-view.mjs": "27a38ee33952f75e22749ca7e819e9ac7d9e5015fdb8f735fbbb8fc1b4a228e9",
     "src/providers/codex.mjs": "fcb3b7e1f0df995d1e55ecf8a8315fb8311dbe746d024551e2979dabb67f681a",
     "src/session-alias-catalog.mjs": "746a7d873dea728f30aa1786414877aa54a3d4e0830be99080042761e23a6ddc",
     "src/session-bridge.mjs": "3ad1668a0291c06bf6a7c1c565dc9c0a4f322191fa83c20fec464126e565289d",
     "src/session-dock.mjs": "743a2cd79038cf108fbe69b5c5f2f54e7fa02b682156f3826c5515a1d619ca62",
-    "src/session-preview.mjs": "d0a248d6101231569c6716012640614456f50051486cb4efa142f5bbb23ca36a",
+    "src/session-preview.mjs": "fc9df3c17e22f72cd6f53694c4d6009871e27dfcba43fee0f9ac8885e1833e2a",
     "src/tmux-workspace.mjs": "72c06f8b5ee3e326bfe59c4d314f6eb6ea760e388e831691c7d3c46b33213ca1",
     "test/claude-peer.test.mjs": "1012aa9d99cd0e3a2e96b061efc6434ad781bbd5af011e5b20efe56a56d224d4",
     "test/claude-provider.test.mjs": "bf72c0768c5b1265d8b7021597385ca1ebfbe9d83ef53b23e4d67fffc560d875",
@@ -63,19 +63,19 @@
     "test/fixtures/claude-preview.jsonl": "fec4b732daccffa14f992e39c76f5d1bbdfcc8f949bbd2df01d77dcf34d9e4dd",
     "test/fixtures/codex-preview.json": "253292e238a2b9598aade4fc20235f7273b317c25c89c51ddf7c2836313d1049",
     "test/managed-session-instructions.test.mjs": "73c3342cbbb3f9c2cf3a9b4b3d4fb77f2012073a899ed0504d78822d6f36fe1c",
-    "test/mutation/cases.json": "38aa51b143dc4f3e1f3744b5f82eababcabd060fd3a44b699c52e1928aa4f4c0",
+    "test/mutation/cases.json": "1763c357d3457379dcccde8e2d137ee2de86ab1c035768dafbaed1addab98859",
     "test/mutation-status.test.mjs": "be2b556def7c03c22efd904c1cc9babc1f38b4f4a588b1022f38f90d2b3e44f6",
     "test/native-launcher.test.mjs": "30111063308ff1d6dc7948c99b0088507143e03cbbc0ef673515aec0b039888f",
     "test/native-process.test.mjs": "68cb7c1f5ae68e63736a91d9fae86f0e11b2da5ce736b8d9085ee28b645c12dd",
     "test/native-session-host.test.mjs": "fd156931e1b504a5be8a7cdcef81d92a236736c1419ee06dbb9b3774ce786976",
     "test/overview-lifecycle.test.mjs": "c80a9aaf9662c89faad4f9de7821d086640f19921a35f95b211f66b91e999611",
-    "test/overview-preview.test.mjs": "13d5d6c2e55f1bc5cc718f17354957c97ac1867c633389fdd4f1fbf6947dec68",
+    "test/overview-preview.test.mjs": "42a1408e7396497ab70b1a62f46d96919d173e8ee2091ac5bb3b232bcc4f7c1e",
     "test/overview.test.mjs": "b7ba553eeeb5b8fbc4119c145fc1a5c1ae618e0bb30efe2ad7b8b7c2ea511367",
     "test/provider-waiting.test.mjs": "fb041d2fce5f1155543e9d394023c95c9608665025b9cecb82b6e4e9020e06b2",
     "test/session-alias-catalog.test.mjs": "1d9dfe4b3ad8eef09d04f20833113fa398eaf9a4356f1288d8e89650fd50d467",
     "test/session-bridge.test.mjs": "bd15994cd81d3bdc84b74540bc15b2905824d4c49eb7b4f738727e73cb0fdc4e",
     "test/session-dock.test.mjs": "bfffbfc0cc2f429682d5ab01dc2dddaab0b8363cedb0c9923e7506491e662037",
-    "test/session-preview.test.mjs": "972a34e8422429f506bb2116356f39075ccfe197b45f816705129d8553699c98",
+    "test/session-preview.test.mjs": "6373486d3a6a1a0ecdef0102f8dadab8ff3d71730864b04f5015935fb6c7c049",
     "test/storage-failures.test.mjs": "2cb75132aadf4cdc4a477ba815070057b494e69326cd585e3e5c2c6f9348c065",
     "test/tmux-integration.test.mjs": "e791e7a4c7afe1d5eef2d7fa99700827e940e8669778db64b428deb10763b7c4",
     "test/tmux-workspace.test.mjs": "cfb815e2874b29167bf0b7bea288899ed49d74537f13292bcc1e83477d8cf8db",
@@ -92,7 +92,47 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 68
+      "tests": 80
+    },
+    {
+      "id": "limit-claude-preview-to-tail",
+      "file": "src/session-preview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 80
+    },
+    {
+      "id": "reread-entire-preview-log",
+      "file": "src/session-preview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 80
+    },
+    {
+      "id": "retain-truncated-preview-cache",
+      "file": "src/session-preview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 80
+    },
+    {
+      "id": "drop-preview-on-read-error",
+      "file": "src/session-preview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 80
+    },
+    {
+      "id": "reuse-preview-after-cwd-change",
+      "file": "src/session-preview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 80
     },
     {
       "id": "ignore-preview-visibility",
@@ -100,7 +140,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 68
+      "tests": 80
     },
     {
       "id": "keep-old-preview-request",
@@ -108,7 +148,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 68
+      "tests": 80
     },
     {
       "id": "read-foreign-claude-preview",
@@ -116,7 +156,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 68
+      "tests": 80
     },
     {
       "id": "overwrite-latest-preview-answer",
@@ -124,7 +164,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 68
+      "tests": 80
     },
     {
       "id": "start-daemon-for-preview",
@@ -132,19 +172,19 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 68
+      "tests": 80
     }
   ],
   "baseline": {
     "status": "survived",
     "code": 0,
     "signal": null,
-    "tests": 68
+    "tests": 80
   },
   "restoredBaseline": {
     "status": "survived",
     "code": 0,
     "signal": null,
-    "tests": 68
+    "tests": 80
   }
 }

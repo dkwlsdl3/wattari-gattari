@@ -50,6 +50,15 @@ test("workspace, empty, loading, error and limited history have explicit preview
   assert.match(frame({ preview: { ...preview, input: "", output: "" } }), /조회 범위에 응답이 없습니다/);
 });
 
+test("preview failure shows its reason and keeps last successful data explicitly stale", () => {
+  const render = (value) => plain(buildOverviewFrame({ sessions: [a], selected: 1, width: 150, height: 30, preview: value }));
+  assert.match(render({ state: "error", error: "로그 파일 없음" }), /로그 파일 없음/);
+  const stale = render({ ...preview, error: "읽기 권한 없음", observedAt: 0, checkedAt: 100000 });
+  assert.match(stale, /입력 한글/); assert.match(stale, /답변 첫 줄/);
+  assert.match(stale, /읽기 권한 없음 · 이전 조회/);
+  assert.ok(stale.includes(new Date(0).toLocaleTimeString()));
+});
+
 test("actual dock key navigation selects one preview, reuses cache and suppresses narrow reads", async (t) => {
   const ui = setup(t); await delay(); assert.deepEqual(ui.calls, []);
   ui.key("down"); await delay(); assert.deepEqual(ui.calls, [a.id]);
