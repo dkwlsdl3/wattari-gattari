@@ -22,6 +22,7 @@ Wattari Gattari는 Claude Code와 Codex가 소유한 네이티브 세션을 발�
 
 - Claude: `claude agents --json`, native peer Unix socket, `claude --bg`,
   `claude attach`, `claude rm`을 사용합니다.
+  JSON 목록에 섞인 `interactive` 항목은 제외하고 attach 가능한 background 세션만 연결합니다.
 - Claude 생성 시 실행별 `--settings`에 제목 훅을 추가합니다. 시작 훅은 기능을 등록하고,
   `UserPromptSubmit`은 UUID별 이름 변경 요청을 한 번 전달합니다. 전달 전에는 대기 이름,
   전달 후에는 native 목록 이름을 표시합니다. 전달은 적용 확인이 아니므로 실패 시 F2로

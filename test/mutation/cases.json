@@ -31,6 +31,7 @@
   "provider": {
     "tests": ["test/codex-provider.test.mjs", "test/codex-app-server.test.mjs", "test/claude-peer.test.mjs", "test/claude-provider.test.mjs", "test/claude-usage.test.mjs", "test/provider-waiting.test.mjs"],
     "mutations": [
+      {"id":"reject-mixed-claude-agents","file":"src/providers/claude.mjs","from":"if (Array.isArray(rows)) rows = rows.filter((row) => row?.kind !== \"interactive\");","to":";"},
       {"id":"ignore-next-page","file":"src/providers/codex.mjs","from":"cursor = page.nextCursor;","to":"cursor = null;"},
       {"id":"ignore-approval-flag","file":"src/providers/codex.mjs","from":"[\"waitingOnApproval\", \"waitingOnUserInput\"].includes(flag)","to":"false"},
       {"id":"send-to-unloaded-thread","file":"src/providers/codex.mjs","from":"if (![\"active\", \"idle\"].includes(thread.status?.type))","to":"if (false)"},

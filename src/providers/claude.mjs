@@ -43,6 +43,8 @@ export function parseClaudeAgents(stdout) {
   try { rows = JSON.parse(stdout); } catch (cause) {
     throw Object.assign(new Error("Claude agents did not return valid JSON", { cause }), { code: "CLAUDE_AGENTS_INVALID" });
   }
+  // `agents --json` also lists interactive terminals; only background jobs support attach/rm.
+  if (Array.isArray(rows)) rows = rows.filter((row) => row?.kind !== "interactive");
   if (!Array.isArray(rows) || rows.some((row) => !row || !SHORT_ID.test(row.id) || typeof row.sessionId !== "string" || typeof row.cwd !== "string")) {
     throw Object.assign(new Error("Claude agents JSON does not match the expected session array"), { code: "CLAUDE_AGENTS_INVALID" });
   }

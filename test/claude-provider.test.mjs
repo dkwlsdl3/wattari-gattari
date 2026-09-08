@@ -9,6 +9,17 @@ import { ClaudeProvider, parseClaudeAgents, parseClaudeBackgroundId } from "../s
 import { WAGA_SESSION_INSTRUCTIONS } from "../src/managed-session-instructions.mjs";
 import { ClaudeTitleSync } from "../src/claude-title-sync.mjs";
 
+// Anonymized from `claude agents --json` on 2026-09-08: interactive rows have no attach id.
+const mixedAgents = JSON.parse(fs.readFileSync(new URL("./fixtures/claude-agents-mixed.json", import.meta.url), "utf8"));
+
+test("mixed native agents output preserves background sessions when an interactive row has no id", () => {
+  assert.deepEqual(parseClaudeAgents(JSON.stringify(mixedAgents)), mixedAgents.slice(0, 2));
+  assert.deepEqual(parseClaudeAgents(JSON.stringify([mixedAgents[2]])), []);
+  for (const row of [null, {}, { ...mixedAgents[0], id: undefined }, { ...mixedAgents[2], kind: "unknown" }]) {
+    assert.throws(() => parseClaudeAgents(JSON.stringify([mixedAgents[0], row])), { code: "CLAUDE_AGENTS_INVALID" });
+  }
+});
+
 test("Claude agents parser rejects drifted output", () => {
   assert.throws(() => parseClaudeAgents("{}"), { code: "CLAUDE_AGENTS_INVALID" });
 });
@@ -84,11 +95,12 @@ test("Claude provider joins agents JSON to the live peer registry", async (t) =>
   const endpoint = { async start(value) { endpointCalls.push(["start", value]); }, async send(_socket, text) { endpointCalls.push(["send", text]); return "message-1"; }, async waitForReply() { return { text: "OK" }; }, async stop() { endpointCalls.push(["stop"]); } };
   const provider = new ClaudeProvider({
     homeDirectory: root,
-    run: async () => ({ stdout: JSON.stringify([row]) }),
+    run: async () => ({ stdout: JSON.stringify([row, mixedAgents[2]]) }),
     endpointFactory: () => endpoint,
     aliasCatalog: { load: () => new Map([["claude:full-id", "renamed target"]]) },
   });
   const listed = await provider.list({ cwd: process.cwd() });
+  assert.equal(listed.length, 1, "interactive sessions must not suppress a live attachable session");
   assert.equal(listed[0].id, "claude:full-id");
   assert.equal(listed[0].name, "renamed target");
   assert.equal(listed[0].nativeId, "1234abcd");
