@@ -39,6 +39,12 @@ Wattari Gattari는 Claude Code와 Codex가 소유한 네이티브 세션을 발�
 Dock은 세션 목록과 관리를 담당합니다. 대화·도구·승인·모델 실행과 그 화면은 provider가 소유합니다.
 사용법과 단축키는 [README](../../README.ko.md)에 둡니다.
 
+- 오른쪽 미리보기는 선택한 세션의 마지막 입력·응답을 읽기 전용으로 표시합니다.
+  Codex는 `thread/items/list`를 최대 3페이지·페이지당 50항목, Claude는 해당 UUID의
+  JSONL 끝 256KiB까지만 읽습니다. 도구 출력·사고 내용은 제외하며 조회 범위 제한을 표시합니다.
+  선택 debounce 150ms, 메모리 캐시 5초·최대 20세션, 입력·응답 각각 4,000자로 제한합니다.
+  숨긴 dock·좁은 화면에서는 조회하지 않으며 별도 transcript 저장·모델 호출·daemon 기동은 없습니다.
+
 - `auto`는 tmux가 있으면 `tmux`, 없으면 `direct`를 선택합니다.
 - `tmux`는 네이티브 TUI마다 window를 재사용하고 여러 terminal client에 같은 화면을
   제공합니다. tmux 밖에서는 격리 server를, tmux 안에서는 현재 server의 Waga session을

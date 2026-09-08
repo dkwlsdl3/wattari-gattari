@@ -23,6 +23,40 @@ async function waitFor(check, timeoutMs = 2_000) {
   throw new Error(`condition was not met within ${timeoutMs}ms`);
 }
 
+test("real tmux dock previews follow key selection and disappear on terminal resize", { skip: !hasTmux, timeout: 15_000 }, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-preview-tmux-"));
+  const prefix = ["-S", path.join(root, "tmux.sock"), "-f", "/dev/null"];
+  const call = async (...args) => (await execFileAsync("tmux", [...prefix, ...args], { encoding: "utf8", timeout: commandTimeoutMs, signal: t.signal })).stdout;
+  t.after(() => {
+    spawnSync("tmux", [...prefix, "kill-server"], { stdio: "ignore", timeout: commandTimeoutMs });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const code = `
+    import {runOverview} from ${JSON.stringify(new URL("../src/overview.mjs", import.meta.url).href)};
+    const sessions = ['codex', 'claude'].map(provider => ({id: provider + ':proof', provider, name: 'waga-proof-' + provider, cwd: ${JSON.stringify(root)}, status: 'working'}));
+    await runOverview({ defaultCwd: ${JSON.stringify(root)}, workspace: {}, bridge: {
+      discover: async () => ({sessions, warnings: []}),
+      preview: async session => ({input: session.provider + '-INPUT 한글', output: session.provider + '-OUTPUT 완료'})
+    }});
+  `;
+  await call("new-session", "-d", "-s", "waga-proof-preview", "-x", "160", "-y", "35", "-c", root,
+    shellCommand(process.execPath, ["--input-type=module", "-e", code]));
+  const frame = () => call("capture-pane", "-p", "-t", "waga-proof-preview");
+  await waitFor(async () => (await frame()).includes("WATTARI GATTARI"));
+  await call("send-keys", "-t", "waga-proof-preview", "Down");
+  const codex = await waitFor(async () => { const text = await frame(); return text.includes("codex-OUTPUT 완료") && text; });
+  assert.ok(codex.includes("codex-INPUT 한글"));
+  assert.ok(codex.includes("Alt+Q"));
+  await call("send-keys", "-t", "waga-proof-preview", "Down");
+  const claude = await waitFor(async () => { const text = await frame(); return text.includes("claude-OUTPUT 완료") && text; });
+  assert.ok(!claude.includes("codex-OUTPUT"));
+  await call("resize-window", "-t", "waga-proof-preview", "-x", "100", "-y", "35");
+  await waitFor(async () => !(await frame()).includes("마지막 입력"));
+  const narrow = await frame();
+  assert.ok(narrow.includes("waga-proof-claude"));
+  assert.ok(narrow.includes("Alt+Q"));
+});
+
 test("real isolated tmux reuses, revives, and removes one retained session view", { skip: !hasTmux, timeout: 30_000 }, async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-tmux-"));
   const env = { ...process.env, XDG_STATE_HOME: path.join(root, "state") };

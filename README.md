@@ -15,6 +15,7 @@ from one local dock, without another daemon or replacement chat UI.
 - Browse sessions by project and open their native TUIs
 - Search, filter, reorder, rename, create, and archive
 - View Claude and Codex quota with a five-minute cache
+- Preview the selected session's latest input and response on wide terminals
 - Send notifications with `waga send` or request replies with `waga ask`
 
 ## Requirements and install
@@ -55,6 +56,12 @@ waga open codex --cwd ~/work/my-app
 `claude:<id>` and `codex:<id>` are recommended.
 
 ## Dock keys
+
+At 120 columns × 20 rows or larger, the right pane shows recent conversation text.
+Only the selected session is read, with a 150 ms selection debounce and five-second
+cache; hidden docks do not poll. Long histories are bounded excerpts, not a live
+terminal mirror. The latest response may belong to an earlier prompt. No model
+calls or additional transcript files are created.
 
 | Key | Action |
 |---|---|

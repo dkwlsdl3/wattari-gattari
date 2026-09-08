@@ -1,0 +1,8 @@
+{
+  "data": [{ "turnId": "01a07f99-0d5b-7a80-bf3c-01432b12a06a", "item": {
+    "type": "userMessage", "id": "01a07f99-0de0-7e71-90eb-5cc4c6494eb2", "clientId": null,
+    "content": [{ "type": "text", "text": "WAGA_PREVIEW_READ_ONLY_PROOF", "text_elements": [] }]
+  } }],
+  "nextCursor": null,
+  "backwardsCursor": "{\"requestedThreadId\":\"01a07f99-0b5e-7550-a247-fb85254bbe78\",\"rolloutOrdinal\":7,\"includeAnchor\":true,\"scope\":{\"kind\":\"itemsByCreatedAtOrdinal\"}}"
+}

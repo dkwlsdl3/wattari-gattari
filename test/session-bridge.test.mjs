@@ -24,6 +24,16 @@ function provider(name, sessions, calls = []) {
   };
 }
 
+test("preview delegates the exact discovered identity without rediscovery or name resolution", async () => {
+  const session = { id: "codex:full", nativeId: "full", provider: "codex", name: "duplicate" };
+  const options = { signal: new AbortController().signal };
+  const bridge = new SessionBridge({ providers: [{ name: "codex", list: () => { throw new Error("must not rediscover"); }, preview: async (actual, passed) => {
+    assert.equal(actual, session); assert.equal(passed, options); return { input: "preview" };
+  } }, { name: "claude" }] });
+  assert.deepEqual(await bridge.preview(session, options), { input: "preview" });
+  await assert.rejects(bridge.preview({ provider: "claude" }), { code: "PREVIEW_UNAVAILABLE" });
+});
+
 test("discovery keeps healthy provider results and exposes warnings", async () => {
   const claude = provider("claude", [{ id: "claude:1", provider: "claude", name: "one", updatedAt: 1 }]);
   const codex = { name: "codex", async list() { throw Object.assign(new Error("offline"), { code: "DOWN" }); } };

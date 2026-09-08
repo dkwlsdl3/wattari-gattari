@@ -25,6 +25,63 @@ function harness(responder, options = {}) {
   return { calls, provider: new CodexProvider({ run, clientFactory: async () => client, wait: async () => {}, ...options }) };
 }
 
+test("Codex preview reads descending bounded history and skips tools without resuming or submitting", async () => {
+  // ThreadItemEntry/UserInput shapes from Codex 0.153.4 generated v2 schema.
+  const { provider, calls } = harness((method, params) => {
+    assert.equal(method, "thread/items/list");
+    assert.equal(params.threadId, "preview-thread");
+    assert.equal(params.limit, 50);
+    assert.equal(params.sortDirection, "desc");
+    assert.equal(params.turnId, undefined);
+    return params.cursor ? { data: [{ turnId: "old", item: { type: "userMessage", content: [{ type: "text", text: "last prompt", text_elements: [] }] } }], nextCursor: null }
+      : { data: [
+        { turnId: "new", item: { type: "commandExecution", aggregatedOutput: "SECRET TOOL OUTPUT" } },
+        { turnId: "new", item: { type: "agentMessage", text: "latest answer", phase: "final_answer" } },
+        { turnId: "old", item: { type: "agentMessage", text: "older answer", phase: "commentary" } },
+      ], nextCursor: "older" };
+  });
+  assert.deepEqual(await provider.preview({ nativeId: "preview-thread" }), { input: "last prompt", output: "latest answer", limited: false });
+  assert.deepEqual(calls.map(([name]) => name), ["run", "initialize", "thread/items/list", "thread/items/list", "close"]);
+});
+
+test("Codex preview reads the real offline 0.153.4 items fixture", async () => {
+  // 2026-09-08: isolated waga-proof-preview-* daemon, no credentials or model response.
+  const fixture = JSON.parse(fs.readFileSync(new URL("./fixtures/codex-preview.json", import.meta.url), "utf8"));
+  const { provider } = harness(() => fixture);
+  assert.deepEqual(await provider.preview({ nativeId: "01a07f99-0b5e-7550-a247-fb85254bbe78" }), {
+    input: "WAGA_PREVIEW_READ_ONLY_PROOF", output: "", limited: false,
+  });
+});
+
+test("Codex image-only latest input must not be replaced by an older text prompt", async () => {
+  const { provider } = harness(() => ({ data: [
+    { item: { type: "userMessage", content: [{ type: "image", url: "image" }] } },
+    { item: { type: "userMessage", content: [{ type: "text", text: "WRONG OLD INPUT" }] } },
+  ], nextCursor: null }));
+  assert.equal((await provider.preview({ nativeId: "t" })).input, "[텍스트 없는 입력]");
+});
+
+test("Codex preview bounds history scans, isolates empty history and closes on protocol failure", async () => {
+  let pages = 0;
+  const bounded = harness(() => ({ data: [], nextCursor: `page-${++pages}` }));
+  assert.deepEqual(await bounded.provider.preview({ nativeId: "t" }), { input: "", output: "", limited: true });
+  assert.equal(pages, 3);
+  const empty = harness(() => ({ data: [], nextCursor: null }));
+  assert.equal((await empty.provider.preview({ nativeId: "t" })).limited, false);
+  const invalid = harness(() => ({ data: "invalid" }));
+  await assert.rejects(invalid.provider.preview({ nativeId: "t" }), { code: "CODEX_PAGE_INVALID" });
+  assert.equal(invalid.calls.at(-1)[0], "close");
+});
+
+test("Codex preview does not start a daemon and respects cancellation", async () => {
+  const calls = [];
+  const provider = new CodexProvider({ run: async (args) => { calls.push(args); return { stdout: '{"status":"stopped"}' }; }, eventLog: { record() {} } });
+  await assert.rejects(provider.preview({ nativeId: "t" }), { code: "CODEX_DAEMON_UNAVAILABLE" });
+  assert.deepEqual(calls, [["app-server", "daemon", "version"]]);
+  await assert.rejects(provider.preview({ nativeId: "t" }, { signal: AbortSignal.abort() }));
+  assert.equal(calls.length, 1);
+});
+
 test("Codex completion finds the matching turn and answer beyond the first page", async () => {
   const { provider, calls } = harness((method, params) => {
     if (method === "thread/read") return { thread: { status: { type: "idle" } } };

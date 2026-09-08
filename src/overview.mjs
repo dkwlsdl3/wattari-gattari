@@ -1,8 +1,10 @@
 import path from "node:path";
 import readline from "node:readline";
+import { stripVTControlCharacters } from "node:util";
 
 import { nativeSessionCommand } from "./native-launcher.mjs";
 import { TmuxWorkspace } from "./tmux-workspace.mjs";
+import { previewText, SessionPreview } from "./session-preview.mjs";
 
 const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
@@ -255,8 +257,55 @@ export function nativeReturnHint(mode) {
     : "네이티브 TUI: tmux prefix + 0 → dock";
 }
 
-export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, providerUsage = {}, notice = "", newTask = null, renameTask = null, nativeHint = nativeReturnHint(null) }) {
+export function hasOverviewPreview(width, height) {
+  return width >= 120 && height >= 20;
+}
+
+function wrapPreview(text, width, count) {
+  const result = [];
+  for (const paragraph of previewText(text).split("\n")) {
+    let line = "";
+    let used = 0;
+    for (const grapheme of graphemes(paragraph)) {
+      const size = widthOf(grapheme);
+      if (used + size > width) {
+        result.push(line); line = ""; used = 0;
+        if (result.length >= count) break;
+      }
+      line += grapheme; used += size;
+    }
+    if (result.length >= count) break;
+    result.push(line);
+  }
+  if (result.length >= count && widthOf(result.join("")) < widthOf(previewText(text).replace(/\n/g, ""))) {
+    result[count - 1] = `${fit(result[count - 1], width - 1)}…`;
+  }
+  return Array.from({ length: count }, (_, index) => fit(result[index] ?? "", width));
+}
+
+function previewLines(session, preview, width, height) {
+  const heading = session ? `${session.provider === "claude" ? "CLAUDE" : "CODEX"} · ${session.name}` : "세션 미리보기";
+  const brand = session?.provider === "claude" ? THEME.claude : THEME.codex;
+  const lines = [color(brand, fit(heading, width))];
+  if (!session || !preview || preview.state !== "ready") {
+    const text = !session ? "세션을 선택하면 최근 대화가 표시됩니다."
+      : preview?.state === "error" ? "미리보기를 읽지 못했습니다. 잠시 후 재시도합니다." : "최근 대화를 읽는 중입니다…";
+    return [...lines, "", ...wrapPreview(text, width, height - 2).map((line) => color(THEME.muted, line))];
+  }
+  const inputRows = Math.max(2, Math.floor((height - 6) * 0.4));
+  const outputRows = Math.max(2, height - 6 - inputRows);
+  lines.push(color(THEME.primary, "마지막 입력"));
+  lines.push(...wrapPreview(preview.input || "최근 조회 범위에 입력이 없습니다.", width, inputRows));
+  lines.push("", color(THEME.primary, fit("마지막 응답 (이전 작업 포함)", width)));
+  lines.push(...wrapPreview(preview.output || "최근 조회 범위에 응답이 없습니다.", width, outputRows));
+  lines.push("", color(THEME.muted, fit(`${preview.limited ? "최근 일부 · " : ""}조회 ${new Date(preview.checkedAt).toLocaleTimeString()}`, width)));
+  return lines;
+}
+
+export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, providerUsage = {}, notice = "", newTask = null, renameTask = null, preview = null, nativeHint = nativeReturnHint(null) }) {
   const usableWidth = Math.max(1, width - 4);
+  const split = hasOverviewPreview(width, height);
+  const listWidth = split ? Math.floor(usableWidth * 0.6) : usableWidth;
   const usageLabels = [
     { text: formatClaudeUsage(providerUsage.claude), color: THEME.claude },
     { text: formatCodexUsage(providerUsage.codex), color: THEME.codex },
@@ -264,16 +313,17 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
   const visibleRows = Math.max(1, height - (usageLabels.length ? 10 : 9));
   const safeSelected = Math.max(0, Math.min(selected, Math.max(0, nodes.length - 1)));
   const offset = Math.max(0, Math.min(safeSelected - Math.floor(visibleRows / 2), Math.max(0, nodes.length - visibleRows)));
-  const wide = usableWidth >= 64;
-  const nameWidth = wide ? Math.max(12, usableWidth - 31) : Math.max(1, usableWidth - 21);
+  const wide = listWidth >= 64;
+  const nameWidth = wide ? Math.max(12, listWidth - 31) : Math.max(1, listWidth - 21);
   const lines = [];
   const title = wide ? "WATTARI GATTARI  Claude + Codex session dock" : "WAGA · session dock";
   lines.push(`  ${color(THEME.title, fit(title, usableWidth))}`);
   lines.push(`  ${color(THEME.muted, fit(`${counts(sessions)}${provider ? `   filter: ${provider}` : ""}`, usableWidth))}`);
   if (usageLabels.length) lines.push(`  ${coloredUsageLine(usageLabels, usableWidth)}`);
   lines.push(`  ${color(THEME.divider, "─".repeat(Math.max(1, usableWidth)))}`);
+  const bodyStart = lines.length;
 
-  if (!sessions.length) lines.push(`  ${color(THEME.muted, query ? "검색 결과가 없습니다." : "발견된 세션이 없습니다. Alt+R을 눌러 새로고침하세요.")}`);
+  if (!sessions.length) lines.push(color(THEME.muted, fit(query ? "검색 결과가 없습니다." : "발견된 세션이 없습니다. Alt+R을 눌러 새로고침하세요.", listWidth)));
   for (let index = offset; index < Math.min(nodes.length, offset + visibleRows); index += 1) {
     const node = nodes[index];
     const active = index === safeSelected;
@@ -281,7 +331,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     if (node.type === "workspace") {
       const toggle = collapsed.has(node.cwd) && !query ? "▸" : "▾";
       const detail = wide ? `  ${node.cwd}  ·  ${node.sessionCount} session${node.sessionCount === 1 ? "" : "s"}` : `  ${node.sessionCount}`;
-      const row = `${marker} ${color(THEME.muted, toggle)} ${color(THEME.primary, fit(`${node.name}${detail}`, usableWidth - 4))}`;
+      const row = `${marker} ${color(THEME.muted, toggle)} ${color(THEME.primary, fit(`${node.name}${detail}`, listWidth - 4))}`;
       lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
       continue;
     }
@@ -293,6 +343,16 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
       ? `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)}  ${fit(session.name, nameWidth)}  ${color(statusColor, fit(status, 11))}`
       : `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)} ${fit(session.name, nameWidth)} ${color(statusColor, fit(status, 8))}`;
     lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
+  }
+  if (split) {
+    const rightWidth = usableWidth - listWidth - 3;
+    const right = previewLines(nodes[safeSelected]?.session, preview, rightWidth, visibleRows);
+    const left = lines.splice(bodyStart);
+    for (let row = 0; row < visibleRows; row++) {
+      const content = left[row] ?? "";
+      const padding = " ".repeat(Math.max(0, listWidth - widthOf(stripVTControlCharacters(content))));
+      lines.push(`  ${content}${padding}${color(THEME.divider, " │ ")}${right[row] ?? ""}`);
+    }
   }
   const helpLines = wide
     ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  Alt+Enter 재접속  / 검색  Tab 필터", "F2 이름 변경  Alt+N 새 세션  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기"]
@@ -348,6 +408,8 @@ export async function runOverview({
   errorOutput = process.stderr,
   orderStore = null,
   refreshMs = 3_000,
+  previewDebounceMs = 150,
+  previewCacheMs = 5_000,
   listenForSignals = true,
   nativeHint = nativeReturnHint(process.env.WAGA_TMUX_MODE),
 } = {}) {
@@ -383,6 +445,13 @@ export async function runOverview({
   let nativeOpen = false;
   let pendingArchiveId = null;
   const archivedSessionIds = new Set();
+  const previewReader = new SessionPreview({
+    read: (session, options) => bridge.preview(session, options),
+    visible: async () => !closed && !busy && !nativeOpen && (!workspace.shouldRefreshOverview || await workspace.shouldRefreshOverview()),
+    changed: () => render(),
+    debounceMs: previewDebounceMs,
+    cacheMs: previewCacheMs,
+  });
 
   const visibleSessions = () => selectOverviewSessions(allSessions, { query, provider });
   const visibleNodes = () => buildOverviewTree(visibleSessions(), { collapsed, query, rootCwd: defaultCwd });
@@ -402,6 +471,9 @@ export async function runOverview({
     const sessions = visibleSessions();
     const nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd: defaultCwd });
     reconcileSelection(nodes);
+    const previewSession = hasOverviewPreview(outputStream.columns || 100, outputStream.rows || 30) && !busy && !newTask && !renameTask
+      ? nodes[selected]?.session : null;
+    previewReader.select(typeof bridge.preview === "function" ? previewSession : null);
     outputStream.write(`${ESC}H${ESC}J${buildOverviewFrame({
       sessions,
       nodes,
@@ -418,6 +490,7 @@ export async function runOverview({
       renameTask,
       rootCwd: defaultCwd,
       nativeHint,
+      preview: previewReader.snapshot(previewSession),
     })}`);
   };
 
@@ -741,6 +814,7 @@ export async function runOverview({
   const cleanup = () => {
     if (closed) return;
     closed = true;
+    previewReader.close();
     clearInterval(timer);
     inputStream.off("keypress", onKeypress);
     inputStream.off("end", cleanup);

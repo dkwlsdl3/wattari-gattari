@@ -67,6 +67,10 @@ const frameBuild = await measure(() => {
   const nodes = buildOverviewTree(ordered);
   return buildOverviewFrame({ sessions: ordered, nodes, width: 120, height: 40 });
 });
+const previewFrameBuild = await measure(() => buildOverviewFrame({
+  sessions: allSessions, selected: 1, width: 160, height: 40,
+  preview: { state: "ready", input: "프롬프트 preview\n".repeat(400), output: "응답 response\n".repeat(400), checkedAt: 0 },
+}));
 const result = {
   scope: "In-memory bridge processing and frame string construction; excludes provider CLI/RPC/parsing and terminal drawing",
   node: process.version,
@@ -74,6 +78,7 @@ const result = {
   samples: SAMPLE_RUNS,
   bridgeProcessing,
   frameBuild,
+  previewFrameBuild,
   rssMiB: process.memoryUsage().rss / 1024 / 1024,
   budgets,
 };
@@ -82,6 +87,7 @@ process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 const failures = [];
 if (bridgeProcessing.p95Ms > budgets.bridgeProcessingP95Ms) failures.push(`bridge processing p95 ${bridgeProcessing.p95Ms.toFixed(2)}ms > ${budgets.bridgeProcessingP95Ms}ms`);
 if (frameBuild.p95Ms > budgets.frameBuildP95Ms) failures.push(`frame build p95 ${frameBuild.p95Ms.toFixed(2)}ms > ${budgets.frameBuildP95Ms}ms`);
+if (previewFrameBuild.p95Ms > budgets.frameBuildP95Ms) failures.push(`preview frame p95 ${previewFrameBuild.p95Ms.toFixed(2)}ms > ${budgets.frameBuildP95Ms}ms`);
 if (failures.length) {
   process.stderr.write(`Performance budget exceeded: ${failures.join(", ")}\n`);
   process.exitCode = 1;

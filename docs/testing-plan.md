@@ -31,7 +31,7 @@ provider·터미널 성능 측정은 아니며, tmux 통합 테스트의 skip �
 node scripts/mutation-check.mjs lifecycle /absolute/new-lifecycle-report
 ```
 
-구획은 `provider`, `overview`, `lifecycle`, `cli`, `title`이며 출력은 존재하지 않는 절대 경로입니다.
+구획은 `provider`, `overview`, `lifecycle`, `cli`, `title`, `preview`이며 출력은 존재하지 않는 절대 경로입니다.
 실행기는 임시 복사본에 `test/mutation/cases.json`의 변이를 적용합니다.
 원본 checkout·사용자 세션은 변경하지 않으며 Node 외 추가 의존성은 없습니다.
 

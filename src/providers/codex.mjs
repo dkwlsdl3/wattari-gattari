@@ -7,6 +7,7 @@ import { readBeforeDeadline } from "../bridge/deadline.mjs";
 import { CodexAppServerClient } from "../codex-app-server.mjs";
 import { EventLog } from "../event-log.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
+import { messageText, previewText } from "../session-preview.mjs";
 
 const execFileAsync = promisify(execFile);
 const THREAD_READ_CONCURRENCY = 8;
@@ -177,6 +178,31 @@ export class CodexProvider {
 
   usageSnapshot() {
     return this.#usageCache?.value ?? null;
+  }
+
+  async preview(session, { signal } = {}) {
+    // Unlike session operations, preview must never start a stopped daemon.
+    signal?.throwIfAborted();
+    const daemon = await this.daemonInfo();
+    this.#assertDaemonAvailable(daemon);
+    signal?.throwIfAborted();
+    const client = await this.#clientFactory(daemon.socketPath);
+    try {
+      const boundedSignal = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(3_000)]);
+      await client.initialize({ signal: boundedSignal });
+      const result = { input: "", output: "", limited: false };
+      let count = 0;
+      for await (const data of pages((method, params) => client.request(method, params, { signal: boundedSignal }),
+        "thread/items/list", { threadId: session.nativeId, limit: 50, sortDirection: "desc" })) {
+        for (const { item } of data) {
+          if (item?.type === "userMessage" && !result.input) result.input = messageText(item.content) || "[텍스트 없는 입력]";
+          if (item?.type === "agentMessage" && !result.output) result.output = previewText(item.text);
+          if (result.input && result.output) return result;
+        }
+        if (++count === 3) { result.limited = true; break; }
+      }
+      return result;
+    } finally { await client.close(); }
   }
 
   async #refreshUsage(client) {

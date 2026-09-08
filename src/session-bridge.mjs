@@ -51,6 +51,13 @@ export class SessionBridge {
     return this.#provider(provider).create(prompt.trim(), { cwd });
   }
 
+  // Takes an already discovered identity; never rediscover or resolve by display name.
+  async preview(session, options) {
+    const provider = this.#provider(session.provider);
+    if (typeof provider.preview !== "function") throw new BridgeError("PREVIEW_UNAVAILABLE", "Session preview is unavailable");
+    return provider.preview(session, options);
+  }
+
   async archive(target, { cwd } = {}) {
     const { provider, session } = await this.#resolve(target, cwd);
     return provider.archive(session);

@@ -11,6 +11,7 @@ import { ClaudeTitleSync } from "../claude-title-sync.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
 import { defaultClaudeAliasPath, SessionAliasCatalog } from "../session-alias-catalog.mjs";
 import { ClaudePeerEndpoint } from "./claude-peer.mjs";
+import { readClaudePreview } from "../session-preview.mjs";
 
 const execFileAsync = promisify(execFile);
 const SHORT_ID = /^[0-9a-f]{8}$/i;
@@ -124,6 +125,10 @@ export class ClaudeProvider {
 
   usageSnapshot() {
     return this.#usageCache?.value ?? null;
+  }
+
+  preview(session, { signal } = {}) {
+    return readClaudePreview(session, { homeDirectory: this.#home, signal });
   }
 
   async #refreshUsage() {

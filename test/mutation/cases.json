@@ -1,4 +1,15 @@
 {
+  "preview": {
+    "tests": ["test/session-preview.test.mjs", "test/overview-preview.test.mjs", "test/codex-provider.test.mjs", "test/session-bridge.test.mjs"],
+    "mutations": [
+      {"id":"ignore-preview-cache","file":"src/session-preview.mjs","from":"if (cached && this.#now() - cached.checkedAt < this.#ttl) return;","to":"if (false) return;"},
+      {"id":"ignore-preview-visibility","file":"src/session-preview.mjs","from":"if (!await this.#visible() || controller.signal.aborted || this.#closed) return;","to":"if (controller.signal.aborted || this.#closed) return;"},
+      {"id":"keep-old-preview-request","file":"src/session-preview.mjs","from":"this.#running?.abort();\n    }","to":";\n    }"},
+      {"id":"read-foreign-claude-preview","file":"src/session-preview.mjs","from":"row.sessionId !== session.sessionId || ","to":""},
+      {"id":"overwrite-latest-preview-answer","file":"src/providers/codex.mjs","from":"item?.type === \"agentMessage\" && !result.output","to":"item?.type === \"agentMessage\""},
+      {"id":"start-daemon-for-preview","file":"src/providers/codex.mjs","from":"const daemon = await this.daemonInfo();","to":"const daemon = await this.daemonInfo({ start: true });"}
+    ]
+  },
   "title": {
     "tests": ["test/claude-title-sync.test.mjs", "test/claude-provider.test.mjs", "test/overview.test.mjs"],
     "mutations": [
@@ -24,7 +35,7 @@
       {"id":"wrong-answer-turn","file":"src/providers/codex.mjs","from":"entry.turnId === turnId && entry.item?.type","to":"entry.item?.type"},
       {"id":"wrong-completion-turn","file":"src/providers/codex.mjs","from":"candidate.id === turnId","to":"true"},
       {"id":"skip-initialize","file":"src/providers/codex.mjs","from":"await client.initialize();","to":";"},
-      {"id":"skip-client-close","file":"src/providers/codex.mjs","from":"await client.close();","to":";"},
+      {"id":"skip-client-close","file":"src/providers/codex.mjs","from":"return await operation(client);\n    } finally {\n      await client.close();","to":"return await operation(client);\n    } finally {\n      ;"},
       {"id":"keep-child-sessions","file":"src/providers/codex.mjs","from":"!thread.ephemeral && !thread.parentThreadId","to":"!thread.ephemeral"},
       {"id":"allow-late-rpc","file":"src/codex-app-server.mjs","from":"}, timeoutMs);","to":"}, 60000);"},
       {"id":"ignore-async-send-error","file":"src/codex-app-server.mjs","from":"if (error) this.#failAll(error);","to":"if (false) this.#failAll(error);"},
