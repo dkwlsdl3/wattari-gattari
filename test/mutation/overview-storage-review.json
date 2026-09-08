@@ -1,6 +1,6 @@
 {
   "group": "overview",
-  "observedAt": "2026-09-08T07:00:29.344Z",
+  "observedAt": "2026-09-08T08:05:50.200Z",
   "node": "v24.15.0",
   "method": "targeted source replacement, not exhaustive Stryker generation",
   "command": [
@@ -34,7 +34,7 @@
     "src/managed-session-instructions.mjs": "160f75fb566e04f7f35eb9ec684f08fdada29d3a79e8481e7b93ebe6f723538c",
     "src/native-launcher.mjs": "3130a497397f3129cb2c4b5460a4b5ea20a45bb47f42ee1f5349f38658bb38c9",
     "src/native-session-host.mjs": "5c198aafa92883acdddf4a670bb41669accd5ae0d5c9de3791629a31117fe2d7",
-    "src/overview.mjs": "8cdd234a6356b53a20834343a5a3bcb634d9da0cab45e2dbc03537d89d27dde6",
+    "src/overview.mjs": "8d684ed2d7bd79509ec7467d2cae47613a45e2bbcd6d19c5de4da2e95a3a6b22",
     "src/product.mjs": "f8205524d3809d6c85048f27f07c111cc722dab9613d635a1a27eb660d3fa9f4",
     "src/providers/claude-peer.mjs": "82cf3fa6804b81e201c72d5763ea51784104a2ac95d8e57ff18682933c67cf8b",
     "src/providers/claude-view.mjs": "a8f50d3d2976b5bf89f4b0c5e81d7e2439caf49de70051baaeb2af0406dd290f",
@@ -66,14 +66,14 @@
     "test/fixtures/claude-preview.jsonl": "fec4b732daccffa14f992e39c76f5d1bbdfcc8f949bbd2df01d77dcf34d9e4dd",
     "test/fixtures/codex-preview.json": "253292e238a2b9598aade4fc20235f7273b317c25c89c51ddf7c2836313d1049",
     "test/managed-session-instructions.test.mjs": "73c3342cbbb3f9c2cf3a9b4b3d4fb77f2012073a899ed0504d78822d6f36fe1c",
-    "test/mutation/cases.json": "9b14215f531003ccdad56e14a47335419a2e2ea936c2ddae6836ccaea5003017",
+    "test/mutation/cases.json": "914e9d6454422df5e830eb67a01fc4c80fd7bfdc5ea35531732b2b0b73cac104",
     "test/mutation-status.test.mjs": "be2b556def7c03c22efd904c1cc9babc1f38b4f4a588b1022f38f90d2b3e44f6",
     "test/native-launcher.test.mjs": "30111063308ff1d6dc7948c99b0088507143e03cbbc0ef673515aec0b039888f",
     "test/native-process.test.mjs": "68cb7c1f5ae68e63736a91d9fae86f0e11b2da5ce736b8d9085ee28b645c12dd",
     "test/native-session-host.test.mjs": "fd156931e1b504a5be8a7cdcef81d92a236736c1419ee06dbb9b3774ce786976",
     "test/overview-lifecycle.test.mjs": "c80a9aaf9662c89faad4f9de7821d086640f19921a35f95b211f66b91e999611",
     "test/overview-preview.test.mjs": "42a1408e7396497ab70b1a62f46d96919d173e8ee2091ac5bb3b232bcc4f7c1e",
-    "test/overview.test.mjs": "909b094430da04a0548fc8f9ab5649a41e8810d5f750638f3a1b447fafd3ae4a",
+    "test/overview.test.mjs": "e99cc47350a9ab30b54037b7e2d9045563794541d195c78368490a815be090c3",
     "test/provider-waiting.test.mjs": "fb041d2fce5f1155543e9d394023c95c9608665025b9cecb82b6e4e9020e06b2",
     "test/session-alias-catalog.test.mjs": "1d9dfe4b3ad8eef09d04f20833113fa398eaf9a4356f1288d8e89650fd50d467",
     "test/session-bridge.test.mjs": "03fce0d6b645d74d91bd15d1c7169df3433c8069c97fd8737d46aaed94106019",
@@ -90,12 +90,60 @@
   },
   "results": [
     {
+      "id": "archive-wait-view-before-unlock",
+      "file": "src/overview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 83
+    },
+    {
+      "id": "archive-wait-list-before-unlock",
+      "file": "src/overview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 83
+    },
+    {
+      "id": "archive-before-native-ack",
+      "file": "src/overview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 83
+    },
+    {
+      "id": "archive-cleanup-after-failure",
+      "file": "src/overview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 83
+    },
+    {
+      "id": "archive-forget-tombstone",
+      "file": "src/overview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 83
+    },
+    {
+      "id": "archive-drop-cleanup-warning",
+      "file": "src/overview.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 83
+    },
+    {
       "id": "drop-created-session-metadata",
       "file": "src/session-bridge.mjs",
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "wait-full-list-before-unlock",
@@ -103,7 +151,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "skip-immediate-created-row",
@@ -111,7 +159,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "steal-late-created-selection",
@@ -119,7 +167,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "remove-on-first-miss",
@@ -127,7 +175,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "hide-after-forty",
@@ -135,7 +183,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "remove-unavailable-provider",
@@ -143,7 +191,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "ignore-manual-rank",
@@ -151,7 +199,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "reverse-manual-move",
@@ -159,7 +207,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "paint-over-native",
@@ -167,7 +215,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "accept-late-discovery",
@@ -175,7 +223,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "lose-forced-refresh",
@@ -183,7 +231,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "leak-signal-listener",
@@ -191,7 +239,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "block-exit-on-discovery",
@@ -199,7 +247,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "skip-order-persist",
@@ -207,7 +255,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "skip-alias-persist",
@@ -215,7 +263,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "leak-order-temp",
@@ -223,7 +271,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     },
     {
       "id": "leak-alias-temp",
@@ -231,19 +279,19 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 76
+      "tests": 83
     }
   ],
   "baseline": {
     "status": "survived",
     "code": 0,
     "signal": null,
-    "tests": 76
+    "tests": 83
   },
   "restoredBaseline": {
     "status": "survived",
     "code": 0,
     "signal": null,
-    "tests": 76
+    "tests": 83
   }
 }

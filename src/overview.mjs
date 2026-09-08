@@ -616,22 +616,32 @@ export async function runOverview({
     render();
     const scope = filterCwd ? { cwd: path.resolve(filterCwd) } : {};
     void (async () => {
+      let archived = false;
       try {
         await bridge.archive(target.id, scope);
+        if (closed) return;
+        archived = true;
         archivedSessionIds.add(target.id);
         allSessions = allSessions.filter((session) => session.id !== target.id);
-        let closeWarning = null;
-        try { await workspace.closeSessionView?.(target); }
-        catch (error) { closeWarning = { provider: "waga", message: `보관된 세션 창을 닫지 못했습니다: ${error.message}` }; }
         selectedKey = null;
-        await refresh({ whileBusy: true, force: true });
         notice = `${target.name} 세션을 보관했습니다. 대화 로그는 유지됩니다.`;
-        if (closeWarning) warnings = [closeWarning, ...warnings];
       } catch (error) {
         warnings = [{ provider: target.provider, message: error.message }];
       } finally {
         busy = false;
         if (!closed) render();
+      }
+
+      // Native acknowledgement is the UI boundary; cleanup must not hold input or the row.
+      if (!archived || closed) return;
+      let closeWarning = null;
+      try { await workspace.closeSessionView?.(target); }
+      catch (error) { closeWarning = { provider: "waga", message: `보관된 세션 창을 닫지 못했습니다: ${error.message}` }; }
+      if (closed) return;
+      await refresh({ force: true });
+      if (closeWarning && !closed) {
+        warnings = [closeWarning, ...warnings];
+        render();
       }
     })();
   };

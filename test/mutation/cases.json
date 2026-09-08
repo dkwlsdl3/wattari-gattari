@@ -96,6 +96,12 @@
   "overview": {
     "tests": ["test/overview.test.mjs", "test/overview-lifecycle.test.mjs", "test/dock-order.test.mjs", "test/session-alias-catalog.test.mjs", "test/storage-failures.test.mjs", "test/session-bridge.test.mjs"],
     "mutations": [
+      {"id":"archive-wait-view-before-unlock","file":"src/overview.mjs","from":"archived = true;\n        archivedSessionIds.add(target.id);","to":"archived = true; await workspace.closeSessionView?.(target);\n        archivedSessionIds.add(target.id);"},
+      {"id":"archive-wait-list-before-unlock","file":"src/overview.mjs","from":"archived = true;\n        archivedSessionIds.add(target.id);","to":"archived = true; await refresh({ whileBusy: true, force: true });\n        archivedSessionIds.add(target.id);"},
+      {"id":"archive-before-native-ack","file":"src/overview.mjs","from":"await bridge.archive(target.id, scope);","to":"void bridge.archive(target.id, scope).catch(() => {});"},
+      {"id":"archive-cleanup-after-failure","file":"src/overview.mjs","from":"if (!archived || closed) return;","to":"if (closed) return;"},
+      {"id":"archive-forget-tombstone","file":"src/overview.mjs","from":"archivedSessionIds.add(target.id);","to":";"},
+      {"id":"archive-drop-cleanup-warning","file":"src/overview.mjs","from":"if (closeWarning && !closed) {","to":"if (false) {"},
       {"id":"drop-created-session-metadata","file":"src/session-bridge.mjs","from":"if (session) return { ...created, session };","to":"if (false) return { ...created, session };"},
       {"id":"wait-full-list-before-unlock","file":"src/overview.mjs","from":"created = await bridge.create(draft.provider, draft.prompt, { cwd: draft.cwd });","to":"created = await bridge.create(draft.provider, draft.prompt, { cwd: draft.cwd }); await refresh({ whileBusy: true, force: true });"},
       {"id":"skip-immediate-created-row","file":"src/overview.mjs","from":"if (created.session) {","to":"if (false) {"},

@@ -401,6 +401,139 @@ test("Alt+X twice archives the selected session and closes its retained view", a
   assert.equal(await running, 0);
 });
 
+for (const slowStage of ["close", "refresh"]) test(`Alt+X removes the row and unlocks input before ${slowStage} finishes`, async (t) => {
+  const input = ttyInput(), output = capturedOutput();
+  let release; const pending = new Promise((resolve) => { release = resolve; });
+  const active = { ...sessions[0], name: "archive-proof" };
+  const remaining = { ...active, id: "codex:remaining", name: "remaining-proof" };
+  let archived = false, reads = 0, closeCalls = 0;
+  const snapshot = { sessions: [active, remaining], warnings: [] };
+  t.after(() => release(snapshot));
+  const bridge = {
+    async discover() { reads++; return archived && slowStage === "refresh" ? pending : snapshot; },
+    async archive() { archived = true; },
+  };
+  const workspace = {
+    async closeSessionView() { closeCalls++; if (slowStage === "close") await pending; },
+  };
+  const running = runOverview({ bridge, workspace, defaultCwd: active.cwd, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise(setImmediate);
+  input.emit("keypress", "", { name: "down" });
+  pressAlt(input, "x"); pressAlt(input, "x");
+  await new Promise(setImmediate);
+  assert.equal(archived, true);
+  assert.equal(closeCalls, 1);
+  assert.equal(reads, slowStage === "close" ? 1 : 2);
+  assert.doesNotMatch(plain(output.writes.at(-1)), /CODEX\s+archive-proof/, "confirmed archive must disappear before background work finishes");
+  assert.equal(selectedSessionName(output), remaining.name);
+  pressAlt(input, "n");
+  input.emit("keypress", "keep draft", { sequence: "keep draft" });
+  assert.match(plain(output.writes.at(-1)), /새 세션 생성/);
+  release(snapshot); // A stale provider snapshot must not resurrect the archived row.
+  await new Promise(setImmediate);
+  assert.match(plain(output.writes.at(-1)), /keep draft/);
+  assert.doesNotMatch(plain(output.writes.at(-1)), /CODEX\s+archive-proof/);
+  input.emit("end"); await running;
+});
+
+test("Alt+X waits for native acknowledgement and ignores repeated confirmation while pending", async (t) => {
+  const input = ttyInput(), output = capturedOutput();
+  let release; const pending = new Promise((resolve) => { release = resolve; });
+  t.after(() => release());
+  let calls = 0, closes = 0;
+  const bridge = {
+    async discover() { return { sessions: [sessions[0]], warnings: [] }; },
+    async archive() { calls++; await pending; },
+  };
+  const running = runOverview({ bridge, workspace: { async closeSessionView() { closes++; } }, defaultCwd: sessions[0].cwd,
+    inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise(setImmediate);
+  input.emit("keypress", "", { name: "down" });
+  pressAlt(input, "x"); pressAlt(input, "x"); pressAlt(input, "x");
+  await new Promise(setImmediate);
+  assert.equal(calls, 1); assert.equal(closes, 0);
+  assert.equal(selectedSessionName(output), "API");
+  release(); await new Promise(setImmediate);
+  assert.equal(closes, 1);
+  assert.doesNotMatch(plain(output.writes.at(-1)), /CODEX\s+API/);
+  input.emit("end"); await running;
+});
+
+test("late Alt+X view cleanup failure stays a warning without restoring the row or replacing a draft", async (t) => {
+  const input = ttyInput(), output = capturedOutput();
+  let reject; const pending = new Promise((_, fail) => { reject = fail; });
+  t.after(() => reject(new Error("cleanup failed")));
+  const bridge = {
+    async discover() { return { sessions: [sessions[0]], warnings: [] }; },
+    async archive() {},
+  };
+  const running = runOverview({ bridge, workspace: { closeSessionView: () => pending }, defaultCwd: sessions[0].cwd,
+    inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise(setImmediate);
+  input.emit("keypress", "", { name: "down" });
+  pressAlt(input, "x"); pressAlt(input, "x"); await new Promise(setImmediate);
+  pressAlt(input, "n"); input.emit("keypress", "new draft", { sequence: "new draft" });
+  reject(new Error("cleanup failed")); await new Promise(setImmediate);
+  assert.match(plain(output.writes.at(-1)), /new draft/);
+  input.emit("keypress", "", { name: "escape" });
+  assert.match(plain(output.writes.at(-1)), /보관된 세션 창을 닫지 못했습니다: cleanup failed/);
+  assert.doesNotMatch(plain(output.writes.at(-1)), /CODEX\s+API/);
+  input.emit("end"); await running;
+});
+
+test("Alt+X background cleanup cannot unlock or refresh over a newer pending creation", async (t) => {
+  const input = ttyInput(), output = capturedOutput();
+  let finishClose, finishCreate;
+  const closing = new Promise((resolve) => { finishClose = resolve; });
+  const creating = new Promise((resolve) => { finishCreate = resolve; });
+  t.after(() => { finishClose(); finishCreate({ provider: "claude", nativeId: "1234abcd" }); });
+  let reads = 0, creates = 0;
+  const bridge = {
+    async discover() { reads++; return { sessions: [sessions[0]], warnings: [] }; },
+    async archive() {},
+    async create() { creates++; return creating; },
+  };
+  const running = runOverview({ bridge, workspace: { closeSessionView: () => closing }, defaultCwd: sessions[0].cwd,
+    inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise(setImmediate);
+  input.emit("keypress", "", { name: "down" });
+  pressAlt(input, "x"); pressAlt(input, "x"); await new Promise(setImmediate);
+  pressAlt(input, "n"); input.emit("keypress", "next work", { sequence: "next work" });
+  input.emit("keypress", "", { name: "return" });
+  await new Promise(setImmediate);
+  assert.equal(creates, 1);
+  finishClose(); await new Promise(setImmediate);
+  assert.equal(reads, 1, "cleanup must defer discovery while another foreground action is busy");
+  input.emit("keypress", "", { name: "return" });
+  assert.equal(creates, 1, "a late cleanup must not unlock a newer creation and submit it twice");
+  assert.match(plain(output.writes.at(-1)), /생성 중/);
+  finishCreate({ provider: "claude", nativeId: "1234abcd" }); await new Promise(setImmediate);
+  assert.equal(reads, 2);
+  input.emit("end"); await running;
+});
+
+for (const slowStage of ["native", "close"]) test(`late Alt+X ${slowStage} completion does not touch a closed dock`, async (t) => {
+  const input = ttyInput(), output = capturedOutput();
+  let release; const pending = new Promise((resolve) => { release = resolve; });
+  t.after(() => release());
+  let reads = 0, closes = 0;
+  const bridge = {
+    async discover() { reads++; return { sessions: [sessions[0]], warnings: [] }; },
+    async archive() { if (slowStage === "native") await pending; },
+  };
+  const running = runOverview({ bridge, workspace: { async closeSessionView() { closes++; await pending; } }, defaultCwd: sessions[0].cwd,
+    inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise(setImmediate);
+  input.emit("keypress", "", { name: "down" });
+  pressAlt(input, "x"); pressAlt(input, "x"); await new Promise(setImmediate);
+  input.emit("end"); await running;
+  const writes = output.writes.length;
+  release(); await new Promise(setImmediate);
+  assert.equal(output.writes.length, writes);
+  assert.equal(reads, 1);
+  assert.equal(closes, slowStage === "native" ? 0 : 1);
+});
+
 test("failed Alt+X archive keeps the session and its retained view", async (t) => {
   const input = ttyInput();
   t.after(() => input.emit("end"));
