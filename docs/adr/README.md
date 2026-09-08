@@ -32,13 +32,16 @@ Wattari Gattari는 Claude Code와 Codex가 소유한 네이티브 세션을 발�
   VSCode 대화 기록은 dock에 섞지 않습니다.
 - provider 오류는 서로 격리하고 경고를 표시합니다. 불완전한 Codex 목록을 삭제로 취급하지 않습니다.
 - 사용량은 Claude OAuth usage endpoint·Codex App Server에서 읽어 5분 캐시합니다.
-  조회 실패는 세션 발견에 영향을 주지 않습니다.
+  Codex 사용량은 별도 연결에서 조회하며 목록 응답을 지연시키지 않습니다. 조회 실패는 세션 발견에 영향을 주지 않습니다.
 - RPC 제출 확인 timeout은 전달 여부 불명으로 취급하며 자동 재전송·원격 작업 중단을 하지 않습니다.
 
 ## Dock backend
 
 Dock은 세션 목록과 관리를 담당합니다. 대화·도구·승인·모델 실행과 그 화면은 provider가 소유합니다.
 사용법과 단축키는 [README](../../README.ko.md)에 둡니다.
+
+- 생성 직후에는 해당 provider에서 새 native ID의 실제 정보를 확인해 먼저 표시하고 입력을 해제합니다.
+  전체 목록은 백그라운드에서 갱신하며, 생성 확인 후 메타데이터 조회 실패는 생성 실패로 취급하거나 재전송하지 않습니다.
 
 - 오른쪽 미리보기는 선택한 세션의 마지막 입력·응답을 읽기 전용으로 표시합니다.
   Codex는 `thread/items/list`를 최대 3페이지·페이지당 50항목, Claude는 해당 UUID의

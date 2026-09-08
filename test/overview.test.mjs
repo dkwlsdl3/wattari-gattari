@@ -812,6 +812,68 @@ test("overview uses Alt shortcuts consistently for commands", async (t) => {
   assert.equal(leaves, 1);
 });
 
+test("created session is visible and input unlocks before an unrelated full refresh finishes", async (t) => {
+  const input = ttyInput(), output = capturedOutput();
+  let release; const pending = new Promise((resolve) => { release = resolve; });
+  t.after(() => release({ sessions: [], warnings: [], availableProviders: ["claude", "codex"] }));
+  const session = { id: "claude:full-new", nativeId: "1234abcd", provider: "claude", status: "working", name: "new-proof", cwd: "/work/new" };
+  let reads = 0;
+  const bridge = {
+    async discover() { return ++reads === 1 ? { sessions: [], warnings: [] } : pending; },
+    async create() { return { provider: "claude", nativeId: session.nativeId, session }; },
+  };
+  const running = runOverview({ bridge, workspace: {}, defaultCwd: session.cwd, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise(setImmediate);
+  pressAlt(input, "n"); input.emit("keypress", "proof", { sequence: "proof" }); input.emit("keypress", "", { name: "return" });
+  await new Promise(setImmediate);
+  assert.equal(selectedSessionName(output), session.name);
+  pressAlt(input, "n");
+  assert.match(plain(output.writes.at(-1)), /새 세션 생성/, "input must not wait for full discovery");
+  input.emit("keypress", "", { name: "escape" });
+  release({ sessions: [], warnings: [], availableProviders: ["claude", "codex"] });
+  await new Promise(setImmediate);
+  assert.match(plain(output.writes.at(-1)), /new-proof/, "one temporarily missing snapshot must preserve the new session");
+  input.emit("end"); await running;
+});
+
+for (const metadata of [true, false]) test(`creation survives an older in-flight refresh without stealing later selection (metadata=${metadata})`, async (t) => {
+  const input = ttyInput(), output = capturedOutput();
+  let release; const stale = new Promise((resolve) => { release = resolve; });
+  t.after(() => release({ sessions: [], warnings: [] }));
+  const session = { id: "claude:new-id", nativeId: "1234abcd", provider: "claude", name: "created-proof", status: "working", cwd: "/work/new" };
+  let reads = 0;
+  const bridge = {
+    async discover() { if (++reads === 2) return stale; return { sessions: reads > 2 ? [session] : [], warnings: [] }; },
+    async create() { return { provider: "claude", nativeId: session.nativeId, ...(metadata ? { session } : {}) }; },
+  };
+  const running = runOverview({ bridge, workspace: {}, defaultCwd: session.cwd, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise(setImmediate);
+  pressAlt(input, "r"); await new Promise(setImmediate);
+  pressAlt(input, "n"); input.emit("keypress", "proof", { sequence: "proof" }); input.emit("keypress", "", { name: "return" });
+  await new Promise(setImmediate);
+  input.emit("keypress", "", { name: "up" }); // Deliberately select the workspace, not the pending session.
+  release({ sessions: [], warnings: [] }); await new Promise(setImmediate);
+  assert.equal(reads, 3, "the invalidated snapshot must trigger one replacement refresh");
+  assert.match(plain(output.writes.at(-1)), /created-proof/);
+  assert.equal(selectedSessionName(output), null, "late creation lookup must respect subsequent navigation");
+  assert.equal((plain(output.writes.at(-1)).match(/created-proof/g) ?? []).length, 1);
+  input.emit("end"); await running;
+});
+
+test("late creation completion cannot repaint a closed overview", async () => {
+  const input = ttyInput(), output = capturedOutput();
+  let release; const pending = new Promise((resolve) => { release = resolve; });
+  let reads = 0;
+  const running = runOverview({ bridge: { async discover() { reads++; return { sessions: [], warnings: [] }; }, create: () => pending },
+    workspace: {}, defaultCwd: "/work/new", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise(setImmediate);
+  pressAlt(input, "n"); input.emit("keypress", "proof", { sequence: "proof" }); input.emit("keypress", "", { name: "return" });
+  input.emit("end"); await running;
+  const writes = output.writes.length;
+  release({ provider: "claude", nativeId: "1234abcd" }); await new Promise(setImmediate);
+  assert.equal(output.writes.length, writes); assert.equal(reads, 1);
+});
+
 test("overview creates a provider-owned session from its one-line composer", async (t) => {
   const input = ttyInput();
   t.after(() => input.emit("end"));

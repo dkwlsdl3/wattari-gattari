@@ -48,7 +48,16 @@ export class SessionBridge {
 
   async create(provider, prompt, { cwd } = {}) {
     if (typeof prompt !== "string" || !prompt.trim()) throw new BridgeError("PROMPT_REQUIRED", "Prompt is required");
-    return this.#provider(provider).create(prompt.trim(), { cwd });
+    const adapter = this.#provider(provider);
+    const created = await adapter.create(prompt.trim(), { cwd });
+    // Resolve real metadata only on the creating provider, without usage or unrelated providers.
+    // Creation is already acknowledged: discovery failure must not offer a duplicate submission.
+    try {
+      const sessions = await adapter.list({ cwd });
+      const session = sessions.find((candidate) => candidate.provider === provider && candidate.nativeId === created.nativeId);
+      if (session) return { ...created, session };
+    } catch { /* The regular overview refresh will discover it later. */ }
+    return created;
   }
 
   // Takes an already discovered identity; never rediscover or resolve by display name.

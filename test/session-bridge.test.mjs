@@ -116,8 +116,21 @@ test("create delegates one prompt to the selected native provider", async () => 
   const bridge = new SessionBridge({ providers: [provider("claude", [], calls), provider("codex", [], calls)] });
   const result = await bridge.create("codex", "  implement the parser  ", { cwd: "/work/project" });
   assert.deepEqual(result, { provider: "codex", nativeId: "codex-new" });
-  assert.deepEqual(calls, [["create", "implement the parser", { cwd: "/work/project" }]]);
+  assert.deepEqual(calls, [["create", "implement the parser", { cwd: "/work/project" }], ["list", { cwd: "/work/project" }]]);
   await assert.rejects(bridge.create("codex", "   ", { cwd: "/work/project" }), { code: "PROMPT_REQUIRED" });
+});
+
+test("create resolves only the acknowledged native identity without querying the other provider or usage", async () => {
+  const calls = [];
+  const session = { id: "claude:full-new", nativeId: "claude-new", provider: "claude", cwd: "/work/project" };
+  const claude = provider("claude", [{ ...session, nativeId: "other", id: "claude:other" }, session], calls);
+  const codex = { name: "codex", list() { throw new Error("unrelated provider queried"); } };
+  const bridge = new SessionBridge({ providers: [claude, codex] });
+  assert.equal((await bridge.create("claude", "new", { cwd: session.cwd })).session, session);
+  assert.deepEqual(calls, [["create", "new", { cwd: session.cwd }], ["list", { cwd: session.cwd }]]);
+  claude.list = async () => { throw new Error("temporary discovery failure"); };
+  assert.deepEqual(await bridge.create("claude", "second"), { provider: "claude", nativeId: "claude-new" });
+  assert.equal(calls.filter(([kind]) => kind === "create").length, 2, "a discovery error must not repeat creation");
 });
 
 test("archive resolves one live target and delegates to its native provider", async () => {

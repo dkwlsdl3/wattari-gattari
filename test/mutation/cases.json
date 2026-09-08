@@ -31,6 +31,7 @@
   "provider": {
     "tests": ["test/codex-provider.test.mjs", "test/codex-app-server.test.mjs", "test/claude-peer.test.mjs", "test/claude-provider.test.mjs", "test/claude-usage.test.mjs", "test/provider-waiting.test.mjs"],
     "mutations": [
+      {"id":"await-usage-before-list","file":"src/providers/codex.mjs","from":"if (includeUsage) void this.#refreshUsage();","to":"if (includeUsage) await this.#refreshUsage();"},
       {"id":"reject-mixed-claude-agents","file":"src/providers/claude.mjs","from":"if (Array.isArray(rows)) rows = rows.filter((row) => row?.kind !== \"interactive\");","to":";"},
       {"id":"ignore-next-page","file":"src/providers/codex.mjs","from":"cursor = page.nextCursor;","to":"cursor = null;"},
       {"id":"ignore-approval-flag","file":"src/providers/codex.mjs","from":"[\"waitingOnApproval\", \"waitingOnUserInput\"].includes(flag)","to":"false"},
@@ -93,8 +94,12 @@
     ]
   },
   "overview": {
-    "tests": ["test/overview.test.mjs", "test/overview-lifecycle.test.mjs", "test/dock-order.test.mjs", "test/session-alias-catalog.test.mjs", "test/storage-failures.test.mjs"],
+    "tests": ["test/overview.test.mjs", "test/overview-lifecycle.test.mjs", "test/dock-order.test.mjs", "test/session-alias-catalog.test.mjs", "test/storage-failures.test.mjs", "test/session-bridge.test.mjs"],
     "mutations": [
+      {"id":"drop-created-session-metadata","file":"src/session-bridge.mjs","from":"if (session) return { ...created, session };","to":"if (false) return { ...created, session };"},
+      {"id":"wait-full-list-before-unlock","file":"src/overview.mjs","from":"created = await bridge.create(draft.provider, draft.prompt, { cwd: draft.cwd });","to":"created = await bridge.create(draft.provider, draft.prompt, { cwd: draft.cwd }); await refresh({ whileBusy: true, force: true });"},
+      {"id":"skip-immediate-created-row","file":"src/overview.mjs","from":"if (created.session) {","to":"if (false) {"},
+      {"id":"steal-late-created-selection","file":"src/overview.mjs","from":"pendingCreated = null; // A later discovery must not steal selection after the user navigates.","to":";"},
       {"id":"remove-on-first-miss","file":"src/overview.mjs","from":"const SESSION_REMOVAL_CONFIRMATIONS = 2;","to":"const SESSION_REMOVAL_CONFIRMATIONS = 1;"},
       {"id":"hide-after-forty","file":"src/overview.mjs","from":"provider = null, limit = Infinity","to":"provider = null, limit = 40"},
       {"id":"remove-unavailable-provider","file":"src/overview.mjs","from":"if (providerUnavailable) {","to":"if (false) {"},

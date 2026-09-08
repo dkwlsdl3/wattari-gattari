@@ -446,6 +446,7 @@ export async function runOverview({
   let busy = false;
   let nativeOpen = false;
   let pendingArchiveId = null;
+  let pendingCreated = null;
   const archivedSessionIds = new Set();
   const previewReader = new SessionPreview({
     read: (session, options) => bridge.preview(session, options),
@@ -519,6 +520,10 @@ export async function runOverview({
       const activeSessions = snapshot.sessions;
       orderByWorkspace = reconcileOverviewOrder(orderByWorkspace, activeSessions);
       allSessions = applyOverviewOrder(activeSessions, orderByWorkspace);
+      if (pendingCreated) {
+        const created = allSessions.find((session) => session.provider === pendingCreated.provider && session.nativeId === pendingCreated.nativeId);
+        if (created) { selectedKey = created.id; collapsed.delete(sessionWorkspace(created)); pendingCreated = null; }
+      }
       if (discovered.providerUsage) providerUsage = { ...providerUsage, ...discovered.providerUsage };
       let reconcileWarning = null;
       if (workspace.reconcileSessionViews && Array.isArray(discovered.availableProviders)) {
@@ -567,18 +572,30 @@ export async function runOverview({
     busy = true;
     render();
     void (async () => {
+      let created;
       try {
-        const created = await bridge.create(draft.provider, draft.prompt, { cwd: draft.cwd });
+        created = await bridge.create(draft.provider, draft.prompt, { cwd: draft.cwd });
+        if (closed) return;
         newTask = null;
         notice = `${draft.provider === "claude" ? "Claude" : "Codex"} 새 세션을 생성했습니다.`;
-        await refresh({ whileBusy: true, force: true });
-        const session = allSessions.find((candidate) => candidate.provider === created.provider && candidate.nativeId === created.nativeId);
-        if (session) selectedKey = session.id;
+        query = "";
+        if (provider && provider !== created.provider) provider = null;
+        pendingCreated = created;
+        if (created.session) {
+          allSessions = [...allSessions.filter((session) => session.id !== created.session.id), created.session];
+          orderByWorkspace = reconcileOverviewOrder(orderByWorkspace, allSessions);
+          allSessions = applyOverviewOrder(allSessions, orderByWorkspace);
+          selectedKey = created.session.id;
+          collapsed.delete(sessionWorkspace(created.session));
+          missingSessionCounts.delete(created.session.id);
+          pendingCreated = null;
+        }
       } catch (error) {
         newTask = { ...draft, submitting: false, error: error.message };
       } finally {
         busy = false;
         if (!closed) render();
+        if (created && !closed) void refresh({ force: true });
       }
     })();
   };
@@ -666,6 +683,7 @@ export async function runOverview({
 
   const onKeypress = (text, key = {}) => {
     if (busy || closed) return;
+    pendingCreated = null; // A later discovery must not steal selection after the user navigates.
     if ((key.ctrl && key.name === "c") || (key.meta && key.name === "q")) {
       leave();
       return;

@@ -1,6 +1,6 @@
 {
   "group": "provider",
-  "observedAt": "2026-09-08T06:39:16.763Z",
+  "observedAt": "2026-09-08T07:00:24.877Z",
   "node": "v24.15.0",
   "method": "targeted source replacement, not exhaustive Stryker generation",
   "command": [
@@ -34,15 +34,15 @@
     "src/managed-session-instructions.mjs": "160f75fb566e04f7f35eb9ec684f08fdada29d3a79e8481e7b93ebe6f723538c",
     "src/native-launcher.mjs": "3130a497397f3129cb2c4b5460a4b5ea20a45bb47f42ee1f5349f38658bb38c9",
     "src/native-session-host.mjs": "5c198aafa92883acdddf4a670bb41669accd5ae0d5c9de3791629a31117fe2d7",
-    "src/overview.mjs": "339a11aa9f7f02ae3b9efaae9fa424b3720c7869df46755313bd964bdc9f285d",
+    "src/overview.mjs": "8cdd234a6356b53a20834343a5a3bcb634d9da0cab45e2dbc03537d89d27dde6",
     "src/product.mjs": "f8205524d3809d6c85048f27f07c111cc722dab9613d635a1a27eb660d3fa9f4",
     "src/providers/claude-peer.mjs": "82cf3fa6804b81e201c72d5763ea51784104a2ac95d8e57ff18682933c67cf8b",
     "src/providers/claude-view.mjs": "a8f50d3d2976b5bf89f4b0c5e81d7e2439caf49de70051baaeb2af0406dd290f",
     "src/providers/claude.mjs": "9449c4b4692bbba3520ad9422e2f27d4264c836bcf3a9220a74afba6318ea9bb",
     "src/providers/codex-view.mjs": "27a38ee33952f75e22749ca7e819e9ac7d9e5015fdb8f735fbbb8fc1b4a228e9",
-    "src/providers/codex.mjs": "fcb3b7e1f0df995d1e55ecf8a8315fb8311dbe746d024551e2979dabb67f681a",
+    "src/providers/codex.mjs": "6819840290e6fbd59ed3c47ab9cb9845fb1bb93429a0cbdadb704bf9420750f8",
     "src/session-alias-catalog.mjs": "746a7d873dea728f30aa1786414877aa54a3d4e0830be99080042761e23a6ddc",
-    "src/session-bridge.mjs": "3ad1668a0291c06bf6a7c1c565dc9c0a4f322191fa83c20fec464126e565289d",
+    "src/session-bridge.mjs": "d1ca6ac2a32786ff7f49ae5926e6a22fe2a81e94fdf9c70476cb43b5e2901881",
     "src/session-dock.mjs": "743a2cd79038cf108fbe69b5c5f2f54e7fa02b682156f3826c5515a1d619ca62",
     "src/session-preview.mjs": "fc9df3c17e22f72cd6f53694c4d6009871e27dfcba43fee0f9ac8885e1833e2a",
     "src/tmux-workspace.mjs": "72c06f8b5ee3e326bfe59c4d314f6eb6ea760e388e831691c7d3c46b33213ca1",
@@ -54,7 +54,7 @@
     "test/cli-options.test.mjs": "5cbf9cded61bb0e4de7b747154ec9e6cb6524a07319df78ae3b02f4afdb6f110",
     "test/cli.test.mjs": "f4e6429de4ca753df5dac3017f896104af38da8b0394a9dab12012e50dcd2cbc",
     "test/codex-app-server.test.mjs": "b67150dc6aefa283f81d3a9070f8655f89a79298bbba3cdf95d7f9f56f49a6e1",
-    "test/codex-provider.test.mjs": "d3cbfee17fa11abbd3794adff3b8254c6f1ea854daf1e4a9b6b35bf7dda2d3b9",
+    "test/codex-provider.test.mjs": "a04fb10c61855e8277d6f35b8e6ee680c6fad75e1a71cc84bc444ff0998cf254",
     "test/codex-view.test.mjs": "b1aa6044a8e9e537757002b877f07b350257224a732af6c20456354aae94e791",
     "test/deadline.test.mjs": "2fd5d502b91e3f3877996877726c9d7b964064c40ca810ae32a7da4c97c3bbc1",
     "test/direct-workspace.test.mjs": "35a356b09ce7d9f8c62d632fd6c16f87c5138cf9cb9b1686ff9cecd2941d23e6",
@@ -66,17 +66,17 @@
     "test/fixtures/claude-preview.jsonl": "fec4b732daccffa14f992e39c76f5d1bbdfcc8f949bbd2df01d77dcf34d9e4dd",
     "test/fixtures/codex-preview.json": "253292e238a2b9598aade4fc20235f7273b317c25c89c51ddf7c2836313d1049",
     "test/managed-session-instructions.test.mjs": "73c3342cbbb3f9c2cf3a9b4b3d4fb77f2012073a899ed0504d78822d6f36fe1c",
-    "test/mutation/cases.json": "75b90b128e335f4877a2d3ebfd5d72265a6fdf213223df0a593aade3ce3acd0e",
+    "test/mutation/cases.json": "9b14215f531003ccdad56e14a47335419a2e2ea936c2ddae6836ccaea5003017",
     "test/mutation-status.test.mjs": "be2b556def7c03c22efd904c1cc9babc1f38b4f4a588b1022f38f90d2b3e44f6",
     "test/native-launcher.test.mjs": "30111063308ff1d6dc7948c99b0088507143e03cbbc0ef673515aec0b039888f",
     "test/native-process.test.mjs": "68cb7c1f5ae68e63736a91d9fae86f0e11b2da5ce736b8d9085ee28b645c12dd",
     "test/native-session-host.test.mjs": "fd156931e1b504a5be8a7cdcef81d92a236736c1419ee06dbb9b3774ce786976",
     "test/overview-lifecycle.test.mjs": "c80a9aaf9662c89faad4f9de7821d086640f19921a35f95b211f66b91e999611",
     "test/overview-preview.test.mjs": "42a1408e7396497ab70b1a62f46d96919d173e8ee2091ac5bb3b232bcc4f7c1e",
-    "test/overview.test.mjs": "b7ba553eeeb5b8fbc4119c145fc1a5c1ae618e0bb30efe2ad7b8b7c2ea511367",
+    "test/overview.test.mjs": "909b094430da04a0548fc8f9ab5649a41e8810d5f750638f3a1b447fafd3ae4a",
     "test/provider-waiting.test.mjs": "fb041d2fce5f1155543e9d394023c95c9608665025b9cecb82b6e4e9020e06b2",
     "test/session-alias-catalog.test.mjs": "1d9dfe4b3ad8eef09d04f20833113fa398eaf9a4356f1288d8e89650fd50d467",
-    "test/session-bridge.test.mjs": "bd15994cd81d3bdc84b74540bc15b2905824d4c49eb7b4f738727e73cb0fdc4e",
+    "test/session-bridge.test.mjs": "03fce0d6b645d74d91bd15d1c7169df3433c8069c97fd8737d46aaed94106019",
     "test/session-dock.test.mjs": "bfffbfc0cc2f429682d5ab01dc2dddaab0b8363cedb0c9923e7506491e662037",
     "test/session-preview.test.mjs": "6373486d3a6a1a0ecdef0102f8dadab8ff3d71730864b04f5015935fb6c7c049",
     "test/storage-failures.test.mjs": "2cb75132aadf4cdc4a477ba815070057b494e69326cd585e3e5c2c6f9348c065",
@@ -90,12 +90,20 @@
   },
   "results": [
     {
+      "id": "await-usage-before-list",
+      "file": "src/providers/codex.mjs",
+      "status": "killed",
+      "code": 1,
+      "signal": null,
+      "tests": 92
+    },
+    {
       "id": "reject-mixed-claude-agents",
       "file": "src/providers/claude.mjs",
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "ignore-next-page",
@@ -103,7 +111,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "ignore-approval-flag",
@@ -111,7 +119,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "send-to-unloaded-thread",
@@ -119,7 +127,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "leave-closing-socket",
@@ -127,7 +135,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "accept-cursor-loop",
@@ -135,7 +143,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "accept-partial-snapshot",
@@ -143,7 +151,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "wrong-answer-turn",
@@ -151,7 +159,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "wrong-completion-turn",
@@ -159,7 +167,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "skip-initialize",
@@ -167,7 +175,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "skip-client-close",
@@ -175,7 +183,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "keep-child-sessions",
@@ -183,7 +191,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "allow-late-rpc",
@@ -191,7 +199,7 @@
       "status": "test-timeout",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "ignore-async-send-error",
@@ -199,7 +207,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "leak-peer-connections",
@@ -207,7 +215,7 @@
       "status": "test-timeout",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "keep-peer-history",
@@ -215,7 +223,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "ignore-peer-stop-waiters",
@@ -223,7 +231,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "accept-expiring-credential",
@@ -231,7 +239,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "accept-unauthorized-usage",
@@ -239,7 +247,7 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     },
     {
       "id": "lose-usage-window",
@@ -247,19 +255,19 @@
       "status": "killed",
       "code": 1,
       "signal": null,
-      "tests": 91
+      "tests": 92
     }
   ],
   "baseline": {
     "status": "survived",
     "code": 0,
     "signal": null,
-    "tests": 91
+    "tests": 92
   },
   "restoredBaseline": {
     "status": "survived",
     "code": 0,
     "signal": null,
-    "tests": 91
+    "tests": 92
   }
 }

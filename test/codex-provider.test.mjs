@@ -170,8 +170,38 @@ test("hung Codex usage cannot indefinitely hold up session discovery", async () 
     }),
   });
   assert.deepEqual(await provider.list({ includeUsage: true }), []);
+  await new Promise((resolve) => setTimeout(resolve, 30));
   assert.equal(aborted, true);
   assert.equal(provider.usageSnapshot(), null);
+});
+
+test("slow usage runs on its own connection without holding discovery or duplicating concurrent refreshes", async () => {
+  let release; const quota = new Promise((resolve) => { release = resolve; });
+  const clients = []; let quotaReads = 0;
+  const provider = new CodexProvider({
+    usageTimeoutMs: 5000, eventLog: { record() {} },
+    run: async () => ({ stdout: JSON.stringify({ status: "running", socketPath: "/tmp/proof.sock" }) }),
+    clientFactory: async () => {
+      const state = { closed: false, quota: false }; clients.push(state);
+      return { initialize: async () => {}, close: async () => { state.closed = true; }, request: async (method) => {
+        if (method === "account/rateLimits/read") { state.quota = true; quotaReads++; return quota; }
+        return { data: [], nextCursor: null };
+      } };
+    },
+  });
+  let finished = false;
+  const listing = provider.list({ includeUsage: true }).then(() => { finished = true; });
+  try {
+    await new Promise(setImmediate);
+    assert.equal(finished, true, "session discovery must finish while quota is still pending");
+    assert.equal(clients.find((client) => client.quota)?.closed, false);
+    assert.equal(clients.find((client) => !client.quota)?.closed, true);
+    await provider.list({ includeUsage: true });
+    assert.equal(quotaReads, 1);
+  } finally { release({ rateLimits: { primary: { usedPercent: 20, windowDurationMins: 10080 } } }); await listing; }
+  await new Promise(setImmediate);
+  assert.ok(clients.every((client) => client.closed));
+  assert.equal(provider.usageSnapshot().remainingPercent, 80);
 });
 
 test("Codex connection recovery retries discovery but never repeats initialized operations", async () => {
@@ -251,6 +281,7 @@ test("Codex provider fetches optional usage at most once per five-minute cache w
 
   await provider.list();
   await provider.list({ includeUsage: true });
+  await new Promise(setImmediate); // Quota is deliberately independent of list completion.
   usedPercent = 99;
   now += 3 * 60_000;
   await provider.list({ includeUsage: true });
@@ -259,6 +290,7 @@ test("Codex provider fetches optional usage at most once per five-minute cache w
 
   now += 2 * 60_000;
   await provider.list({ includeUsage: true });
+  await new Promise(setImmediate);
   assert.equal(calls.filter(([method]) => method === "account/rateLimits/read").length, 2);
   assert.equal(provider.usageSnapshot().remainingPercent, 1);
 });
@@ -272,6 +304,7 @@ test("Codex usage failure does not fail discovery and is negatively cached", asy
   }, { now: () => now, usageCacheMs: 60_000 });
 
   assert.deepEqual(await provider.list({ includeUsage: true }), []);
+  await new Promise(setImmediate);
   now += 3_000;
   assert.deepEqual(await provider.list({ includeUsage: true }), []);
   assert.equal(calls.filter(([method]) => method === "account/rateLimits/read").length, 1);

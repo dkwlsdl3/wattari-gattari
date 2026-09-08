@@ -141,7 +141,7 @@ export class CodexProvider {
 
   async list({ cwd, includeUsage = false } = {}) {
     return this.#withClient(async (client) => {
-      const usageRefresh = includeUsage ? this.#refreshUsage(client) : Promise.resolve();
+      if (includeUsage) void this.#refreshUsage();
       const loadedIds = [];
       for await (const data of pages((...args) => client.request(...args), "thread/loaded/list", { cursor: null, limit: 100 })) loadedIds.push(...data);
 
@@ -171,7 +171,6 @@ export class CodexProvider {
           return true;
         })
         .map(toSession);
-      await usageRefresh;
       return sessions;
     });
   }
@@ -205,16 +204,17 @@ export class CodexProvider {
     } finally { await client.close(); }
   }
 
-  async #refreshUsage(client) {
+  async #refreshUsage() {
     const checkedAt = this.#now();
     if (this.#usageCache && checkedAt - this.#usageCache.checkedAt < this.#usageCacheMs) return;
     if (this.#usageRefresh) return this.#usageRefresh;
     this.#usageRefresh = Promise.resolve().then(async () => {
       try {
-        const result = await readBeforeDeadline((signal) => client.request("account/rateLimits/read", undefined, { signal }), {
+        // An independent client lets discovery close promptly without cancelling the quota read.
+        const result = await this.#withClient((client) => readBeforeDeadline((signal) => client.request("account/rateLimits/read", undefined, { signal }), {
           deadline: checkedAt + this.#usageTimeoutMs, now: this.#now,
           error: Object.assign(new Error("Codex usage read timed out"), { code: "CODEX_USAGE_TIMEOUT" }),
-        });
+        }));
         const value = parseCodexUsage(result, checkedAt);
         this.#usageCache = { checkedAt, value: value ?? this.#usageCache?.value ?? null };
       } catch {
