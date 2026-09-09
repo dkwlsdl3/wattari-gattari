@@ -148,6 +148,22 @@ test("an explicit routing decision avoids re-running the bridge router", async (
   assert.deepEqual(calls[0], ["create", "review", { cwd: "/work/project", model: "opus", effort: "high" }]);
 });
 
+test("create awaits the dedicated router only at session creation", async () => {
+  const calls = [];
+  const routing = { provider: "codex", model: "large", effort: "low", tier: "promoted", reasons: ["issue metadata"] };
+  const bridge = new SessionBridge({
+    providers: [provider("codex", [], calls)],
+    router: () => { throw new Error("preview router must not be used when createRouter is provided"); },
+    createRouter: async (input) => {
+      assert.deepEqual(input, { provider: "codex", prompt: "inspect the issue", cwd: "/work/project" });
+      return routing;
+    },
+  });
+  const result = await bridge.create("codex", "inspect the issue", { cwd: "/work/project" });
+  assert.deepEqual(result.routing, routing);
+  assert.deepEqual(calls[0], ["create", "inspect the issue", { cwd: "/work/project", model: "large", effort: "low" }]);
+});
+
 test("create resolves only the acknowledged native identity without querying the other provider or usage", async () => {
   const calls = [];
   const session = { id: "claude:full-new", nativeId: "claude-new", provider: "claude", cwd: "/work/project" };

@@ -7,8 +7,9 @@ import { fileURLToPath } from "node:url";
 import { parseCliArgs } from "./cli-options.mjs";
 import { DockOrderStore } from "./dock-order.mjs";
 import { runDoctor } from "./doctor.mjs";
+import { fallbackRouting } from "./model-router.mjs";
+import { LocalRouterClient } from "./local-router-client.mjs";
 import { openNativeAgents } from "./native-launcher.mjs";
-import { routeTask } from "./model-router.mjs";
 import { runOverview } from "./overview.mjs";
 import { CLI_NAME, VERSION } from "./product.mjs";
 import { ClaudeProvider } from "./providers/claude.mjs";
@@ -31,7 +32,18 @@ function usage() {
 }
 
 function defaultBridge() {
-  return new SessionBridge({ providers: [new ClaudeProvider(), new CodexProvider()], router: routeTask });
+  const localRouter = new LocalRouterClient();
+  return new SessionBridge({
+    providers: [new ClaudeProvider(), new CodexProvider()],
+    router: fallbackRouting,
+    createRouter: async (input) => {
+      try {
+        return await localRouter.route(input);
+      } catch (error) {
+        return { ...fallbackRouting(input), warnings: [error.message] };
+      }
+    },
+  });
 }
 
 async function openTmuxAgentsView(windowId) {

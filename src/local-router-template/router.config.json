@@ -1,0 +1,19 @@
+{
+  "promotionThreshold": 3,
+  "issue": {
+    "enabled": true,
+    "maxIssues": 3,
+    "maxComments": 50,
+    "maxChars": 65536
+  },
+  "profiles": {
+    "codex": {
+      "default": { "model": "gpt-5.6-luna", "effort": "max", "label": "GPT-5.6 Luna · max" },
+      "promoted": { "model": "gpt-6-astra", "effort": "low", "label": "GPT-6 Astra · low" }
+    },
+    "claude": {
+      "default": { "model": "opus", "effort": "high", "label": "Claude Opus · high" },
+      "promoted": { "model": "fable", "effort": "high", "label": "Claude Fable · high" }
+    }
+  }
+}

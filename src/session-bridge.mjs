@@ -15,14 +15,17 @@ function providerFromTarget(target) {
 export class SessionBridge {
   #providers;
   #router;
+  #createRouter;
 
-  constructor({ providers, router = null }) {
+  constructor({ providers, router = null, createRouter = null }) {
     if (!Array.isArray(providers) || providers.length === 0) {
       throw new TypeError("SessionBridge requires at least one provider");
     }
     this.#providers = new Map(providers.map((provider) => [provider.name, provider]));
     if (router !== null && typeof router !== "function") throw new TypeError("SessionBridge router must be a function");
+    if (createRouter !== null && typeof createRouter !== "function") throw new TypeError("SessionBridge createRouter must be a function");
     this.#router = router;
+    this.#createRouter = createRouter;
   }
 
   async discover({ provider, cwd, includeUsage = false } = {}) {
@@ -57,7 +60,7 @@ export class SessionBridge {
   async create(provider, prompt, { cwd, routing } = {}) {
     if (typeof prompt !== "string" || !prompt.trim()) throw new BridgeError("PROMPT_REQUIRED", "Prompt is required");
     const adapter = this.#provider(provider);
-    const selectedRouting = routing ?? this.route(provider, prompt.trim(), { cwd });
+    const selectedRouting = routing ?? await this.#resolveCreateRouting(provider, prompt.trim(), { cwd });
     const options = { cwd };
     if (selectedRouting?.model) options.model = selectedRouting.model;
     if (selectedRouting?.effort) options.effort = selectedRouting.effort;
@@ -70,6 +73,12 @@ export class SessionBridge {
       if (session) return { ...created, ...(selectedRouting ? { routing: selectedRouting } : {}), session };
     } catch { /* The regular overview refresh will discover it later. */ }
     return { ...created, ...(selectedRouting ? { routing: selectedRouting } : {}) };
+  }
+
+  async #resolveCreateRouting(provider, prompt, { cwd } = {}) {
+    const resolver = this.#createRouter ?? this.#router;
+    if (!resolver) return null;
+    return resolver({ provider, prompt, cwd });
   }
 
   // Takes an already discovered identity; never rediscover or resolve by display name.

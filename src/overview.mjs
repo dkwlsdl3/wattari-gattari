@@ -2,7 +2,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { stripVTControlCharacters } from "node:util";
 
-import { routeTask, routingSummary } from "./model-router.mjs";
+import { fallbackRouting, routingSummary } from "./model-router.mjs";
 import { nativeSessionCommand } from "./native-launcher.mjs";
 import { TmuxWorkspace } from "./tmux-workspace.mjs";
 import { previewText, SessionPreview } from "./session-preview.mjs";
@@ -502,7 +502,7 @@ export async function runOverview({
   const routeNewTask = (draft) => {
     if (!draft) return null;
     const selected = typeof bridge.route === "function" ? bridge.route(draft.provider, draft.prompt, { cwd: draft.cwd }) : null;
-    return selected ?? routeTask({ provider: draft.provider, prompt: draft.prompt, cwd: draft.cwd });
+    return selected ?? fallbackRouting({ provider: draft.provider, cwd: draft.cwd });
   };
 
   const refreshNewTaskRouting = () => {
@@ -586,7 +586,7 @@ export async function runOverview({
     void (async () => {
       let created;
       try {
-        created = await bridge.create(draft.provider, draft.prompt, { cwd: draft.cwd, routing: draft.routing });
+        created = await bridge.create(draft.provider, draft.prompt, { cwd: draft.cwd });
         if (closed) return;
         newTask = null;
         notice = `${draft.provider === "claude" ? "Claude" : "Codex"} 새 세션을 생성했습니다. ${routingSummary(created.routing ?? draft.routing)}`;

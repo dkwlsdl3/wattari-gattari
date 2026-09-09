@@ -1,0 +1,17 @@
+{
+  "name": "local-llm-router",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local, configurable model router used by Waga",
+  "type": "module",
+  "bin": {
+    "local-llm-router": "src/cli.mjs"
+  },
+  "scripts": {
+    "check": "find src test -name '*.mjs' -print0 | xargs -0 -n1 node --check && npm test",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

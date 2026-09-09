@@ -57,17 +57,23 @@ waga open codex --cwd ~/work/my-app
 
 ### Automatic model routing for new sessions
 
-When `Alt+N` creates a session, Waga applies local rules to the prompt. It recognizes
-explicit skills as well as task cues such as storage, concurrency, migrations, security,
-and production changes, so a skill is optional.
+When `Alt+N` creates a session, Waga can create and invoke a separate local project named
+`local-llm-router`. Waga's public core does not contain a personal model policy or GitLab
+credentials; if the router is absent or fails, the provider creates the session with its
+own defaults.
 
-- Codex default: `gpt-5.6-luna` · `max`
-- Codex promoted: `gpt-6-astra` · `low`
-- Claude default: `opus` · `high`
-- Claude promoted: `fable` · `high`
+The router's `router.config.json` owns model aliases and promotion rules. For a prompt
+that contains an issue reference, the router may read the title, description, labels, and
+comments through the user's local GitLab CLI and use them as routing evidence. It never
+passes issue text on as an instruction or performs work automatically.
 
-The composer shows the selected profile and its reasons. Routing applies only when a new
-session is created; it does not switch an existing session or fetch issue details by ID.
+The default directory is `~/Projects/local-llm-router`; set `WAGA_LOCAL_ROUTER_DIR` to
+use another path. If the directory is absent, Waga copies its starter template and never
+overwrites a non-empty existing directory.
+
+The composer shows the provider fallback before submission, and the final routing result
+in the creation notice. Waga does not change models in existing sessions or fetch issue
+data itself.
 
 ## Dock keys
 
