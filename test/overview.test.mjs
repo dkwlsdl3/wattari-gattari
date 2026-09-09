@@ -212,6 +212,7 @@ test("overview frame distinguishes providers and keeps navigation help visible",
   assert.match(frame, /CLAUDE/);
   assert.match(frame, /Enter 열기/);
   assert.match(frame, /Alt\+N 새 세션/);
+  assert.match(frame, /Alt\+Y Codex 실행/);
   assert.match(frame, /Alt\+R 갱신/);
   assert.match(frame, /F2 이름 변경/);
   assert.match(frame, /Alt\+Q 나가기/);
@@ -227,6 +228,62 @@ test("overview formats and displays cached Codex weekly usage", () => {
   assert.equal(formatCodexUsage(usage), "Codex 주간 2% 남음 · 9/7 11:24 초기화");
   const frame = plain(buildOverviewFrame({ sessions, providerUsage: { codex: usage }, width: 120, height: 20 }));
   assert.match(frame, /Codex 주간 2% 남음 · 9\/7 11:24 초기화/);
+});
+
+test("Alt+Y toggles and persists the Codex execution mode for new sessions", async (t) => {
+  const input = ttyInput();
+  t.after(() => input.emit("end"));
+  const output = capturedOutput();
+  let mode = "default";
+  let created;
+  const settingsStore = {
+    load: () => ({ codexExecutionMode: mode }),
+    toggleCodexExecutionMode: () => { mode = mode === "default" ? "yolo" : "default"; return mode; },
+  };
+  const bridge = {
+    async discover() { return { sessions: [], warnings: [] }; },
+    async create(provider, prompt, options) { created = { provider, prompt, options }; return { provider, nativeId: "new-thread" }; },
+  };
+  const workspace = { async leave() { return { closeOverview: true }; } };
+  const running = runOverview({ bridge, settingsStore, workspace, defaultCwd: "/work/new", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.match(plain(output.writes.at(-1)), /Codex 새 세션: 기본값/);
+  pressAlt(input, "y");
+  assert.equal(mode, "yolo");
+  assert.match(plain(output.writes.at(-1)), /Codex 새 세션: YOLO/);
+  assert.match(plain(output.writes.at(-1)), /승인과 샌드박스 제한이 해제됩니다/);
+
+  pressAlt(input, "n");
+  input.emit("keypress", "", { name: "tab" });
+  input.emit("keypress", "작업", { sequence: "작업" });
+  input.emit("keypress", "", { name: "return" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(created, { provider: "codex", prompt: "작업", options: { cwd: "/work/new", executionMode: "yolo" } });
+  input.emit("end");
+  assert.equal(await running, 0);
+});
+
+test("unreadable execution settings fail closed and remain visible as a warning", async (t) => {
+  const input = ttyInput();
+  t.after(() => input.emit("end"));
+  const output = capturedOutput();
+  const running = runOverview({
+    bridge: { async discover() { return { sessions: [], warnings: [] }; } },
+    settingsStore: { load() { throw new Error("settings unavailable"); } },
+    workspace: { async leave() { return { closeOverview: true }; } },
+    defaultCwd: "/work/new",
+    inputStream: input,
+    outputStream: output,
+    refreshMs: 60_000,
+    listenForSignals: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  const frame = plain(output.writes.at(-1));
+  assert.match(frame, /Codex 새 세션: 기본값/);
+  assert.match(frame, /실행 설정을 읽지 못했습니다: settings unavailable/);
+  input.emit("end");
+  assert.equal(await running, 0);
 });
 
 test("overview formats and displays cached Claude usage", () => {
@@ -1052,7 +1109,7 @@ test("overview creates a provider-owned session from its one-line composer", asy
 
   assert.equal(created.provider, "codex");
   assert.equal(created.prompt, "작새업");
-  assert.deepEqual(created.options, { cwd: "/work/new" });
+  assert.deepEqual(created.options, { cwd: "/work/new", executionMode: "default" });
   assert.equal(selectedSessionName(output), "작새업");
   pressAlt(input, "q");
   assert.equal(await running, 0);
@@ -1081,7 +1138,7 @@ test("overview shows the provider fallback until the external router runs", asyn
   assert.match(plain(output.writes.at(-1)), /local-llm-router 조회 전/);
   input.emit("keypress", "", { name: "return" });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(created.options, { cwd: "/work/sample-app" });
+  assert.deepEqual(created.options, { cwd: "/work/sample-app", executionMode: "default" });
   input.emit("end");
   assert.equal(await running, 0);
 });

@@ -57,11 +57,13 @@ test("bare CLI opens the dock on an interactive terminal", async () => {
   let seen;
   const dock = async (options) => { seen = options; return { code: 4 }; };
   const orderStore = {};
-  assert.equal(await runCli([], { stdin, stdout, stderr: output(), bridge: {}, dock, orderStore }), 4);
+  const settingsStore = {};
+  assert.equal(await runCli([], { stdin, stdout, stderr: output(), bridge: {}, dock, orderStore, settingsStore }), 4);
   assert.equal(seen.cwd, path.resolve(process.cwd()));
   assert.equal(seen.filterCwd, null);
   assert.equal(seen.backend, "auto");
   assert.equal(seen.orderStore, orderStore);
+  assert.equal(seen.settingsStore, settingsStore);
 });
 
 test("interactive CLI filters the dock only when cwd is explicit", async () => {

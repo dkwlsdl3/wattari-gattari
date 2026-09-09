@@ -5,6 +5,7 @@ import path from "node:path";
 import test, { after } from "node:test";
 
 import { CodexProvider, parseCodexUsage, parseDaemonVersion } from "../src/providers/codex.mjs";
+import { CODEX_EXECUTION_MODES } from "../src/codex-execution.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../src/managed-session-instructions.mjs";
 
 process.env.XDG_STATE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "waga-codex-test-state-"));
@@ -410,6 +411,41 @@ test("Codex create applies the routed model and effort to the new thread", async
     model: "gpt-6-astra",
     effort: "low",
   });
+});
+
+test("Codex create applies the explicit YOLO policy to the thread and first turn", async () => {
+  const { provider, calls } = harness((method) => {
+    if (method === "thread/start") return { thread: { id: "yolo-thread" } };
+    if (method === "turn/start") return { turn: { id: "yolo-turn" } };
+    throw new Error(method);
+  });
+  await provider.create("run the proof", {
+    cwd: "/work/sample-app",
+    model: "gpt-6-astra",
+    effort: "xhigh",
+    executionMode: CODEX_EXECUTION_MODES.YOLO,
+  });
+  assert.deepEqual(calls.find(([method]) => method === "thread/start")[1], {
+    cwd: "/work/sample-app",
+    developerInstructions: WAGA_SESSION_INSTRUCTIONS,
+    model: "gpt-6-astra",
+    approvalPolicy: "never",
+    sandbox: "danger-full-access",
+  });
+  assert.deepEqual(calls.find(([method]) => method === "turn/start")[1], {
+    threadId: "yolo-thread",
+    input: [{ type: "text", text: "run the proof", textElements: [] }],
+    model: "gpt-6-astra",
+    effort: "xhigh",
+    approvalPolicy: "never",
+    sandboxPolicy: { type: "dangerFullAccess" },
+  });
+});
+
+test("Codex create rejects an unknown execution mode before submitting", async () => {
+  const { provider, calls } = harness(() => { throw new Error("must not call App Server"); });
+  await assert.rejects(provider.create("unsafe", { executionMode: "unknown" }), { code: "CODEX_EXECUTION_MODE_INVALID" });
+  assert.equal(calls.some(([method]) => method === "thread/start"), false);
 });
 
 test("Codex archive uses the App Server archive boundary and keeps delete separate", async () => {

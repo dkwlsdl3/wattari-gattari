@@ -2,6 +2,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { stripVTControlCharacters } from "node:util";
 
+import { CODEX_EXECUTION_MODES, codexExecutionLabel } from "./codex-execution.mjs";
 import { fallbackRouting, routingSummary } from "./model-router.mjs";
 import { nativeSessionCommand } from "./native-launcher.mjs";
 import { TmuxWorkspace } from "./tmux-workspace.mjs";
@@ -305,7 +306,7 @@ function previewLines(session, preview, width, height) {
   return lines;
 }
 
-export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, providerUsage = {}, notice = "", newTask = null, renameTask = null, preview = null, nativeHint = nativeReturnHint(null) }) {
+export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, providerUsage = {}, notice = "", newTask = null, renameTask = null, preview = null, nativeHint = nativeReturnHint(null), codexExecutionMode = CODEX_EXECUTION_MODES.DEFAULT }) {
   const usableWidth = Math.max(1, width - 4);
   const split = hasOverviewPreview(width, height);
   const listWidth = split ? Math.floor(usableWidth * 0.6) : usableWidth;
@@ -321,7 +322,8 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
   const lines = [];
   const title = wide ? "WATTARI GATTARI  Claude + Codex session dock" : "WAGA · session dock";
   lines.push(`  ${color(THEME.title, fit(title, usableWidth))}`);
-  lines.push(`  ${color(THEME.muted, fit(`${counts(sessions)}${provider ? `   filter: ${provider}` : ""}`, usableWidth))}`);
+  const executionStatusColor = codexExecutionMode === CODEX_EXECUTION_MODES.YOLO ? THEME.warning : THEME.muted;
+  lines.push(`  ${color(executionStatusColor, fit(`${counts(sessions)}${provider ? `   filter: ${provider}` : ""}   ${codexExecutionLabel(codexExecutionMode)}   Alt+Y 전환`, usableWidth))}`);
   if (usageLabels.length) lines.push(`  ${coloredUsageLine(usageLabels, usableWidth)}`);
   lines.push(`  ${color(THEME.divider, "─".repeat(Math.max(1, usableWidth)))}`);
   const bodyStart = lines.length;
@@ -358,8 +360,8 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     }
   }
   const helpLines = wide
-    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  Alt+Enter 재접속  / 검색  Tab 필터", "F2 이름 변경  Alt+N 새 세션  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기"]
-    : ["Shift+↑↓ 순서  Enter 열기  Alt+Enter 재접속  F2 이름  Alt+N 새 세션", "Alt+X 보관  Alt+Q 나가기"];
+    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  Alt+Enter 재접속  / 검색  Tab 필터", "F2 이름 변경  Alt+N 새 세션  Alt+Y Codex 실행  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기"]
+    : ["Shift+↑↓ 순서  Enter 열기  Alt+Enter 재접속  F2 이름  Alt+N 새 세션", "Alt+Y Codex 실행  Alt+X 보관  Alt+Q 나가기"];
   while (lines.length < height - helpLines.length - 4) lines.push("");
   if (newTask) {
     const providerName = newTask.provider === "claude" ? "CLAUDE" : "CODEX";
@@ -375,7 +377,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     lines.push(`  ${color(newTask.routing?.tier === "promoted" ? THEME.warning : providerColor, fit(routingSummary(newTask.routing), usableWidth))}`);
     const composerHint = newTask.error
       ? `오류: ${safeText(newTask.error)}`
-      : `Tab → ${alternateProvider} 전환   ←→ 커서   Enter 생성   Esc 취소   Ctrl+U 지우기`;
+      : `${codexExecutionLabel(codexExecutionMode)}   Alt+Y 전환   Tab → ${alternateProvider} 전환   ←→ 커서   Enter 생성   Esc 취소   Ctrl+U 지우기`;
     lines.push(`  ${color(newTask.error ? THEME.error : providerColor, fit(composerHint, usableWidth))}`);
     lines.push(`  ${editorLine(newTask.prompt, newTask.cursor, usableWidth)}`);
     lines.push("");
@@ -411,6 +413,7 @@ export async function runOverview({
   outputStream = process.stdout,
   errorOutput = process.stderr,
   orderStore = null,
+  settingsStore = null,
   refreshMs = 3_000,
   previewDebounceMs = 150,
   previewCacheMs = 5_000,
@@ -431,6 +434,17 @@ export async function runOverview({
   if (orderStore) {
     try { orderByWorkspace = orderStore.load(); }
     catch (error) { orderWarning = { provider: "waga", message: error.message }; }
+  }
+  let codexExecutionMode = CODEX_EXECUTION_MODES.DEFAULT;
+  let settingsWarning = null;
+  if (settingsStore) {
+    try {
+      const loaded = settingsStore.load();
+      if (loaded?.codexExecutionMode === CODEX_EXECUTION_MODES.YOLO) codexExecutionMode = CODEX_EXECUTION_MODES.YOLO;
+      else if (loaded?.codexExecutionMode !== CODEX_EXECUTION_MODES.DEFAULT) throw new Error("Waga settings returned an invalid Codex execution mode");
+    } catch (error) {
+      settingsWarning = { provider: "waga", message: `실행 설정을 읽지 못했습니다: ${error.message}` };
+    }
   }
   let selected = 0;
   let selectedKey = null;
@@ -487,7 +501,11 @@ export async function runOverview({
       width: outputStream.columns || 100,
       height: outputStream.rows || 30,
       query,
-      warnings: orderWarning ? [orderWarning, ...warnings] : warnings,
+      warnings: [
+        ...(settingsWarning ? [settingsWarning] : []),
+        ...(orderWarning ? [orderWarning] : []),
+        ...warnings,
+      ],
       provider,
       providerUsage,
       notice,
@@ -495,6 +513,7 @@ export async function runOverview({
       renameTask,
       rootCwd: defaultCwd,
       nativeHint,
+      codexExecutionMode,
       preview: previewReader.snapshot(previewSession),
     })}`);
   };
@@ -572,6 +591,29 @@ export async function runOverview({
       .finally(() => { busy = false; });
   };
 
+  const toggleCodexExecution = () => {
+    if (!settingsStore) {
+      notice = "Codex 실행 설정 저장소가 연결되지 않았습니다.";
+      render();
+      return;
+    }
+    try {
+      const next = settingsStore.toggleCodexExecutionMode();
+      if (![CODEX_EXECUTION_MODES.DEFAULT, CODEX_EXECUTION_MODES.YOLO].includes(next)) {
+        throw new Error("Waga settings returned an invalid Codex execution mode");
+      }
+      codexExecutionMode = next;
+      settingsWarning = null;
+      notice = next === CODEX_EXECUTION_MODES.YOLO
+        ? "Codex 새 세션을 YOLO로 켰습니다. 승인과 샌드박스 제한이 해제됩니다. Alt+Y로 끌 수 있습니다."
+        : "Codex 새 세션을 기본 실행 모드로 되돌렸습니다.";
+    } catch (error) {
+      settingsWarning = { provider: "waga", message: `실행 설정을 저장하지 못했습니다: ${error.message}` };
+      notice = "실행 설정을 바꾸지 못했습니다.";
+    }
+    render();
+  };
+
   const submitNewTask = () => {
     const prompt = newTask.prompt.trim();
     if (!prompt) {
@@ -586,7 +628,9 @@ export async function runOverview({
     void (async () => {
       let created;
       try {
-        created = await bridge.create(draft.provider, draft.prompt, { cwd: draft.cwd });
+        const createOptions = { cwd: draft.cwd };
+        if (draft.provider === "codex") createOptions.executionMode = codexExecutionMode;
+        created = await bridge.create(draft.provider, draft.prompt, createOptions);
         if (closed) return;
         newTask = null;
         notice = `${draft.provider === "claude" ? "Claude" : "Codex"} 새 세션을 생성했습니다. ${routingSummary(created.routing ?? draft.routing)}`;
@@ -708,6 +752,10 @@ export async function runOverview({
     pendingCreated = null; // A later discovery must not steal selection after the user navigates.
     if ((key.ctrl && key.name === "c") || (key.meta && key.name === "q")) {
       leave();
+      return;
+    }
+    if (key.meta && key.name === "y") {
+      toggleCodexExecution();
       return;
     }
     if (!(key.meta && key.name === "x")) pendingArchiveId = null;

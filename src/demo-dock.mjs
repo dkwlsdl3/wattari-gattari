@@ -1,4 +1,5 @@
 import { runOverview } from "./overview.mjs";
+import { CODEX_EXECUTION_MODES } from "./codex-execution.mjs";
 
 let sessions = [
   { id: "claude:demo-api", nativeId: "demo-api", provider: "claude", status: "idle", name: "API contract", cwd: "/demo/wattari-gattari", updatedAt: 3 },
@@ -45,8 +46,20 @@ const workspace = {
   },
 };
 
+let codexExecutionMode = CODEX_EXECUTION_MODES.DEFAULT;
+const settingsStore = {
+  load: () => ({ codexExecutionMode }),
+  toggleCodexExecutionMode: () => {
+    codexExecutionMode = codexExecutionMode === CODEX_EXECUTION_MODES.DEFAULT
+      ? CODEX_EXECUTION_MODES.YOLO
+      : CODEX_EXECUTION_MODES.DEFAULT;
+    return codexExecutionMode;
+  },
+};
+
 process.exitCode = await runOverview({
   bridge,
+  settingsStore,
   workspace,
   defaultCwd: "/demo/wattari-gattari",
   refreshMs: 60_000,

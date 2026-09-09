@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { buildPeerEnvelope } from "../bridge/envelope.mjs";
 import { readBeforeDeadline } from "../bridge/deadline.mjs";
 import { CodexAppServerClient } from "../codex-app-server.mjs";
+import { applyCodexExecutionMode } from "../codex-execution.mjs";
 import { EventLog } from "../event-log.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
 import { messageText, previewText } from "../session-preview.mjs";
@@ -242,23 +243,23 @@ export class CodexProvider {
     this.#loadedIds = sessionIds;
   }
 
-  async create(prompt, { cwd = process.cwd(), model, effort } = {}) {
+  async create(prompt, { cwd = process.cwd(), model, effort, executionMode } = {}) {
     const workspace = path.resolve(cwd);
     return this.#withClient(async (client) => {
-      const threadStart = {
+      const threadStart = applyCodexExecutionMode({
         cwd: workspace,
         developerInstructions: WAGA_SESSION_INSTRUCTIONS,
-      };
+      }, executionMode, "thread");
       if (typeof model === "string" && model.trim()) threadStart.model = model.trim();
       const started = await client.request("thread/start", threadStart);
       const threadId = started?.thread?.id;
       if (typeof threadId !== "string" || !threadId) {
         throw Object.assign(new Error("Codex thread/start response is missing its thread id"), { code: "CODEX_THREAD_START_INVALID" });
       }
-      const turnStart = {
+      const turnStart = applyCodexExecutionMode({
         threadId,
         input: [{ type: "text", text: prompt, textElements: [] }],
-      };
+      }, executionMode, "turn");
       if (typeof model === "string" && model.trim()) turnStart.model = model.trim();
       if (typeof effort === "string" && effort.trim()) turnStart.effort = effort.trim();
       const turn = await client.request("turn/start", turnStart);

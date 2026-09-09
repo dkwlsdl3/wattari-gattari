@@ -79,6 +79,18 @@ in the creation notice. Waga does not change models in existing sessions or fetc
 data itself. The subprocess request and v1 response are defined in the
 [local-router contract](docs/adr/2026-09-09-local-router-contract.md).
 
+### Codex execution mode for new sessions
+
+The default execution mode keeps the Codex App Server provider defaults. Press `Alt+Y`
+in the dock to toggle an explicit YOLO mode for newly created Codex sessions. YOLO sends
+`approvalPolicy=never` and `sandbox=danger-full-access` to the App Server, so approval and
+sandbox restrictions are removed. The current mode is visible in the dock and composer.
+
+Waga stores the preference at
+`$XDG_CONFIG_HOME/wattari-gattari/settings.json` (default:
+`~/.config/wattari-gattari/settings.json`). Missing or unreadable settings fail closed to
+the provider default. Existing sessions, Claude sessions, and `send`/`ask` are unaffected.
+
 ## Dock keys
 
 At 120 columns × 20 rows or larger, the right pane shows recent conversation text.
@@ -97,6 +109,7 @@ calls or additional transcript files are created.
 | `/` / `Tab` | Search / filter providers |
 | `F2` | Rename the selected session |
 | `Alt+N` / `Alt+R` | New session / refresh |
+| `Alt+Y` | Toggle the new Codex session execution mode |
 | `Alt+X` twice | Archive a session |
 | `Alt+Q` | Exit Waga |
 

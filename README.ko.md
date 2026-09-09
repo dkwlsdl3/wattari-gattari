@@ -78,6 +78,18 @@ standalone 라우터입니다. 이슈 번호가 있는 프롬프트를 라우터
 조회하지는 않습니다. subprocess 입력과 v1 응답 필드는
 [라우터 계약 문서](docs/adr/2026-09-09-local-router-contract.md)에 정의되어 있습니다.
 
+### Codex 새 세션 실행 모드
+
+기본 실행 모드는 Codex App Server의 provider 기본값을 그대로 사용합니다. dock에서
+`Alt+Y`를 누르면 새 Codex 세션에만 YOLO 실행 모드를 켜거나 끌 수 있습니다. YOLO는
+App Server `approvalPolicy=never`와 `sandbox=danger-full-access`를 사용하므로 승인과
+샌드박스 제한이 사라집니다. 현재 모드는 dock과 새 세션 입력창에 표시됩니다.
+
+설정은 `$XDG_CONFIG_HOME/wattari-gattari/settings.json`(기본값
+`~/.config/wattari-gattari/settings.json`)에 저장됩니다. 기본값은 안전한 provider
+모드이며, 설정 파일이 없거나 읽을 수 없으면 기본값으로 동작합니다. 기존 세션과
+Claude 세션, `send`·`ask`는 이 설정의 영향을 받지 않습니다.
+
 ## Dock 조작
 
 120열 × 20행 이상이면 오른쪽에 최근 대화를 표시합니다. 선택 후 150ms를 기다려
@@ -95,6 +107,7 @@ standalone 라우터입니다. 이슈 번호가 있는 프롬프트를 라우터
 | `/` / `Tab` | 검색 / provider 필터 |
 | `F2` | 선택한 세션 이름 변경 |
 | `Alt+N` / `Alt+R` | 새 세션 / 새로고침 |
+| `Alt+Y` | 새 Codex 세션 실행 모드 기본값 / YOLO 전환 |
 | `Alt+X` 두 번 | 세션 보관 |
 | `Alt+Q` | Waga 종료 |
 

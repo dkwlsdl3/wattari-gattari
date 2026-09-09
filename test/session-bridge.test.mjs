@@ -135,6 +135,17 @@ test("create forwards a routed model and returns the routing decision", async ()
   ]);
 });
 
+test("create forwards Codex execution mode but keeps it out of Claude options", async () => {
+  const calls = [];
+  const bridge = new SessionBridge({ providers: [provider("claude", [], calls), provider("codex", [], calls)] });
+  await bridge.create("codex", "run without prompts", { cwd: "/work/project", executionMode: "yolo" });
+  await bridge.create("claude", "review safely", { cwd: "/work/project", executionMode: "yolo" });
+  assert.deepEqual(calls.filter(([kind]) => kind === "create"), [
+    ["create", "run without prompts", { cwd: "/work/project", executionMode: "yolo" }],
+    ["create", "review safely", { cwd: "/work/project" }],
+  ]);
+});
+
 test("an explicit routing decision avoids re-running the bridge router", async () => {
   const calls = [];
   let routed = 0;

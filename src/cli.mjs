@@ -17,6 +17,7 @@ import { CodexProvider } from "./providers/codex.mjs";
 import { SessionBridge } from "./session-bridge.mjs";
 import { enterSessionDock } from "./session-dock.mjs";
 import { TmuxWorkspace } from "./tmux-workspace.mjs";
+import { WagaSettingsStore } from "./waga-settings.mjs";
 
 function usage() {
   return [
@@ -71,6 +72,7 @@ export async function runCli(args = process.argv.slice(2), {
   overview = runOverview,
   tmuxAgentsView = openTmuxAgentsView,
   orderStore = new DockOrderStore(),
+  settingsStore = new WagaSettingsStore(),
 } = {}) {
   let options;
   try { options = parseCliArgs(args); }
@@ -95,8 +97,9 @@ export async function runCli(args = process.argv.slice(2), {
       outputStream: stdout,
       errorOutput: stderr,
       orderStore,
+      settingsStore,
     })).code;
-    else if (options.command === "overview") return await overview({ filterCwd: options.cwd ? cwd : null, defaultCwd: cwd, bridge, inputStream: stdin, outputStream: stdout, errorOutput: stderr, orderStore });
+    else if (options.command === "overview") return await overview({ filterCwd: options.cwd ? cwd : null, defaultCwd: cwd, bridge, inputStream: stdin, outputStream: stdout, errorOutput: stderr, orderStore, settingsStore });
     else if (options.command === "tmux-agents-view") return (await tmuxAgentsView(options.windowId)).code ?? 0;
     else if (options.command === "list" || options.command === "default") writeList(stdout, stderr, await bridge.discover({ provider: options.provider, cwd: options.cwd ? cwd : undefined }), options.json);
     else if (options.command === "send") {
