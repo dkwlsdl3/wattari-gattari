@@ -112,8 +112,9 @@ next Claude or Codex session created.
 At 120 columns × 20 rows or larger, the right pane shows recent conversation text.
 Only the selected session is read, with a 150 ms selection debounce and five-second
 cache; hidden docks do not poll. Long histories are bounded excerpts, not a live
-terminal mirror. The latest response may belong to an earlier prompt. No model
-calls or additional transcript files are created.
+terminal mirror. Use `PgUp` / `PgDn` to scroll a long response in the right pane without
+changing the selected session. The latest response may belong to an earlier prompt.
+No model calls or additional transcript files are created.
 
 | Key | Action |
 |---|---|
@@ -129,6 +130,7 @@ calls or additional transcript files are created.
 | `Alt+Y` | Toggle the new Codex session execution mode |
 | `Alt+X` twice | Archive a session |
 | `Alt+Q` | Exit Waga |
+| `PgUp` / `PgDn` | Scroll the selected response in the right pane |
 
 The default `auto` backend reuses tmux session windows when available, otherwise
 it uses `direct`. To leave a native view:

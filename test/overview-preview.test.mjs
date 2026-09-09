@@ -40,6 +40,20 @@ test("preview layout respects width and height boundaries, usage row, long text 
   }
 });
 
+test("long responses scroll inside the preview pane without changing the selected session", () => {
+  const output = Array.from({ length: 30 }, (_, index) => `응답-${index}`).join("\n");
+  const first = plain(buildOverviewFrame({ sessions: [a, b], selected: 2, width: 150, height: 30,
+    preview: { ...preview, output }, previewOutputOffset: 0 }));
+  const later = plain(buildOverviewFrame({ sessions: [a, b], selected: 2, width: 150, height: 30,
+    preview: { ...preview, output }, previewOutputOffset: 9 }));
+  assert.match(first, /마지막 응답 \(이전 작업 포함\) · 1-9\/30/);
+  assert.match(first, /응답-0/); assert.doesNotMatch(first, /응답-9/);
+  assert.match(later, /마지막 응답 \(이전 작업 포함\) · 10-18\/30/);
+  assert.match(later, /응답-9/); assert.doesNotMatch(later, /응답-0/);
+  assert.match(later, /CLAUDE · UI 구현/);
+  assert.ok(later.split("\n").every((line) => cellWidth(line) <= 150));
+});
+
 test("workspace, empty, loading, error and limited history have explicit preview placeholders", () => {
   const frame = (options) => plain(buildOverviewFrame({ sessions: [a], selected: 1, width: 150, height: 30, ...options }));
   assert.match(frame({ selected: 0 }), /세션을 선택하면/);
@@ -69,6 +83,18 @@ test("actual dock key navigation selects one preview, reuses cache and suppresse
   ui.key("up"); await delay(); assert.equal(ui.calls.length, 2);
   ui.output.columns = 100; ui.output.emit("resize"); ui.key("down"); await delay();
   assert.equal(ui.calls.length, 2); assert.ok(!ui.writes.at(-1).includes("마지막 입력"));
+});
+
+test("PageUp and PageDown scroll only the selected response", async (t) => {
+  const output = Array.from({ length: 40 }, (_, index) => `long-answer-${index}`).join("\n");
+  const ui = setup(t, { bridge: { preview: async (s) => ({ input: `${s.id}-INPUT`, output }) } });
+  await delay(); ui.key("down"); await delay(); ui.key("down"); await delay();
+  assert.match(ui.writes.at(-1), /마지막 응답 \(이전 작업 포함\) · 1-9\/40/);
+  ui.key("pagedown");
+  assert.match(ui.writes.at(-1), /마지막 응답 \(이전 작업 포함\) · 10-18\/40/);
+  assert.match(ui.writes.at(-1), /CLAUDE · UI 구현/);
+  ui.key("pageup");
+  assert.match(ui.writes.at(-1), /마지막 응답 \(이전 작업 포함\) · 1-9\/40/);
 });
 
 test("actual dock drops late results after moving and closing", async (t) => {
