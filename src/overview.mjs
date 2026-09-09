@@ -592,7 +592,7 @@ export async function runOverview({
   const previewReader = new SessionPreview({
     read: (session, options) => bridge.preview(session, options),
     visible: async () => !closed && !busy && !nativeOpen && (!workspace.shouldRefreshOverview || await workspace.shouldRefreshOverview()),
-    changed: () => { previewOutputOffset = 0; render(); },
+    changed: () => render(),
     debounceMs: previewDebounceMs,
     cacheMs: previewCacheMs,
   });

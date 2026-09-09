@@ -97,6 +97,20 @@ test("PageUp and PageDown scroll only the selected response", async (t) => {
   assert.match(ui.writes.at(-1), /마지막 응답 \(이전 작업 포함\) · 1-9\/40/);
 });
 
+test("preview refresh keeps the response scroll position", async (t) => {
+  const output = Array.from({ length: 40 }, (_, index) => `refresh-answer-${index}`).join("\n");
+  const ui = setup(t, {
+    refreshMs: 30,
+    previewCacheMs: 10,
+    bridge: { preview: async (s) => ({ input: `${s.id}-INPUT`, output }) },
+  });
+  await delay(50); ui.key("down"); await delay(50); ui.key("down"); await delay(50);
+  ui.key("pagedown");
+  assert.match(ui.writes.at(-1), /마지막 응답 \(이전 작업 포함\) · 10-18\/40/);
+  await delay(100);
+  assert.match(ui.writes.at(-1), /마지막 응답 \(이전 작업 포함\) · 10-18\/40/);
+});
+
 test("actual dock drops late results after moving and closing", async (t) => {
   let resolve; const pending = new Promise((r) => { resolve = r; });
   const ui = setup(t, { bridge: { preview: () => pending } });
