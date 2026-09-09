@@ -442,6 +442,46 @@ test("Codex create applies the explicit YOLO policy to the thread and first turn
   });
 });
 
+test("Codex create applies each configured execution category to the thread and first turn", async () => {
+  const { provider, calls } = harness((method) => {
+    if (method === "thread/start") return { thread: { id: "configured-thread" } };
+    if (method === "turn/start") return { turn: { id: "configured-turn" } };
+    throw new Error(method);
+  });
+  await provider.create("run the configured task", {
+    cwd: "/work/sample-app",
+    executionSettings: {
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      approvalsReviewer: "auto_review",
+      summary: "detailed",
+      options: { allowProviderModelFallback: true },
+    },
+  });
+  assert.deepEqual(calls.find(([method]) => method === "thread/start")[1], {
+    cwd: "/work/sample-app",
+    developerInstructions: WAGA_SESSION_INSTRUCTIONS,
+    approvalPolicy: "on-request",
+    sandbox: "workspace-write",
+    approvalsReviewer: "auto_review",
+    allowProviderModelFallback: true,
+  });
+  assert.deepEqual(calls.find(([method]) => method === "turn/start")[1], {
+    threadId: "configured-thread",
+    input: [{ type: "text", text: "run the configured task", textElements: [] }],
+    approvalPolicy: "on-request",
+    sandboxPolicy: {
+      type: "workspaceWrite",
+      writableRoots: ["/work/sample-app"],
+      networkAccess: false,
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false,
+    },
+    approvalsReviewer: "auto_review",
+    summary: "detailed",
+  });
+});
+
 test("Codex create rejects an unknown execution mode before submitting", async () => {
   const { provider, calls } = harness(() => { throw new Error("must not call App Server"); });
   await assert.rejects(provider.create("unsafe", { executionMode: "unknown" }), { code: "CODEX_EXECUTION_MODE_INVALID" });

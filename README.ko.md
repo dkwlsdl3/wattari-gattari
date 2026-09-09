@@ -78,17 +78,31 @@ standalone 라우터입니다. 이슈 번호가 있는 프롬프트를 라우터
 조회하지는 않습니다. subprocess 입력과 v1 응답 필드는
 [라우터 계약 문서](docs/adr/2026-09-09-local-router-contract.md)에 정의되어 있습니다.
 
-### Codex 새 세션 실행 모드
+### 새 세션 실행 설정
 
-기본 실행 모드는 Codex App Server의 provider 기본값을 그대로 사용합니다. dock에서
-`Alt+Y`를 누르면 새 Codex 세션에만 YOLO 실행 모드를 켜거나 끌 수 있습니다. YOLO는
-App Server `approvalPolicy=never`와 `sandbox=danger-full-access`를 사용하므로 승인과
-샌드박스 제한이 사라집니다. 현재 모드는 dock과 새 세션 입력창에 표시됩니다.
+Dock에서 `Alt+S`를 누르면 새 세션에 적용할 Claude·Codex 실행 설정 화면을 엽니다.
+`Tab`으로 provider를 바꾸고, `↑`·`↓`로 항목을 고른 뒤 `Space`로 선택합니다.
+라디오 그룹은 하나만 선택되고 체크박스 그룹은 여러 항목을 선택할 수 있습니다.
+`Enter`는 저장, `Esc` 또는 `Alt+S`는 취소입니다.
+
+- Claude: 승인 권한(`default`, `manual`, `acceptEdits`, `auto`, `dontAsk`, `plan`,
+  `bypassPermissions`)과 `dangerously-skip-permissions`, `restricted`, `bare`,
+  `disable-slash-commands`, `strict-mcp-config` 실행 옵션을 설정합니다.
+- Codex: 승인 정책(`default`, `untrusted`, `on-request`, `never`, `granular`),
+  샌드박스(`default`, `read-only`, `workspace-write`, `danger-full-access`), 승인
+  검토자, 응답 요약 수준, 세부 승인 항목과 provider 모델 대체 허용을 설정합니다.
+
+Waga는 선택한 값을 새 세션 생성 시 Claude CLI의 실행별 플래그와 Codex App Server의
+`thread/start`·첫 `turn/start` 파라미터로 전달합니다. provider의 native 승인 화면과
+실행은 각 provider가 계속 소유합니다. `Alt+Y`는 Codex의 기본값과 YOLO
+(`approvalPolicy=never` + `sandbox=danger-full-access`)를 빠르게 전환하는 호환
+단축키입니다.
 
 설정은 `$XDG_CONFIG_HOME/wattari-gattari/settings.json`(기본값
-`~/.config/wattari-gattari/settings.json`)에 저장됩니다. 기본값은 안전한 provider
-모드이며, 설정 파일이 없거나 읽을 수 없으면 기본값으로 동작합니다. 기존 세션과
-Claude 세션, `send`·`ask`는 이 설정의 영향을 받지 않습니다.
+`~/.config/wattari-gattari/settings.json`)의 version 2 문서에 저장됩니다. 기존
+version 1 Codex 전환 설정은 읽을 때 provider 설정으로 변환되며, 파일이 없거나
+읽을 수 없으면 provider 기본값으로 닫힙니다. 기존 세션과 `send`·`ask`에는 영향을
+주지 않고, 다음에 만드는 Claude·Codex 세션부터 적용됩니다.
 
 ## Dock 조작
 
@@ -107,6 +121,7 @@ Claude 세션, `send`·`ask`는 이 설정의 영향을 받지 않습니다.
 | `/` / `Tab` | 검색 / provider 필터 |
 | `F2` | 선택한 세션 이름 변경 |
 | `Alt+N` / `Alt+R` | 새 세션 / 새로고침 |
+| `Alt+S` | 새 세션 Claude·Codex 실행 설정 |
 | `Alt+Y` | 새 Codex 세션 실행 모드 기본값 / YOLO 전환 |
 | `Alt+X` 두 번 | 세션 보관 |
 | `Alt+Q` | Waga 종료 |

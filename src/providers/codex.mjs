@@ -6,6 +6,7 @@ import { buildPeerEnvelope } from "../bridge/envelope.mjs";
 import { readBeforeDeadline } from "../bridge/deadline.mjs";
 import { CodexAppServerClient } from "../codex-app-server.mjs";
 import { applyCodexExecutionMode } from "../codex-execution.mjs";
+import { applyCodexExecutionSettings } from "../provider-execution.mjs";
 import { EventLog } from "../event-log.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
 import { messageText, previewText } from "../session-preview.mjs";
@@ -243,23 +244,29 @@ export class CodexProvider {
     this.#loadedIds = sessionIds;
   }
 
-  async create(prompt, { cwd = process.cwd(), model, effort, executionMode } = {}) {
+  async create(prompt, { cwd = process.cwd(), model, effort, executionMode, executionSettings } = {}) {
     const workspace = path.resolve(cwd);
     return this.#withClient(async (client) => {
-      const threadStart = applyCodexExecutionMode({
+      const threadBase = {
         cwd: workspace,
         developerInstructions: WAGA_SESSION_INSTRUCTIONS,
-      }, executionMode, "thread");
+      };
+      const threadStart = executionSettings
+        ? applyCodexExecutionSettings(threadBase, executionSettings, "thread", { cwd: workspace })
+        : applyCodexExecutionMode(threadBase, executionMode, "thread");
       if (typeof model === "string" && model.trim()) threadStart.model = model.trim();
       const started = await client.request("thread/start", threadStart);
       const threadId = started?.thread?.id;
       if (typeof threadId !== "string" || !threadId) {
         throw Object.assign(new Error("Codex thread/start response is missing its thread id"), { code: "CODEX_THREAD_START_INVALID" });
       }
-      const turnStart = applyCodexExecutionMode({
+      const turnBase = {
         threadId,
         input: [{ type: "text", text: prompt, textElements: [] }],
-      }, executionMode, "turn");
+      };
+      const turnStart = executionSettings
+        ? applyCodexExecutionSettings(turnBase, executionSettings, "turn", { cwd: workspace })
+        : applyCodexExecutionMode(turnBase, executionMode, "turn");
       if (typeof model === "string" && model.trim()) turnStart.model = model.trim();
       if (typeof effort === "string" && effort.trim()) turnStart.effort = effort.trim();
       const turn = await client.request("turn/start", turnStart);

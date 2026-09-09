@@ -146,6 +146,19 @@ test("create forwards Codex execution mode but keeps it out of Claude options", 
   ]);
 });
 
+test("create forwards provider execution settings to both native adapters", async () => {
+  const calls = [];
+  const bridge = new SessionBridge({ providers: [provider("claude", [], calls), provider("codex", [], calls)] });
+  const claudeSettings = { permissionMode: "acceptEdits", options: { bare: true } };
+  const codexSettings = { approvalPolicy: "on-request", sandbox: "workspace-write" };
+  await bridge.create("claude", "review safely", { cwd: "/work/project", executionSettings: claudeSettings });
+  await bridge.create("codex", "run safely", { cwd: "/work/project", executionSettings: codexSettings });
+  assert.deepEqual(calls.filter(([kind]) => kind === "create"), [
+    ["create", "review safely", { cwd: "/work/project", executionSettings: claudeSettings }],
+    ["create", "run safely", { cwd: "/work/project", executionSettings: codexSettings }],
+  ]);
+});
+
 test("an explicit routing decision avoids re-running the bridge router", async () => {
   const calls = [];
   let routed = 0;

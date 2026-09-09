@@ -5,6 +5,17 @@ import { stripVTControlCharacters } from "node:util";
 import { CODEX_EXECUTION_MODES, codexExecutionLabel } from "./codex-execution.mjs";
 import { fallbackRouting, routingSummary } from "./model-router.mjs";
 import { nativeSessionCommand } from "./native-launcher.mjs";
+import {
+  codexExecutionModeForSettings,
+  codexSettingsForExecutionMode,
+  defaultProviderExecutionSettings,
+  migrateLegacyProviderExecutionSettings,
+  normalizeAllProviderExecutionSettings,
+  providerExecutionRows,
+  providerExecutionSections,
+  providerExecutionSummary,
+  updateProviderExecutionSetting,
+} from "./provider-execution.mjs";
 import { TmuxWorkspace } from "./tmux-workspace.mjs";
 import { previewText, SessionPreview } from "./session-preview.mjs";
 
@@ -259,6 +270,59 @@ export function nativeReturnHint(mode) {
     : "네이티브 TUI: tmux prefix + 0 → dock";
 }
 
+function settingIndicator(row) {
+  return row.kind === "radio" ? (row.selected ? "◉" : "○") : (row.selected ? "[x]" : "[ ]");
+}
+
+function settingsDisplayRows(provider, settings) {
+  return providerExecutionSections(provider, settings).flatMap((section) => [
+    { type: "heading", title: section.title },
+    ...section.rows.map((row) => ({ type: "setting", ...row })),
+  ]);
+}
+
+export function buildSettingsFrame({ settingsPanel, width = 100, height = 30, notice = "" }) {
+  const usableWidth = Math.max(1, width - 4);
+  const provider = settingsPanel?.provider === "codex" ? "codex" : "claude";
+  const drafts = settingsPanel?.drafts ?? defaultProviderExecutionSettings();
+  const settings = drafts[provider] ?? defaultProviderExecutionSettings()[provider];
+  const displayRows = settingsDisplayRows(provider, settings);
+  const selectableRows = displayRows.filter((row) => row.type === "setting");
+  const selected = Math.max(0, Math.min(Number(settingsPanel?.selected ?? 0), Math.max(0, selectableRows.length - 1)));
+  const selectedRow = selectableRows[selected];
+  const selectedDisplayIndex = displayRows.findIndex((row) => row.type === "setting" && row.field === selectedRow?.field && row.key === selectedRow?.key && row.value === selectedRow?.value);
+  const viewportHeight = Math.max(1, height - 9);
+  const offset = Math.max(0, Math.min(selectedDisplayIndex < 0 ? 0 : selectedDisplayIndex - Math.floor(viewportHeight / 2), Math.max(0, displayRows.length - viewportHeight)));
+  const lines = [];
+  lines.push(`  ${color(THEME.title, fit("WAGA · 실행 설정", usableWidth))}`);
+  lines.push(`  ${color(THEME.muted, fit("새 세션 생성에 적용할 provider별 승인 권한과 실행 옵션을 선택합니다.", usableWidth))}`);
+  const tabs = ["claude", "codex"].map((name) => name === provider
+    ? color(name === "claude" ? THEME.claude : THEME.codex, `[ ${name.toUpperCase()} ]`)
+    : color(THEME.muted, `  ${name.toUpperCase()}  `)).join("   ");
+  lines.push(`  ${tabs}`);
+  lines.push(`  ${color(THEME.divider, "─".repeat(Math.max(1, usableWidth)))}`);
+  for (let index = offset; index < Math.min(displayRows.length, offset + viewportHeight); index += 1) {
+    const row = displayRows[index];
+    if (row.type === "heading") {
+      lines.push(`  ${color(THEME.primary, fit(row.title, usableWidth))}`);
+      continue;
+    }
+    const rowIndex = selectableRows.indexOf(row);
+    const active = rowIndex === selected;
+    const indicator = settingIndicator(row);
+    const detail = row.description ? `  ${row.description}` : "";
+    const text = `${indicator} ${row.label}${detail}`;
+    const rowColor = row.disabled ? THEME.muted : row.danger && row.selected ? THEME.warning : THEME.primary;
+    const rendered = `  ${color(rowColor, fit(text, usableWidth - 2))}`;
+    lines.push(active ? `${ESC}${THEME.selected}m${rendered}${RESET}` : rendered);
+  }
+  while (lines.length < height - 4) lines.push("");
+  const panelError = settingsPanel?.error ? `오류: ${settingsPanel.error}` : notice;
+  lines.push(`  ${color(settingsPanel?.error ? THEME.error : THEME.muted, fit(panelError || "Space 선택  ↑↓ 이동  Tab provider 전환  Enter 저장  Esc 취소", usableWidth))}`);
+  lines.push(`  ${color(THEME.muted, fit("Alt+S 닫기   라디오 그룹은 하나만 선택되고 체크박스는 여러 개 선택할 수 있습니다.", usableWidth))}`);
+  return lines.slice(0, height).join("\n");
+}
+
 export function hasOverviewPreview(width, height) {
   return width >= 120 && height >= 20;
 }
@@ -306,7 +370,8 @@ function previewLines(session, preview, width, height) {
   return lines;
 }
 
-export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, providerUsage = {}, notice = "", newTask = null, renameTask = null, preview = null, nativeHint = nativeReturnHint(null), codexExecutionMode = CODEX_EXECUTION_MODES.DEFAULT }) {
+export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, providerUsage = {}, notice = "", newTask = null, renameTask = null, preview = null, nativeHint = nativeReturnHint(null), codexExecutionMode = CODEX_EXECUTION_MODES.DEFAULT, providerSettings = defaultProviderExecutionSettings(), settingsPanel = null }) {
+  if (settingsPanel) return buildSettingsFrame({ settingsPanel, width, height, notice });
   const usableWidth = Math.max(1, width - 4);
   const split = hasOverviewPreview(width, height);
   const listWidth = split ? Math.floor(usableWidth * 0.6) : usableWidth;
@@ -323,7 +388,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
   const title = wide ? "WATTARI GATTARI  Claude + Codex session dock" : "WAGA · session dock";
   lines.push(`  ${color(THEME.title, fit(title, usableWidth))}`);
   const executionStatusColor = codexExecutionMode === CODEX_EXECUTION_MODES.YOLO ? THEME.warning : THEME.muted;
-  lines.push(`  ${color(executionStatusColor, fit(`${counts(sessions)}${provider ? `   filter: ${provider}` : ""}   ${codexExecutionLabel(codexExecutionMode)}   Alt+Y 전환`, usableWidth))}`);
+  lines.push(`  ${color(executionStatusColor, fit(`${counts(sessions)}${provider ? `   filter: ${provider}` : ""}   ${codexExecutionLabel(codexExecutionMode)}   Alt+S 설정   Alt+Y 빠른 전환`, usableWidth))}`);
   if (usageLabels.length) lines.push(`  ${coloredUsageLine(usageLabels, usableWidth)}`);
   lines.push(`  ${color(THEME.divider, "─".repeat(Math.max(1, usableWidth)))}`);
   const bodyStart = lines.length;
@@ -360,8 +425,8 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     }
   }
   const helpLines = wide
-    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  Alt+Enter 재접속  / 검색  Tab 필터", "F2 이름 변경  Alt+N 새 세션  Alt+Y Codex 실행  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기"]
-    : ["Shift+↑↓ 순서  Enter 열기  Alt+Enter 재접속  F2 이름  Alt+N 새 세션", "Alt+Y Codex 실행  Alt+X 보관  Alt+Q 나가기"];
+    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  Alt+Enter 재접속  / 검색  Tab 필터", "F2 이름 변경  Alt+N 새 세션  Alt+S 설정  Alt+Y Codex 실행  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기"]
+    : ["↑↓ 이동  Shift+↑↓ 순서  Enter 열기  Alt+Q 나가기", "Alt+Enter 재접속  / 검색  Tab 필터  F2 이름  Alt+N 새 세션", "Alt+S 설정  Alt+Y Codex 실행  Alt+R 갱신  Alt+X 보관"];
   while (lines.length < height - helpLines.length - 4) lines.push("");
   if (newTask) {
     const providerName = newTask.provider === "claude" ? "CLAUDE" : "CODEX";
@@ -375,9 +440,12 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     const heading = `${color(THEME.title, headingPrefix)}${color(providerColor, providerBadge)}${suffixWidth ? `   ${color(THEME.muted, fit(headingSuffix, suffixWidth))}` : ""}`;
     lines.push(`  ${heading}`);
     lines.push(`  ${color(newTask.routing?.tier === "promoted" ? THEME.warning : providerColor, fit(routingSummary(newTask.routing), usableWidth))}`);
+    const executionSummary = providerSettings?.[newTask.provider]
+      ? providerExecutionSummary(newTask.provider, providerSettings[newTask.provider])
+      : newTask.provider === "codex" ? codexExecutionLabel(codexExecutionMode) : "Claude 실행 설정";
     const composerHint = newTask.error
       ? `오류: ${safeText(newTask.error)}`
-      : `${codexExecutionLabel(codexExecutionMode)}   Alt+Y 전환   Tab → ${alternateProvider} 전환   ←→ 커서   Enter 생성   Esc 취소   Ctrl+U 지우기`;
+      : `${executionSummary}   Alt+S 설정   Tab → ${alternateProvider} 전환   ←→ 커서   Enter 생성   Esc 취소   Ctrl+U 지우기`;
     lines.push(`  ${color(newTask.error ? THEME.error : providerColor, fit(composerHint, usableWidth))}`);
     lines.push(`  ${editorLine(newTask.prompt, newTask.cursor, usableWidth)}`);
     lines.push("");
@@ -435,13 +503,16 @@ export async function runOverview({
     try { orderByWorkspace = orderStore.load(); }
     catch (error) { orderWarning = { provider: "waga", message: error.message }; }
   }
+  let providerSettings = defaultProviderExecutionSettings();
   let codexExecutionMode = CODEX_EXECUTION_MODES.DEFAULT;
   let settingsWarning = null;
   if (settingsStore) {
     try {
       const loaded = settingsStore.load();
-      if (loaded?.codexExecutionMode === CODEX_EXECUTION_MODES.YOLO) codexExecutionMode = CODEX_EXECUTION_MODES.YOLO;
-      else if (loaded?.codexExecutionMode !== CODEX_EXECUTION_MODES.DEFAULT) throw new Error("Waga settings returned an invalid Codex execution mode");
+      providerSettings = loaded?.providers
+        ? normalizeAllProviderExecutionSettings(loaded.providers)
+        : migrateLegacyProviderExecutionSettings(loaded?.codexExecutionMode ?? loaded);
+      codexExecutionMode = codexExecutionModeForSettings(providerSettings.codex);
     } catch (error) {
       settingsWarning = { provider: "waga", message: `실행 설정을 읽지 못했습니다: ${error.message}` };
     }
@@ -461,6 +532,7 @@ export async function runOverview({
   let closed = false;
   let busy = false;
   let nativeOpen = false;
+  let settingsPanel = null;
   let pendingArchiveId = null;
   let pendingCreated = null;
   const archivedSessionIds = new Set();
@@ -514,8 +586,98 @@ export async function runOverview({
       rootCwd: defaultCwd,
       nativeHint,
       codexExecutionMode,
+      providerSettings,
+      settingsPanel,
       preview: previewReader.snapshot(previewSession),
     })}`);
+  };
+
+  const readProviderSettings = () => {
+    if (!settingsStore) throw new Error("실행 설정 저장소가 연결되지 않았습니다.");
+    const loaded = settingsStore.load();
+    const next = loaded?.providers
+      ? normalizeAllProviderExecutionSettings(loaded.providers)
+      : migrateLegacyProviderExecutionSettings(loaded?.codexExecutionMode ?? loaded);
+    providerSettings = next;
+    codexExecutionMode = codexExecutionModeForSettings(next.codex);
+    return next;
+  };
+
+  const openSettings = () => {
+    if (settingsPanel) {
+      settingsPanel = null;
+      render();
+      return;
+    }
+    try {
+      const current = readProviderSettings();
+      settingsPanel = { provider: "claude", drafts: structuredClone(current), selected: 0, error: "" };
+      settingsWarning = null;
+    } catch (error) {
+      settingsPanel = { provider: "claude", drafts: structuredClone(providerSettings), selected: 0, error: `현재 설정을 읽지 못했습니다: ${error.message}` };
+    }
+    render();
+  };
+
+  const saveSettings = () => {
+    if (!settingsPanel) return;
+    if (!settingsStore || typeof settingsStore.saveProviderExecutionSettings !== "function") {
+      settingsPanel = { ...settingsPanel, error: "설정 저장소가 전체 provider 설정 저장을 지원하지 않습니다." };
+      render();
+      return;
+    }
+    try {
+      const saved = settingsStore.saveProviderExecutionSettings(settingsPanel.drafts);
+      providerSettings = normalizeAllProviderExecutionSettings(saved);
+      codexExecutionMode = codexExecutionModeForSettings(providerSettings.codex);
+      settingsWarning = null;
+      settingsPanel = null;
+      notice = "Claude와 Codex 새 세션 실행 설정을 저장했습니다.";
+    } catch (error) {
+      settingsPanel = { ...settingsPanel, error: error.message };
+    }
+    render();
+  };
+
+  const handleSettingsKey = (text, key) => {
+    if (!settingsPanel) return false;
+    if (key.name === "escape" || (key.meta && key.name === "s")) {
+      settingsPanel = null;
+      render();
+      return true;
+    }
+    if (key.name === "tab") {
+      const providerName = settingsPanel.provider === "claude" ? "codex" : "claude";
+      settingsPanel = { ...settingsPanel, provider: providerName, selected: 0, error: "" };
+      render();
+      return true;
+    }
+    const rows = providerExecutionRows(settingsPanel.provider, settingsPanel.drafts[settingsPanel.provider]);
+    if (key.name === "up") {
+      settingsPanel = { ...settingsPanel, selected: Math.max(0, settingsPanel.selected - 1), error: "" };
+      render();
+      return true;
+    }
+    if (key.name === "down") {
+      settingsPanel = { ...settingsPanel, selected: Math.min(Math.max(0, rows.length - 1), settingsPanel.selected + 1), error: "" };
+      render();
+      return true;
+    }
+    if (key.name === "return") {
+      saveSettings();
+      return true;
+    }
+    if (key.name === "space" || text === " " || key.sequence === " ") {
+      const row = rows[settingsPanel.selected];
+      if (row) {
+        const drafts = structuredClone(settingsPanel.drafts);
+        drafts[settingsPanel.provider] = updateProviderExecutionSetting(settingsPanel.provider, drafts[settingsPanel.provider], row);
+        settingsPanel = { ...settingsPanel, drafts, error: "" };
+      }
+      render();
+      return true;
+    }
+    return true;
   };
 
   const routeNewTask = (draft) => {
@@ -602,7 +764,12 @@ export async function runOverview({
       if (![CODEX_EXECUTION_MODES.DEFAULT, CODEX_EXECUTION_MODES.YOLO].includes(next)) {
         throw new Error("Waga settings returned an invalid Codex execution mode");
       }
-      codexExecutionMode = next;
+      if (typeof settingsStore.load === "function") {
+        readProviderSettings();
+      } else {
+        providerSettings = { ...providerSettings, codex: codexSettingsForExecutionMode(next, providerSettings.codex) };
+        codexExecutionMode = next;
+      }
       settingsWarning = null;
       notice = next === CODEX_EXECUTION_MODES.YOLO
         ? "Codex 새 세션을 YOLO로 켰습니다. 승인과 샌드박스 제한이 해제됩니다. Alt+Y로 끌 수 있습니다."
@@ -629,6 +796,7 @@ export async function runOverview({
       let created;
       try {
         const createOptions = { cwd: draft.cwd };
+        if (settingsStore) createOptions.executionSettings = structuredClone(providerSettings[draft.provider]);
         if (draft.provider === "codex") createOptions.executionMode = codexExecutionMode;
         created = await bridge.create(draft.provider, draft.prompt, createOptions);
         if (closed) return;
@@ -752,6 +920,14 @@ export async function runOverview({
     pendingCreated = null; // A later discovery must not steal selection after the user navigates.
     if ((key.ctrl && key.name === "c") || (key.meta && key.name === "q")) {
       leave();
+      return;
+    }
+    if (key.meta && key.name === "s" && !renameTask) {
+      openSettings();
+      return;
+    }
+    if (settingsPanel) {
+      handleSettingsKey(text, key);
       return;
     }
     if (key.meta && key.name === "y") {

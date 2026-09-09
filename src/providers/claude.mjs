@@ -12,6 +12,7 @@ import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
 import { defaultClaudeAliasPath, SessionAliasCatalog } from "../session-alias-catalog.mjs";
 import { ClaudePeerEndpoint } from "./claude-peer.mjs";
 import { ClaudePreviewReader } from "../session-preview.mjs";
+import { applyClaudeExecutionSettings } from "../provider-execution.mjs";
 
 const execFileAsync = promisify(execFile);
 const SHORT_ID = /^[0-9a-f]{8}$/i;
@@ -151,11 +152,12 @@ export class ClaudeProvider {
     return this.#usageRefresh;
   }
 
-  async create(prompt, { cwd = process.cwd(), model, effort } = {}) {
+  async create(prompt, { cwd = process.cwd(), model, effort, executionSettings } = {}) {
     const workspace = canonical(cwd);
     const args = ["--bg"];
     if (typeof model === "string" && model.trim()) args.push("--model", model.trim());
     if (typeof effort === "string" && effort.trim()) args.push("--effort", effort.trim());
+    if (executionSettings) applyClaudeExecutionSettings(args, executionSettings);
     args.push("--settings", this.#titleSync.settings(), "--append-system-prompt", WAGA_SESSION_INSTRUCTIONS, "--", prompt);
     const { stdout } = await this.#run(args, { cwd: workspace });
     return { provider: this.name, nativeId: parseClaudeBackgroundId(stdout) };

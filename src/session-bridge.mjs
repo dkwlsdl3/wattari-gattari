@@ -57,7 +57,7 @@ export class SessionBridge {
     return this.#router({ provider, prompt, cwd });
   }
 
-  async create(provider, prompt, { cwd, routing, executionMode } = {}) {
+  async create(provider, prompt, { cwd, routing, executionMode, executionSettings } = {}) {
     if (typeof prompt !== "string" || !prompt.trim()) throw new BridgeError("PROMPT_REQUIRED", "Prompt is required");
     const adapter = this.#provider(provider);
     const selectedRouting = routing ?? await this.#resolveCreateRouting(provider, prompt.trim(), { cwd });
@@ -65,6 +65,7 @@ export class SessionBridge {
     if (selectedRouting?.model) options.model = selectedRouting.model;
     if (selectedRouting?.effort) options.effort = selectedRouting.effort;
     if (adapter.name === "codex" && executionMode !== undefined) options.executionMode = executionMode;
+    if (executionSettings !== undefined) options.executionSettings = executionSettings;
     const created = await adapter.create(prompt.trim(), options);
     // Resolve real metadata only on the creating provider, without usage or unrelated providers.
     // Creation is already acknowledged: discovery failure must not offer a duplicate submission.

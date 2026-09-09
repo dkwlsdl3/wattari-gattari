@@ -73,6 +73,28 @@ test("Claude create applies the routed model and effort to the new background ag
   });
 });
 
+test("Claude create applies provider execution settings to the new background agent", async () => {
+  let invocation;
+  const provider = new ClaudeProvider({
+    titleSync: { settings: () => '{"hooks":{}}' },
+    run: async (args, options) => {
+      invocation = { args, options };
+      return { stdout: "backgrounded · 1234abcd · configured\n" };
+    },
+  });
+  await provider.create("run the configured task", {
+    cwd: "/work/sample-app",
+    executionSettings: {
+      permissionMode: "acceptEdits",
+      options: { bare: true, strictMcpConfig: true },
+    },
+  });
+  assert.deepEqual(invocation, {
+    args: ["--bg", "--permission-mode", "acceptEdits", "--bare", "--strict-mcp-config", "--settings", "{\"hooks\":{}}", "--append-system-prompt", WAGA_SESSION_INSTRUCTIONS, "--", "run the configured task"],
+    options: { cwd: "/work/sample-app" },
+  });
+});
+
 test("Claude archive removes only the Agents background job through the native CLI", async () => {
   let invocation;
   const provider = new ClaudeProvider({

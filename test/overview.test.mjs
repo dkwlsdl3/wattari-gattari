@@ -16,6 +16,7 @@ import {
   runOverview as startOverview,
   selectOverviewSessions,
 } from "../src/overview.mjs";
+import { defaultProviderExecutionSettings } from "../src/provider-execution.mjs";
 
 const runningOverviews = new Set();
 function runOverview(options) {
@@ -259,7 +260,69 @@ test("Alt+Y toggles and persists the Codex execution mode for new sessions", asy
   input.emit("keypress", "작업", { sequence: "작업" });
   input.emit("keypress", "", { name: "return" });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(created, { provider: "codex", prompt: "작업", options: { cwd: "/work/new", executionMode: "yolo" } });
+  assert.equal(created.provider, "codex");
+  assert.equal(created.prompt, "작업");
+  assert.equal(created.options.cwd, "/work/new");
+  assert.equal(created.options.executionMode, "yolo");
+  assert.equal(created.options.executionSettings.approvalPolicy, "never");
+  assert.equal(created.options.executionSettings.sandbox, "danger-full-access");
+  input.emit("end");
+  assert.equal(await running, 0);
+});
+
+test("Alt+S opens the provider settings screen and saves radio and checkbox choices", async (t) => {
+  const input = ttyInput();
+  t.after(() => input.emit("end"));
+  const output = capturedOutput();
+  const settings = defaultProviderExecutionSettings();
+  let saved;
+  const settingsStore = {
+    load: () => ({ providers: structuredClone(settings) }),
+    saveProviderExecutionSettings: (value) => { saved = structuredClone(value); return structuredClone(value); },
+    toggleCodexExecutionMode: () => "default",
+  };
+  let created;
+  const running = runOverview({
+    bridge: {
+      async discover() { return { sessions: [], warnings: [] }; },
+      async create(provider, prompt, options) { created = { provider, prompt, options }; return { provider, nativeId: "settings-new" }; },
+    },
+    settingsStore,
+    workspace: { async leave() { return { closeOverview: true }; } },
+    defaultCwd: "/work/new",
+    inputStream: input,
+    outputStream: output,
+    refreshMs: 60_000,
+    listenForSignals: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  pressAlt(input, "s");
+  assert.match(plain(output.writes.at(-1)), /WAGA · 실행 설정/);
+  assert.match(plain(output.writes.at(-1)), /승인 권한/);
+  input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", " ", { sequence: " " }); // Claude acceptEdits radio
+  for (let index = 0; index < 7; index += 1) input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", " ", { sequence: " " }); // Claude bare checkbox
+  input.emit("keypress", "", { name: "tab" });
+  for (let index = 0; index < 3; index += 1) input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", " ", { sequence: " " }); // Codex never radio
+  for (let index = 0; index < 5; index += 1) input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", " ", { sequence: " " }); // Codex danger-full-access radio
+  input.emit("keypress", "", { name: "return" });
+  assert.equal(saved.claude.permissionMode, "acceptEdits");
+  assert.equal(saved.claude.options.bare, true);
+  assert.equal(saved.codex.approvalPolicy, "never");
+  assert.equal(saved.codex.sandbox, "danger-full-access");
+
+  pressAlt(input, "n");
+  input.emit("keypress", "작업", { sequence: "작업" });
+  input.emit("keypress", "", { name: "return" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(created.provider, "claude");
+  assert.equal(created.options.executionSettings.permissionMode, "acceptEdits");
+  assert.equal(created.options.executionSettings.options.bare, true);
   input.emit("end");
   assert.equal(await running, 0);
 });

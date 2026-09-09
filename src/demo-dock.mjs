@@ -1,5 +1,6 @@
 import { runOverview } from "./overview.mjs";
 import { CODEX_EXECUTION_MODES } from "./codex-execution.mjs";
+import { defaultProviderExecutionSettings, normalizeAllProviderExecutionSettings, codexExecutionModeForSettings } from "./provider-execution.mjs";
 
 let sessions = [
   { id: "claude:demo-api", nativeId: "demo-api", provider: "claude", status: "idle", name: "API contract", cwd: "/demo/wattari-gattari", updatedAt: 3 },
@@ -46,14 +47,22 @@ const workspace = {
   },
 };
 
-let codexExecutionMode = CODEX_EXECUTION_MODES.DEFAULT;
+let providerSettings = defaultProviderExecutionSettings();
 const settingsStore = {
-  load: () => ({ codexExecutionMode }),
+  load: () => ({ providers: structuredClone(providerSettings), codexExecutionMode: codexExecutionModeForSettings(providerSettings.codex) }),
   toggleCodexExecutionMode: () => {
-    codexExecutionMode = codexExecutionMode === CODEX_EXECUTION_MODES.DEFAULT
-      ? CODEX_EXECUTION_MODES.YOLO
-      : CODEX_EXECUTION_MODES.DEFAULT;
-    return codexExecutionMode;
+    const current = codexExecutionModeForSettings(providerSettings.codex);
+    const next = current === CODEX_EXECUTION_MODES.DEFAULT ? CODEX_EXECUTION_MODES.YOLO : CODEX_EXECUTION_MODES.DEFAULT;
+    providerSettings.codex = {
+      ...providerSettings.codex,
+      approvalPolicy: next === CODEX_EXECUTION_MODES.YOLO ? "never" : "default",
+      sandbox: next === CODEX_EXECUTION_MODES.YOLO ? "danger-full-access" : "default",
+    };
+    return next;
+  },
+  saveProviderExecutionSettings: (settings) => {
+    providerSettings = normalizeAllProviderExecutionSettings(settings);
+    return structuredClone(providerSettings);
   },
 };
 

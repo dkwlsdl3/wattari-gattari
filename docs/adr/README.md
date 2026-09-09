@@ -6,8 +6,10 @@
 ## 제품 경계
 
 Wattari Gattari는 Claude Code와 Codex가 소유한 네이티브 세션을 발견하고 연결하는
-얇은 로컬 CLI입니다. Waga는 별도 daemon, 대화 transcript, 승인 UI, provider 세션을
-소유하지 않습니다.
+얇은 로컬 CLI입니다. Waga는 별도 daemon, 대화 transcript, provider native 승인 UI,
+provider 세션을 소유하지 않습니다. 새 세션을 시작하기 전 선택하는 작은 실행 설정
+화면은 Waga dock의 입력 계층으로만 동작하며, 실제 승인·샌드박스 집행은 provider에
+위임합니다.
 
 - 기본 목록은 모든 프로젝트의 활성 세션이며 `--cwd PATH`로 제한합니다.
 - 생성·접속·보관은 provider 공개 CLI 또는 native daemon에 위임합니다.
@@ -19,11 +21,14 @@ Wattari Gattari는 Claude Code와 Codex가 소유한 네이티브 세션을 발�
   유지하며 자동 릴레이와 자동 작업 배정은 하지 않습니다. `Alt+N` 새 세션은 선택적인
   별도 `local-llm-router` 프로젝트에서 모델·추론 레벨을 받아 provider에 전달할 수
   있지만, Waga 코어가 개인 정책·GitLab 인증·이슈 데이터를 소유하지는 않습니다.
-  기존 세션을 감시하거나 턴마다 모델을 교체하지 않습니다. Codex 새 세션 실행 모드는
-  로컬 Waga 설정의 명시적인 `Alt+Y` opt-in으로만 바뀌며, 기본은 provider 기본값입니다.
-  YOLO를 선택하면 App Server `thread/start`와 첫 `turn/start`에 각각
+  기존 세션을 감시하거나 턴마다 모델을 교체하지 않습니다. `Alt+S` 실행 설정 화면은
+  Claude의 permission mode·실행 플래그와 Codex의 approval policy·sandbox·reviewer·
+  summary·세부 승인 항목을 provider별로 라디오/체크박스로 편집합니다. 저장된 값은 새
+  세션 생성 시에만 각 provider 공개 경계로 전달합니다. Codex `Alt+Y`는 이 설정의
+  approval policy와 sandbox를 기본값↔YOLO로 빠르게 바꾸는 호환 단축키입니다. YOLO를
+  선택하면 App Server `thread/start`와 첫 `turn/start`에 각각
   `approvalPolicy=never`, `sandbox=danger-full-access`와
-  `sandboxPolicy={type:dangerFullAccess}`를 전달합니다. 기존 세션·Claude·`send`·`ask`에는
+  `sandboxPolicy={type:dangerFullAccess}`를 전달합니다. 기존 세션·`send`·`ask`에는
   적용하지 않습니다.
 
 ## Provider 경계
@@ -48,10 +53,12 @@ Wattari Gattari는 Claude Code와 Codex가 소유한 네이티브 세션을 발�
 
 ## Dock backend
 
-Dock은 세션 목록과 관리를 담당합니다. 대화·도구·승인·모델 실행과 그 화면은 provider가 소유합니다.
-사용법과 단축키는 [README](../../README.ko.md)에 둡니다. Codex 새 세션 실행 모드는
-`$XDG_CONFIG_HOME/wattari-gattari/settings.json`에 저장하고, 파일이 없거나 읽히지 않으면
-provider 기본값으로 닫힙니다. Waga는 provider 승인 UI를 대신 소유하지 않습니다.
+Dock은 세션 목록과 관리를 담당합니다. 대화·도구·승인·모델 실행과 native 화면은
+provider가 소유합니다. 사용법과 단축키는 [README](../../README.ko.md)에 둡니다.
+새 세션 provider 실행 설정은 `$XDG_CONFIG_HOME/wattari-gattari/settings.json` version
+2에 저장하고, version 1 Codex 전환 값은 읽을 때 변환합니다. 파일이 없거나 읽히지
+않으면 provider 기본값으로 닫힙니다. Waga는 provider 승인 UI를 대신 소유하지 않고,
+저장한 선택을 생성 시 provider 공개 인자로 전달할 뿐입니다.
 
 - 생성 직후에는 해당 provider에서 새 native ID의 실제 정보를 확인해 먼저 표시하고 입력을 해제합니다.
   전체 목록은 백그라운드에서 갱신하며, 생성 확인 후 메타데이터 조회 실패는 생성 실패로 취급하거나 재전송하지 않습니다.

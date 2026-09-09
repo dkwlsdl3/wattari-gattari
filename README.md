@@ -79,17 +79,33 @@ in the creation notice. Waga does not change models in existing sessions or fetc
 data itself. The subprocess request and v1 response are defined in the
 [local-router contract](docs/adr/2026-09-09-local-router-contract.md).
 
-### Codex execution mode for new sessions
+### Execution settings for new sessions
 
-The default execution mode keeps the Codex App Server provider defaults. Press `Alt+Y`
-in the dock to toggle an explicit YOLO mode for newly created Codex sessions. YOLO sends
-`approvalPolicy=never` and `sandbox=danger-full-access` to the App Server, so approval and
-sandbox restrictions are removed. The current mode is visible in the dock and composer.
+Press `Alt+S` in the dock to open the execution settings for new Claude and Codex
+sessions. Use `Tab` to switch providers, `↑` / `↓` to select a row, and `Space` to
+change it. Radio groups allow one choice; checkbox groups allow several. `Enter` saves,
+while `Esc` or `Alt+S` cancels.
 
-Waga stores the preference at
+- Claude: choose a permission mode (`default`, `manual`, `acceptEdits`, `auto`,
+  `dontAsk`, `plan`, `bypassPermissions`) and optional `dangerously-skip-permissions`,
+  `restricted`, `bare`, `disable-slash-commands`, and `strict-mcp-config` flags.
+- Codex: choose an approval policy (`default`, `untrusted`, `on-request`, `never`,
+  `granular`), sandbox (`default`, `read-only`, `workspace-write`,
+  `danger-full-access`), approvals reviewer, response summary level, granular approval
+  items, and provider model fallback.
+
+Waga passes the selected values to Claude CLI's per-run flags and to the Codex App
+Server `thread/start` and first `turn/start` parameters when creating a session. The
+provider continues to own its native approval UI and execution. `Alt+Y` remains a
+compatibility shortcut that toggles Codex default and YOLO
+(`approvalPolicy=never` plus `sandbox=danger-full-access`).
+
+Waga stores the settings in the version 2 document at
 `$XDG_CONFIG_HOME/wattari-gattari/settings.json` (default:
-`~/.config/wattari-gattari/settings.json`). Missing or unreadable settings fail closed to
-the provider default. Existing sessions, Claude sessions, and `send`/`ask` are unaffected.
+`~/.config/wattari-gattari/settings.json`). A version 1 Codex toggle is migrated to the
+provider settings when read. Missing or unreadable files fail closed to provider
+defaults. Existing sessions and `send`/`ask` are unaffected; the settings apply to the
+next Claude or Codex session created.
 
 ## Dock keys
 
@@ -109,6 +125,7 @@ calls or additional transcript files are created.
 | `/` / `Tab` | Search / filter providers |
 | `F2` | Rename the selected session |
 | `Alt+N` / `Alt+R` | New session / refresh |
+| `Alt+S` | New-session Claude and Codex execution settings |
 | `Alt+Y` | Toggle the new Codex session execution mode |
 | `Alt+X` twice | Archive a session |
 | `Alt+Q` | Exit Waga |
