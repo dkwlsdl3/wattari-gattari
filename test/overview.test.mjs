@@ -1179,6 +1179,46 @@ test("overview creates a provider-owned session from its one-line composer", asy
   assert.equal(await running, 0);
 });
 
+test("new-session composer batches bracketed multiline paste and preserves line breaks", async (t) => {
+  const input = rawTtyInput();
+  t.after(() => input.emit("end"));
+  const output = capturedOutput();
+  let routeCalls = 0;
+  let created = null;
+  const bridge = {
+    async discover() { return { sessions: [], warnings: [] }; },
+    route(provider, prompt, { cwd }) {
+      routeCalls += 1;
+      return { provider, prompt, cwd, model: null, effort: null, label: `${provider} test`, tier: "default", reasons: [], source: "test" };
+    },
+    async create(provider, prompt, options) {
+      created = { provider, prompt, options };
+      return { provider, nativeId: "thread-paste" };
+    },
+  };
+  const workspace = { async leave() { return { closeOverview: true }; } };
+  const running = runOverview({ bridge, workspace, defaultCwd: "/work/new", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise(setImmediate);
+
+  pressAlt(input, "n");
+  const writesBeforePaste = output.writes.length;
+  const routesBeforePaste = routeCalls;
+  const prompt = "쿼터 증량 요청 접수\n김민준님이 'mjk2' 디렉토리의 쿼터 증가를 요청했습니다\n1분 전";
+  input.write(`\u001b[200~${prompt}\u001b[201~`);
+  await waitFor(() => output.writes.length > writesBeforePaste);
+
+  assert.equal(output.writes.length, writesBeforePaste + 1);
+  assert.equal(routeCalls, routesBeforePaste + 1);
+  assert.match(plain(output.writes.at(-1)), /쿼터 증량 요청 접수/);
+  assert.match(plain(output.writes.at(-1)), /↵/);
+
+  input.write("\r");
+  await waitFor(() => created !== null);
+  assert.equal(created.prompt, prompt);
+  input.end();
+  assert.equal(await running, 0);
+});
+
 test("overview shows the provider fallback until the external router runs", async (t) => {
   const input = ttyInput();
   t.after(() => input.emit("end"));

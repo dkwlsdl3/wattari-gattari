@@ -21,6 +21,8 @@ import { previewText, SessionPreview } from "./session-preview.mjs";
 
 const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
+const BRACKETED_PASTE_ON = `${ESC}?2004h`;
+const BRACKETED_PASTE_OFF = `${ESC}?2004l`;
 const ESCAPE_CODE_TIMEOUT_MS = 25;
 const SESSION_REMOVAL_CONFIRMATIONS = 2;
 const color = (code, text) => `${ESC}${code}m${text}${RESET}`;
@@ -77,7 +79,7 @@ function fit(value, width) {
 }
 
 function editorLine(value, cursor, width) {
-  const cells = graphemes(value);
+  const cells = graphemes(value).map((cell) => cell === "\n" ? "↵" : cell === "\t" ? "⇥" : cell);
   const contentWidth = Math.max(1, width - 2);
   let start = 0;
   while (start < cursor && widthOf(cells.slice(start, cursor).join("")) >= contentWidth) start += 1;
@@ -93,6 +95,16 @@ function editorLine(value, cursor, width) {
   const atCursor = cells[cursor] ?? " ";
   const after = cells.slice(cursor + 1, end).join("");
   return `› ${before}${ESC}7m${atCursor}${RESET}${after}`;
+}
+
+function cleanPastedPrompt(value) {
+  return String(value ?? "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, "");
+}
+
+function cleanPastedSingleLine(value) {
+  return cleanPastedPrompt(value).replace(/[\n\t]+/g, " ");
 }
 
 function sessionWorkspace(session) {
@@ -532,6 +544,7 @@ export async function runOverview({
   let searching = false;
   let newTask = null;
   let renameTask = null;
+  let pasteBuffer = null;
   let provider = null;
   let refreshing = false;
   let refreshQueued = false;
@@ -748,7 +761,7 @@ export async function runOverview({
     }
   };
 
-  outputStream.write(`${ESC}?1049h${ESC}?25l${ESC}2J`);
+  outputStream.write(`${ESC}?1049h${ESC}?25l${BRACKETED_PASTE_ON}${ESC}2J`);
   readline.emitKeypressEvents(inputStream, { escapeCodeTimeout: ESCAPE_CODE_TIMEOUT_MS });
   inputStream.setRawMode(true);
   inputStream.resume();
@@ -908,6 +921,45 @@ export async function runOverview({
     })();
   };
 
+  const pasteTarget = () => newTask ? "newTask" : renameTask ? "renameTask" : searching ? "search" : null;
+
+  const insertAtCursor = (value, cursor, inserted) => {
+    if (!inserted) return { value, cursor };
+    const cells = graphemes(value);
+    const added = graphemes(inserted);
+    cells.splice(cursor, 0, ...added);
+    return { value: cells.join(""), cursor: cursor + added.length };
+  };
+
+  const startPaste = () => {
+    const target = pasteTarget();
+    if (!target) return false;
+    pasteBuffer = { target, chunks: [] };
+    return true;
+  };
+
+  const finishPaste = () => {
+    if (!pasteBuffer) return false;
+    const { target, chunks } = pasteBuffer;
+    pasteBuffer = null;
+    const raw = chunks.join("");
+    if (target === "newTask" && newTask) {
+      const next = insertAtCursor(newTask.prompt, newTask.cursor, cleanPastedPrompt(raw));
+      newTask = { ...newTask, prompt: next.value, cursor: next.cursor, error: "" };
+      refreshNewTaskRouting();
+    } else if (target === "renameTask" && renameTask) {
+      const next = insertAtCursor(renameTask.name, renameTask.cursor, cleanPastedSingleLine(raw));
+      renameTask = { ...renameTask, name: next.value, cursor: next.cursor, error: "" };
+    } else if (target === "search" && searching) {
+      const inserted = cleanPastedSingleLine(raw);
+      if (inserted) query += inserted;
+      selected = 0;
+      selectedKey = null;
+    }
+    render();
+    return true;
+  };
+
   const openSession = (target, { force = false } = {}) => {
     busy = true;
     notice = force ? `${target.name} 세션에 다시 연결하는 중입니다.` : `${target.name} 세션을 여는 중입니다.`;
@@ -926,6 +978,18 @@ export async function runOverview({
   const onKeypress = (text, key = {}) => {
     if (busy || closed) return;
     pendingCreated = null; // A later discovery must not steal selection after the user navigates.
+    if (key.name === "paste-start") {
+      if (startPaste()) return;
+    }
+    if (pasteBuffer) {
+      if (key.name === "paste-end") {
+        finishPaste();
+        return;
+      }
+      const chunk = String(key.sequence ?? text ?? "");
+      if (chunk) pasteBuffer.chunks.push(chunk);
+      return;
+    }
     if ((key.ctrl && key.name === "c") || (key.meta && key.name === "q")) {
       leave();
       return;
@@ -1102,7 +1166,8 @@ export async function runOverview({
       process.off("SIGHUP", cleanup);
     }
     if (inputStream.isTTY) inputStream.setRawMode(false);
-    outputStream.write(`${ESC}?25h${ESC}?1049l`);
+    pasteBuffer = null;
+    outputStream.write(`${ESC}?25h${BRACKETED_PASTE_OFF}${ESC}?1049l`);
     resolveRun(0);
   };
   if (listenForSignals) {
