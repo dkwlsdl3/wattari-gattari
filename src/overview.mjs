@@ -219,13 +219,18 @@ function counts(sessions) {
   return `${count("needs-input")} need input   ${count("working")} working   ${count("idle")} ready`;
 }
 
-function resetLabel(resetsAt) {
+function resetText(resetsAt) {
   if (!Number.isFinite(resetsAt)) return "";
   const date = new Date(resetsAt * 1_000);
   if (Number.isNaN(date.getTime())) return "";
   const hour = String(date.getHours()).padStart(2, "0");
   const minute = String(date.getMinutes()).padStart(2, "0");
-  return ` · ${date.getMonth() + 1}/${date.getDate()} ${hour}:${minute} 초기화`;
+  return `${date.getMonth() + 1}/${date.getDate()} ${hour}:${minute} 초기화`;
+}
+
+function resetLabel(resetsAt) {
+  const text = resetText(resetsAt);
+  return text ? ` · ${text}` : "";
 }
 
 function remaining(value) {
@@ -240,10 +245,13 @@ export function formatCodexUsage(usage) {
 
 export function formatClaudeUsage(usage) {
   const parts = [];
-  if (Number.isFinite(usage?.fiveHour?.remainingPercent)) parts.push(`5시간 ${remaining(usage.fiveHour.remainingPercent)}%`);
-  if (Number.isFinite(usage?.weekly?.remainingPercent)) parts.push(`주간 ${remaining(usage.weekly.remainingPercent)}%`);
+  for (const [label, window] of [["5시간", usage?.fiveHour], ["주간", usage?.weekly]]) {
+    if (!Number.isFinite(window?.remainingPercent)) continue;
+    const reset = resetText(window.resetsAt);
+    parts.push(`${label} ${remaining(window.remainingPercent)}% 남음${reset ? ` (${reset})` : ""}`);
+  }
   if (!parts.length) return null;
-  return `Claude ${parts.join(" · ")} 남음${resetLabel(usage.weekly?.resetsAt)}`;
+  return `Claude ${parts.join(" · ")}`;
 }
 
 function coloredUsageLine(segments, width) {

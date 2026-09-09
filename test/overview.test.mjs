@@ -350,14 +350,15 @@ test("unreadable execution settings fail closed and remain visible as a warning"
 });
 
 test("overview formats and displays cached Claude usage", () => {
-  const resetsAt = Math.floor(new Date(2026, 8, 7, 11, 24).getTime() / 1_000);
+  const fiveHourResetsAt = Math.floor(new Date(2026, 8, 7, 6, 0).getTime() / 1_000);
+  const weeklyResetsAt = Math.floor(new Date(2026, 8, 7, 11, 24).getTime() / 1_000);
   const usage = {
-    fiveHour: { remainingPercent: 90 },
-    weekly: { remainingPercent: 6, resetsAt },
+    fiveHour: { remainingPercent: 90, resetsAt: fiveHourResetsAt },
+    weekly: { remainingPercent: 6, resetsAt: weeklyResetsAt },
   };
-  assert.equal(formatClaudeUsage(usage), "Claude 5시간 90% · 주간 6% 남음 · 9/7 11:24 초기화");
+  assert.equal(formatClaudeUsage(usage), "Claude 5시간 90% 남음 (9/7 06:00 초기화) · 주간 6% 남음 (9/7 11:24 초기화)");
   const frame = plain(buildOverviewFrame({ sessions, providerUsage: { claude: usage }, width: 120, height: 20 }));
-  assert.match(frame, /Claude 5시간 90% · 주간 6% 남음 · 9\/7 11:24 초기화/);
+  assert.match(frame, /Claude 5시간 90% 남음 \(9\/7 06:00 초기화\) · 주간 6% 남음 \(9\/7 11:24 초기화\)/);
 });
 
 test("overview uses native provider colors and colors usage independently", () => {
@@ -372,7 +373,7 @@ test("overview uses native provider colors and colors usage independently", () =
     height: 20,
   });
 
-  assert.match(frame, /\x1b\[1;38;2;217;119;87mClaude 5시간 90% · 주간 6% 남음\x1b\[0m/);
+  assert.match(frame, /\x1b\[1;38;2;217;119;87mClaude 5시간 90% 남음 · 주간 6% 남음\x1b\[0m/);
   assert.match(frame, /\x1b\[1;36mCodex 주간 2% 남음\x1b\[0m/);
   assert.match(frame, /\x1b\[1;32m●\x1b\[0m.*\x1b\[1;32mworking/);
   assert.match(frame, /\x1b\[1;34m○\x1b\[0m.*\x1b\[1;34mready/);
