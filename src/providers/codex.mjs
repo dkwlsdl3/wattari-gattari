@@ -242,21 +242,26 @@ export class CodexProvider {
     this.#loadedIds = sessionIds;
   }
 
-  async create(prompt, { cwd = process.cwd() } = {}) {
+  async create(prompt, { cwd = process.cwd(), model, effort } = {}) {
     const workspace = path.resolve(cwd);
     return this.#withClient(async (client) => {
-      const started = await client.request("thread/start", {
+      const threadStart = {
         cwd: workspace,
         developerInstructions: WAGA_SESSION_INSTRUCTIONS,
-      });
+      };
+      if (typeof model === "string" && model.trim()) threadStart.model = model.trim();
+      const started = await client.request("thread/start", threadStart);
       const threadId = started?.thread?.id;
       if (typeof threadId !== "string" || !threadId) {
         throw Object.assign(new Error("Codex thread/start response is missing its thread id"), { code: "CODEX_THREAD_START_INVALID" });
       }
-      const turn = await client.request("turn/start", {
+      const turnStart = {
         threadId,
         input: [{ type: "text", text: prompt, textElements: [] }],
-      });
+      };
+      if (typeof model === "string" && model.trim()) turnStart.model = model.trim();
+      if (typeof effort === "string" && effort.trim()) turnStart.effort = effort.trim();
+      const turn = await client.request("turn/start", turnStart);
       const turnId = turn?.turn?.id;
       if (typeof turnId !== "string" || !turnId) {
         throw Object.assign(new Error(`Codex turn/start response is missing its turn id for ${threadId}`), { code: "CODEX_TURN_START_INVALID" });

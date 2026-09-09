@@ -120,6 +120,34 @@ test("create delegates one prompt to the selected native provider", async () => 
   await assert.rejects(bridge.create("codex", "   ", { cwd: "/work/project" }), { code: "PROMPT_REQUIRED" });
 });
 
+test("create forwards a routed model and returns the routing decision", async () => {
+  const calls = [];
+  const routing = { provider: "codex", model: "gpt-6-astra", effort: "low", tier: "promoted", reasons: ["issue-loop (+3)"] };
+  const bridge = new SessionBridge({
+    providers: [provider("codex", [], calls)],
+    router: () => routing,
+  });
+  const result = await bridge.create("codex", "inspect the issue", { cwd: "/work/project" });
+  assert.deepEqual(result.routing, routing);
+  assert.deepEqual(calls, [
+    ["create", "inspect the issue", { cwd: "/work/project", model: "gpt-6-astra", effort: "low" }],
+    ["list", { cwd: "/work/project" }],
+  ]);
+});
+
+test("an explicit routing decision avoids re-running the bridge router", async () => {
+  const calls = [];
+  let routed = 0;
+  const routing = { provider: "claude", model: "opus", effort: "high", tier: "default", reasons: [] };
+  const bridge = new SessionBridge({
+    providers: [provider("claude", [], calls)],
+    router: () => { routed += 1; return routing; },
+  });
+  await bridge.create("claude", "review", { cwd: "/work/project", routing });
+  assert.equal(routed, 0);
+  assert.deepEqual(calls[0], ["create", "review", { cwd: "/work/project", model: "opus", effort: "high" }]);
+});
+
 test("create resolves only the acknowledged native identity without querying the other provider or usage", async () => {
   const calls = [];
   const session = { id: "claude:full-new", nativeId: "claude-new", provider: "claude", cwd: "/work/project" };

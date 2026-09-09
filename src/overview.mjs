@@ -2,6 +2,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { stripVTControlCharacters } from "node:util";
 
+import { routeTask, routingSummary } from "./model-router.mjs";
 import { nativeSessionCommand } from "./native-launcher.mjs";
 import { TmuxWorkspace } from "./tmux-workspace.mjs";
 import { previewText, SessionPreview } from "./session-preview.mjs";
@@ -371,6 +372,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     const suffixWidth = Math.max(0, usableWidth - widthOf(headingPrefix) - widthOf(providerBadge) - 3);
     const heading = `${color(THEME.title, headingPrefix)}${color(providerColor, providerBadge)}${suffixWidth ? `   ${color(THEME.muted, fit(headingSuffix, suffixWidth))}` : ""}`;
     lines.push(`  ${heading}`);
+    lines.push(`  ${color(newTask.routing?.tier === "promoted" ? THEME.warning : providerColor, fit(routingSummary(newTask.routing), usableWidth))}`);
     const composerHint = newTask.error
       ? `오류: ${safeText(newTask.error)}`
       : `Tab → ${alternateProvider} 전환   ←→ 커서   Enter 생성   Esc 취소   Ctrl+U 지우기`;
@@ -497,6 +499,16 @@ export async function runOverview({
     })}`);
   };
 
+  const routeNewTask = (draft) => {
+    if (!draft) return null;
+    const selected = typeof bridge.route === "function" ? bridge.route(draft.provider, draft.prompt, { cwd: draft.cwd }) : null;
+    return selected ?? routeTask({ provider: draft.provider, prompt: draft.prompt, cwd: draft.cwd });
+  };
+
+  const refreshNewTaskRouting = () => {
+    if (newTask) newTask = { ...newTask, routing: routeNewTask(newTask) };
+  };
+
   const refresh = async ({ whileBusy = false, force = false } = {}) => {
     if (closed || (busy && !whileBusy)) return;
     if (refreshing) {
@@ -567,17 +579,17 @@ export async function runOverview({
       render();
       return;
     }
-    const draft = { ...newTask, prompt, cursor: Math.min(newTask.cursor, graphemes(prompt).length), submitting: true, error: "" };
+    const draft = { ...newTask, prompt, cursor: Math.min(newTask.cursor, graphemes(prompt).length), submitting: true, error: "", routing: routeNewTask({ ...newTask, prompt }) };
     newTask = draft;
     busy = true;
     render();
     void (async () => {
       let created;
       try {
-        created = await bridge.create(draft.provider, draft.prompt, { cwd: draft.cwd });
+        created = await bridge.create(draft.provider, draft.prompt, { cwd: draft.cwd, routing: draft.routing });
         if (closed) return;
         newTask = null;
-        notice = `${draft.provider === "claude" ? "Claude" : "Codex"} 새 세션을 생성했습니다.`;
+        notice = `${draft.provider === "claude" ? "Claude" : "Codex"} 새 세션을 생성했습니다. ${routingSummary(created.routing ?? draft.routing)}`;
         query = "";
         if (provider && provider !== created.provider) provider = null;
         pendingCreated = created;
@@ -749,6 +761,7 @@ export async function runOverview({
           newTask = { ...newTask, prompt: cells.join(""), cursor: newTask.cursor + added.length, error: "" };
         }
       }
+      refreshNewTaskRouting();
       render();
       return;
     }
@@ -813,7 +826,9 @@ export async function runOverview({
         cursor: 0,
         error: "",
         submitting: false,
+        routing: null,
       };
+      refreshNewTaskRouting();
     }
     else if (key.meta && key.name === "r") { notice = "새로고침 중입니다."; render(); void refresh({ force: true }); return; }
     else if (key.name === "left" && nodes[selected]?.type === "workspace") collapsed.add(nodes[selected].cwd);

@@ -151,9 +151,13 @@ export class ClaudeProvider {
     return this.#usageRefresh;
   }
 
-  async create(prompt, { cwd = process.cwd() } = {}) {
+  async create(prompt, { cwd = process.cwd(), model, effort } = {}) {
     const workspace = canonical(cwd);
-    const { stdout } = await this.#run(["--bg", "--settings", this.#titleSync.settings(), "--append-system-prompt", WAGA_SESSION_INSTRUCTIONS, "--", prompt], { cwd: workspace });
+    const args = ["--bg"];
+    if (typeof model === "string" && model.trim()) args.push("--model", model.trim());
+    if (typeof effort === "string" && effort.trim()) args.push("--effort", effort.trim());
+    args.push("--settings", this.#titleSync.settings(), "--append-system-prompt", WAGA_SESSION_INSTRUCTIONS, "--", prompt);
+    const { stdout } = await this.#run(args, { cwd: workspace });
     return { provider: this.name, nativeId: parseClaudeBackgroundId(stdout) };
   }
 

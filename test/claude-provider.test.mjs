@@ -53,6 +53,26 @@ test("Claude create starts an official background agent in the requested workspa
   });
 });
 
+test("Claude create applies the routed model and effort to the new background agent", async () => {
+  let invocation;
+  const provider = new ClaudeProvider({
+    titleSync: { settings: () => '{"hooks":{}}' },
+    run: async (args, options) => {
+      invocation = { args, options };
+      return { stdout: "backgrounded · 1234abcd · routed\n" };
+    },
+  });
+  await provider.create("inspect the issue", {
+    cwd: "/work/sample-app",
+    model: "fable",
+    effort: "high",
+  });
+  assert.deepEqual(invocation, {
+    args: ["--bg", "--model", "fable", "--effort", "high", "--settings", '{"hooks":{}}', "--append-system-prompt", WAGA_SESSION_INSTRUCTIONS, "--", "inspect the issue"],
+    options: { cwd: "/work/sample-app" },
+  });
+});
+
 test("Claude archive removes only the Agents background job through the native CLI", async () => {
   let invocation;
   const provider = new ClaudeProvider({

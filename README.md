@@ -55,6 +55,20 @@ waga open codex --cwd ~/work/my-app
 `waga agents` aliases `waga list`. Provider-prefixed targets such as
 `claude:<id>` and `codex:<id>` are recommended.
 
+### Automatic model routing for new sessions
+
+When `Alt+N` creates a session, Waga applies local rules to the prompt. It recognizes
+explicit skills as well as task cues such as storage, concurrency, migrations, security,
+and production changes, so a skill is optional.
+
+- Codex default: `gpt-5.6-luna` · `max`
+- Codex promoted: `gpt-6-astra` · `low`
+- Claude default: `opus` · `high`
+- Claude promoted: `fable` · `high`
+
+The composer shows the selected profile and its reasons. Routing applies only when a new
+session is created; it does not switch an existing session or fetch issue details by ID.
+
 ## Dock keys
 
 At 120 columns × 20 rows or larger, the right pane shows recent conversation text.

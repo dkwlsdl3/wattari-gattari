@@ -388,6 +388,30 @@ test("Codex create starts a native daemon thread and dispatches its first turn",
   });
 });
 
+test("Codex create applies the routed model and effort to the new thread", async () => {
+  const { provider, calls } = harness((method) => {
+    if (method === "thread/start") return { thread: { id: "routed-thread" } };
+    if (method === "turn/start") return { turn: { id: "routed-turn" } };
+    throw new Error(method);
+  });
+  await provider.create("inspect the issue", {
+    cwd: "/work/sample-app",
+    model: "gpt-6-astra",
+    effort: "low",
+  });
+  assert.deepEqual(calls.find(([method]) => method === "thread/start")[1], {
+    cwd: "/work/sample-app",
+    developerInstructions: WAGA_SESSION_INSTRUCTIONS,
+    model: "gpt-6-astra",
+  });
+  assert.deepEqual(calls.find(([method]) => method === "turn/start")[1], {
+    threadId: "routed-thread",
+    input: [{ type: "text", text: "inspect the issue", textElements: [] }],
+    model: "gpt-6-astra",
+    effort: "low",
+  });
+});
+
 test("Codex archive uses the App Server archive boundary and keeps delete separate", async () => {
   const { provider, calls } = harness((method) => {
     if (method === "thread/archive") return {};

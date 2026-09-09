@@ -1050,9 +1050,46 @@ test("overview creates a provider-owned session from its one-line composer", asy
   await createCalled;
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.deepEqual(created, { provider: "codex", prompt: "작새업", options: { cwd: "/work/new" } });
+  assert.equal(created.provider, "codex");
+  assert.equal(created.prompt, "작새업");
+  assert.equal(created.options.cwd, "/work/new");
+  assert.deepEqual({ model: created.options.routing.model, effort: created.options.routing.effort, tier: created.options.routing.tier }, {
+    model: "gpt-5.6-luna",
+    effort: "max",
+    tier: "default",
+  });
   assert.equal(selectedSessionName(output), "작새업");
   pressAlt(input, "q");
+  assert.equal(await running, 0);
+});
+
+test("overview previews automatic routing for a skill-based task", async (t) => {
+  const input = ttyInput();
+  t.after(() => input.emit("end"));
+  const output = capturedOutput();
+  let created;
+  const bridge = {
+    async discover() { return { sessions: [], warnings: [] }; },
+    async create(provider, prompt, options) {
+      created = { provider, prompt, options };
+      return { provider, nativeId: "thread-routed" };
+    },
+  };
+  const workspace = { async leave() { return { closeOverview: true }; } };
+  const running = runOverview({ bridge, workspace, defaultCwd: "/work/sample-app", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise((resolve) => setImmediate(resolve));
+  input.emit("keypress", "", { name: "tab" });
+  input.emit("keypress", "", { name: "tab" });
+  pressAlt(input, "n");
+  input.emit("keypress", "이슈루프 스킬써서 #123번 이슈 확인해봐", { sequence: "이슈루프 스킬써서 #123번 이슈 확인해봐" });
+  assert.match(plain(output.writes.at(-1)), /자동 라우팅: GPT-6 Astra · low/);
+  assert.match(plain(output.writes.at(-1)), /issue-loop/);
+  input.emit("keypress", "", { name: "return" });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(created.options.routing.model, "gpt-6-astra");
+  assert.equal(created.options.routing.effort, "low");
+  assert.deepEqual(created.options.routing.skills, ["issue-loop"]);
+  input.emit("end");
   assert.equal(await running, 0);
 });
 

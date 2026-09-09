@@ -14,12 +14,15 @@ function providerFromTarget(target) {
 
 export class SessionBridge {
   #providers;
+  #router;
 
-  constructor({ providers }) {
+  constructor({ providers, router = null }) {
     if (!Array.isArray(providers) || providers.length === 0) {
       throw new TypeError("SessionBridge requires at least one provider");
     }
     this.#providers = new Map(providers.map((provider) => [provider.name, provider]));
+    if (router !== null && typeof router !== "function") throw new TypeError("SessionBridge router must be a function");
+    this.#router = router;
   }
 
   async discover({ provider, cwd, includeUsage = false } = {}) {
@@ -46,18 +49,27 @@ export class SessionBridge {
     return { sessions: sessions.sort((left, right) => (right.updatedAt ?? 0) - (left.updatedAt ?? 0)), warnings, availableProviders, providerUsage };
   }
 
-  async create(provider, prompt, { cwd } = {}) {
+  route(provider, prompt, { cwd } = {}) {
+    if (!this.#router) return null;
+    return this.#router({ provider, prompt, cwd });
+  }
+
+  async create(provider, prompt, { cwd, routing } = {}) {
     if (typeof prompt !== "string" || !prompt.trim()) throw new BridgeError("PROMPT_REQUIRED", "Prompt is required");
     const adapter = this.#provider(provider);
-    const created = await adapter.create(prompt.trim(), { cwd });
+    const selectedRouting = routing ?? this.route(provider, prompt.trim(), { cwd });
+    const options = { cwd };
+    if (selectedRouting?.model) options.model = selectedRouting.model;
+    if (selectedRouting?.effort) options.effort = selectedRouting.effort;
+    const created = await adapter.create(prompt.trim(), options);
     // Resolve real metadata only on the creating provider, without usage or unrelated providers.
     // Creation is already acknowledged: discovery failure must not offer a duplicate submission.
     try {
       const sessions = await adapter.list({ cwd });
       const session = sessions.find((candidate) => candidate.provider === provider && candidate.nativeId === created.nativeId);
-      if (session) return { ...created, session };
+      if (session) return { ...created, ...(selectedRouting ? { routing: selectedRouting } : {}), session };
     } catch { /* The regular overview refresh will discover it later. */ }
-    return created;
+    return { ...created, ...(selectedRouting ? { routing: selectedRouting } : {}) };
   }
 
   // Takes an already discovered identity; never rediscover or resolve by display name.
