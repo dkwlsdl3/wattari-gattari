@@ -1,0 +1,24 @@
+{
+  "contractVersion": 1,
+  "provider": "codex",
+  "model": "gpt-6-astra",
+  "effort": "xhigh",
+  "label": "GPT-6 Astra · xhigh",
+  "tier": "critical",
+  "score": 7,
+  "confidence": "high",
+  "skills": ["issue-loop"],
+  "reasons": ["issue-loop (+3)", "스토리지/파일시스템 (+2)"],
+  "cwd": "/work/sample-app",
+  "source": "local-llm-router",
+  "issueRefs": ["123"],
+  "issues": [
+    {
+      "iid": "123",
+      "title": "Example recovery",
+      "labels": ["reliability", "storage"],
+      "commentCount": 4
+    }
+  ],
+  "warnings": []
+}

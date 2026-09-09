@@ -62,10 +62,13 @@ When `Alt+N` creates a session, Waga can create and invoke a separate local proj
 credentials; if the router is absent or fails, the provider creates the session with its
 own defaults.
 
-The router's `router.config.json` owns model aliases and promotion rules. For a prompt
-that contains an issue reference, the router may read the title, description, labels, and
-comments through the user's local GitLab CLI and use them as routing evidence. It never
-passes issue text on as an instruction or performs work automatically.
+The router's `router.config.json` owns model aliases and the four routing tiers. The
+starter policy is Codex `Sol low → Sol medium → Astra low → Astra xhigh` and Claude
+`Sonnet low → Opus low → Fable low → Fable high`; the standalone router remains the
+source of truth. For a prompt that contains an issue reference, the router may read the
+title, description, labels, and comments through the user's local GitLab CLI and use them
+as routing evidence. It never passes issue text on as an instruction or performs work
+automatically.
 
 The default directory is `~/Projects/local-llm-router`; set `WAGA_LOCAL_ROUTER_DIR` to
 use another path. If the directory is absent, Waga copies its starter template and never
@@ -73,7 +76,8 @@ overwrites a non-empty existing directory.
 
 The composer shows the provider fallback before submission, and the final routing result
 in the creation notice. Waga does not change models in existing sessions or fetch issue
-data itself.
+data itself. The subprocess request and v1 response are defined in the
+[local-router contract](docs/adr/2026-09-09-local-router-contract.md).
 
 ## Dock keys
 

@@ -39,6 +39,7 @@ Wattari Gattari는 Claude Code와 Codex가 소유한 네이티브 세션을 발�
 - RPC 제출 확인 timeout은 전달 여부 불명으로 취급하며 자동 재전송·원격 작업 중단을 하지 않습니다.
 - 새 세션 생성 전에 외부 라우터가 실패하면 provider 기본값으로 한 번만 계속하며,
   라우터가 이슈 본문·라벨·코멘트를 읽더라도 그 내용은 라우팅 근거로만 취급합니다.
+  호출 인자와 v1 JSON 응답은 [local-llm-router 입출력 계약](2026-09-09-local-router-contract.md)을 따릅니다.
 
 ## Dock backend
 

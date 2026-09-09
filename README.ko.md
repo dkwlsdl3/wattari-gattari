@@ -62,10 +62,12 @@ waga open codex --cwd ~/work/my-app
 GitLab 인증을 넣지 않으며, 라우터가 없거나 실패하면 provider 기본값으로 세션을
 생성합니다.
 
-라우터의 `router.config.json`에서 모델 별칭·승격 기준을 정합니다. 이슈 번호가 있는
-프롬프트를 라우터에 넘기면 라우터가 선택적으로 제목·본문·라벨·코멘트를 읽어 점수에
-반영할 수 있습니다. 조회 결과는 라우팅 근거로만 쓰고 작업 지시나 자동 실행으로
-전달하지 않습니다.
+라우터의 `router.config.json`에서 네 단계 모델 별칭과 기준을 정합니다. 기본 템플릿은
+Codex가 `Sol low → Sol medium → Astra low → Astra xhigh`, Claude가
+`Sonnet low → Opus low → Fable low → Fable high` 순서이며, 실제 정책의 정본은
+standalone 라우터입니다. 이슈 번호가 있는 프롬프트를 라우터에 넘기면 라우터가
+선택적으로 제목·본문·라벨·코멘트를 읽어 점수에 반영할 수 있습니다. 조회 결과는
+라우팅 근거로만 쓰고 작업 지시나 자동 실행으로 전달하지 않습니다.
 
 기본 경로는 `~/Projects/local-llm-router`이며 `WAGA_LOCAL_ROUTER_DIR`로 바꿀 수
 있습니다. 경로가 비어 있으면 Waga가 기본 템플릿을 복사하고, 기존 파일이 있으면
@@ -73,7 +75,8 @@ GitLab 인증을 넣지 않으며, 라우터가 없거나 실패하면 provider 
 
 입력창에는 생성 전 provider 기본 미리보기가 표시되고, 최종 라우팅 결과는 세션 생성
 알림에 표시됩니다. 이미 열린 세션의 모델을 바꾸거나 Waga가 이슈 데이터를 직접
-조회하지는 않습니다.
+조회하지는 않습니다. subprocess 입력과 v1 응답 필드는
+[라우터 계약 문서](docs/adr/2026-09-09-local-router-contract.md)에 정의되어 있습니다.
 
 ## Dock 조작
 
