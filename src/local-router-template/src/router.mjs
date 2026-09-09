@@ -38,7 +38,7 @@ const TASK_SIGNALS = [
 
 export const DEFAULT_CONFIG = Object.freeze({
   promotionThreshold: 3,
-  issue: Object.freeze({ enabled: true, maxIssues: 3, maxComments: 50, maxChars: 65_536 }),
+  issue: Object.freeze({ enabled: true, timeoutMs: 5_000, maxIssues: 3, maxComments: 50, maxChars: 65_536 }),
   profiles: Object.freeze({
     codex: Object.freeze({
       default: Object.freeze({ model: "gpt-5.6-luna", effort: "max", label: "GPT-5.6 Luna · max" }),
@@ -113,10 +113,10 @@ export function parseIssueOutput(stdout) {
   }
 }
 
-export async function fetchIssueFromGlab(iid, { cwd = process.cwd(), run = execFileAsync } = {}) {
+export async function fetchIssueFromGlab(iid, { cwd = process.cwd(), run = execFileAsync, timeoutMs = 5_000 } = {}) {
   const result = await run("glab", ["issue", "view", String(iid), "--comments", "--output", "json"], {
     cwd: path.resolve(cwd),
-    timeout: 20_000,
+    timeout: timeoutMs,
     maxBuffer: ISSUE_OUTPUT_BYTES,
   });
   return parseIssueOutput(result.stdout);
@@ -167,7 +167,7 @@ export async function routeTask({
   if (issueSettings.enabled !== false && references.length) {
     for (const iid of references.slice(0, issueSettings.maxIssues ?? 3)) {
       try {
-        const issue = await fetchIssue(iid, { cwd });
+        const issue = await fetchIssue(iid, { cwd, timeoutMs: issueSettings.timeoutMs ?? 5_000 });
         issueContexts.push(normalizeIssue(issue, { iid, maxComments: issueSettings.maxComments, maxChars: issueSettings.maxChars }));
       } catch (error) {
         warnings.push(`#${iid}: ${clean(error.message || error)}`);

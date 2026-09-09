@@ -2,6 +2,7 @@
   "promotionThreshold": 3,
   "issue": {
     "enabled": true,
+    "timeoutMs": 5000,
     "maxIssues": 3,
     "maxComments": 50,
     "maxChars": 65536

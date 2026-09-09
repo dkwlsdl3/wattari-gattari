@@ -89,7 +89,7 @@ export class LocalRouterClient {
     try {
       result = await this.#run(process.execPath, args, {
         cwd: path.resolve(cwd),
-        timeout: 30_000,
+        timeout: 15_000,
         maxBuffer: MAX_OUTPUT_BYTES,
       });
     } catch (error) {
