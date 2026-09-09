@@ -28,6 +28,14 @@ test("an explicit issue-loop skill promotes even when the issue number is opaque
   assert.equal(routing.cwd, "/work/sample-app");
 });
 
+test("an issue reference with an action is routed without an explicit skill", () => {
+  const routing = routeTask({ provider: "codex", prompt: "#123번 이슈 확인해봐" });
+  assert.equal(routing.skills.length, 0);
+  assert.equal(routing.tier, "promoted");
+  assert.equal(routing.model, "gpt-6-astra");
+  assert.ok(routing.reasons.some((reason) => reason.includes("이슈 작업")));
+});
+
 test("unstated skills are inferred from risky task language", () => {
   const routing = routeTask({
     provider: "codex",

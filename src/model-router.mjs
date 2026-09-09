@@ -19,7 +19,7 @@ const TASK_SIGNALS = [
   { id: "security", label: "보안/인증", weight: 2, pattern: /security|credential|authentication|authorization|보안|인증|권한/i },
   { id: "production", label: "운영 변경", weight: 2, pattern: /production|deploy|deployment|rollback|배포|롤백|운영\s*(?:장애|변경)/i },
   { id: "root-cause", label: "원인 분석", weight: 1, pattern: /root[- ]cause|investigate|debug|원인\s*분석|장애\s*분석|재현/i },
-  { id: "issue-work", label: "이슈 작업", weight: 2, pattern: /(?:issue|이슈)\s*(?:확인|처리|해결|수정|구현|검토)/i },
+  { id: "issue-work", label: "이슈 작업", weight: 2, pattern: /(?:#\d{3,}|issue|이슈)[^\n]{0,60}(?:확인|처리|해결|수정|구현|검토)/i },
   { id: "review", label: "검토", weight: 1, pattern: /review|검토|리뷰|역검증/i },
   { id: "change", label: "구현 변경", weight: 1, pattern: /implement|refactor|fix|수정|구현|리팩터링|고쳐/i },
   { id: "issue-reference", label: "이슈 참조", weight: 1, pattern: ISSUE_REFERENCE },
