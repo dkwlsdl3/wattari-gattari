@@ -119,7 +119,7 @@ version 1 Codex 전환 설정은 읽을 때 provider 설정으로 변환되며, 
 | `Shift+↑` / `Shift+↓` | 세션 표시 순서 변경 |
 | `←` / `→` / `Enter` | 프로젝트 접기·펼치기 |
 | 세션에서 `Enter` | 실행 중인 네이티브 TUI로 복귀 |
-| 세션에서 `Alt+Enter` | 네이티브 TUI 강제 재접속 |
+| 세션에서 `F4` | 네이티브 TUI 강제 재접속 |
 | `/` / `Tab` | 검색 / provider 필터 |
 | `F2` | 선택한 세션 이름 변경 |
 | `Alt+N` / `Alt+R` | 새 세션 / 새로고침 |
@@ -130,6 +130,9 @@ version 1 Codex 전환 설정은 읽을 때 provider 설정으로 변환되며, 
 | `PgUp` / `PgDn` | 오른쪽 선택 응답만 페이지 단위로 스크롤 |
 
 기본 `auto`는 tmux가 있으면 세션 창을 재사용하고, 없으면 `direct`로 실행합니다.
+여러 터미널에서 `waga`를 실행하면 각각 목록과 에이전트 화면을 독립적으로 선택합니다.
+동일한 에이전트 창을 열면 그 창의 화면과 입력은 공유합니다. 한쪽 Waga를 닫아도
+다른 화면과 보관된 에이전트 창은 유지됩니다. 변경은 새로 실행한 Waga부터 적용됩니다.
 네이티브 화면에서 돌아오는 키는 다음과 같습니다.
 
 - Waga 격리 tmux: `Alt+G`로 dock, `Alt+A`로 별도 provider Agents View
@@ -151,9 +154,44 @@ Waga가 다른 세션의 표시 모드나 전역 설정을 바꾸지는 않습�
 ## 세션 간 메시지
 
 - `send`: 단방향 알림. 제출만 확인합니다.
-- `ask`: 대상의 idle을 기다려 실제 transcript에 한 turn을 보내고 첫 답변을 받습니다.
+- `ask`: Claude는 작업 중에도 native peer 큐에 넣고 요청 ID가 붙은 답변을 기다립니다.
+  Codex는 Waga 호출끼리 접수 순서대로 기다린 뒤 대상이 idle이면 peer turn을 제출합니다.
 - `ask --until-idle`: Codex는 제출한 turn의 완료와 마지막 답변을 확인합니다.
   Claude는 peer 답변 후 idle만 확인하며, native turn 대응이나 최종 답변 여부는 보장하지 않습니다.
+
+진행 출력에는 요청 UUID와 전송 상태가 함께 나옵니다.
+
+| 상태 | 의미 |
+|---|---|
+| `not-sent`, `waiting-local`, `waiting` | 미전송. 각각 준비, Waga 대기열, 대상 busy 대기 |
+| `submitting` | 제출 중. 연결 종료 시 전달 여부 불명 |
+| `submitted` | 제출됨. Claude는 수신 확인 전, Codex는 native 제출 확인 |
+| `accepted` | Claude가 접수를 확인함. 작업 완료는 아님 |
+| `reply-received`, `working` | 답변은 받았으나 Claude idle 확인 대기 |
+| `replied` | 요청에 연결된 답변 반환 |
+
+장시간 검증에는 시간 제한을 명시합니다. Codex의 기본 전송 전 대기는 1800초,
+제출 후 답변 대기는 180초입니다. Claude의 `--wait-timeout`은 전송 전 대상 확인에만
+사용하며, 큐에서 기다리는 시간도 `--reply-timeout`에 포함됩니다.
+
+```bash
+waga ask codex:<thread-id> "현재 변경을 검증해 주세요" --until-idle --wait-timeout 1800 --reply-timeout 1800
+waga result <request-id> --json
+```
+
+`result`는 재전송하거나 다른 turn을 따라가지 않습니다. 답변을 회수하면 종료 코드 0,
+대기·미전송·결과 미확정·중단 상태면 3, 조회 자체가 실패하면 1입니다.
+`ask`/`send` 오류는 종료 코드 1이며 요청 ID와 전달 상태를 출력합니다.
+파이프로 출력할 때는 `set -o pipefail`을 사용해야 `tail` 등의 성공이 실패를 가리지 않습니다.
+
+요청 메타데이터와 회수한 답변 한 건은 `$XDG_STATE_HOME/wattari-gattari/requests/`
+(기본 `~/.local/state/wattari-gattari/requests/`)에 개인 권한으로 저장합니다.
+요청 본문과 전체 대화는 저장하지 않습니다. 최초 회수 답변은 고정되며 `result`로 반복 조회할 수 있습니다.
+호출이 종료된 미전송 요청은 다른 프로세스가 대신 전송하지 않습니다. 대기열은 같은 상태 디렉터리를
+쓰는 Waga 호출끼리만 순서를 정하며, provider UI나 다른 클라이언트 입력까지 예약하지 않습니다.
+Claude의 늦은 답변은 해당 세션의 native 로그에서 `[WAGA REPLY <request-id>]` 표식으로 찾습니다.
+표식·로그가 없거나 원래 Codex turn을 식별하지 못하면 `result-unknown`으로 남깁니다.
+기존 버전에서 보낸 요청에는 기록이 없으므로 이 복구 기능을 소급 적용할 수 없습니다.
 
 peer 메시지는 사용자 지시·승인이 아닌 불신 입력이며 기존 sandbox·승인 정책을 따릅니다.
 자동 릴레이는 없습니다. `Alt+N`으로 만든 세션에는 사용법과 이 신뢰 경계를

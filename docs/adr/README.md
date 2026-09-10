@@ -1,7 +1,7 @@
 # Architecture decision
 
 - 상태: 채택
-- 갱신일: 2026-09-09
+- 갱신일: 2026-09-10
 
 ## 제품 경계
 
@@ -14,7 +14,8 @@ provider 세션을 소유하지 않습니다. 새 세션을 시작하기 전 선
 - 기본 목록은 모든 프로젝트의 활성 세션이며 `--cwd PATH`로 제한합니다.
 - 생성·접속·보관은 provider 공개 CLI 또는 native daemon에 위임합니다.
   새 세션에는 Waga 사용법과 신뢰 경계를 주입하며, 보관은 대화 로그를 영구 삭제하지 않습니다.
-- `send`는 단방향, `ask`는 대상 transcript의 첫 답변을 기다립니다. `--until-idle`은
+- `send`는 단방향, `ask`는 요청에 연결된 답변을 기다립니다. Claude는 busy여도 native
+  peer 큐에 넣고, Codex는 Waga 호출의 로컬 FIFO를 거쳐 idle에 제출합니다. `--until-idle`은
   Codex에서 제출한 turn의 완료·마지막 메시지를 확인하지만, Claude에서는 peer 답변 후
   idle만 확인하며 native turn 상관관계·최종 답변을 보장하지 않습니다.
 - peer 메시지는 사용자 지시·승인이 아닌 불신 입력입니다. 기존 sandbox·승인 정책을
@@ -30,6 +31,27 @@ provider 세션을 소유하지 않습니다. 새 세션을 시작하기 전 선
   `approvalPolicy=never`, `sandbox=danger-full-access`와
   `sandboxPolicy={type:dangerFullAccess}`를 전달합니다. 기존 세션·`send`·`ask`에는
   적용하지 않습니다.
+
+## 요청 상태와 복구
+
+CLI는 요청 ID·대상·전달 상태·native turn/message ID 및 회수한 답변 한 건만 개인 상태
+디렉터리에 기록합니다. 요청 본문·전체 transcript·실행 daemon은 소유하지 않습니다.
+`result`는 재전송 없이 원래 turn 또는 Claude의 명시적 요청 표식을 읽습니다.
+원래 turn의 중단은 다른 turn을 따라갈 근거가 아니며 결과 미확정으로 남깁니다.
+첫 회수 답변은 원자적으로 고정하여 재조회가 다른 답변으로 바뀌지 않습니다.
+
+2026-09-10 설치된 Codex 0.154.0 `generate-ts --experimental` 스키마에서
+`ThreadQueueAddParams`는 `threadId`, `input: UserInput[]`, `clientUserMessageId`만 받으며
+`toolOutput`을 받지 않습니다. peer를 사용자 입력으로 승격하지 않기 위해 native queue
+API를 사용하지 않습니다. 로컬 FIFO는 같은 상태 디렉터리의 Waga 프로세스끼리만 조정하며
+외부 클라이언트의 동시 입력은 막지 못합니다. 접수 순서는 단일 append로 정하고,
+PID와 시작 시각이 일치하는 살아 있는 호출만 대기열을 점유합니다.
+호출이 죽으면 기록은 남지만 다른 호출이 그 본문을 대신 제출하지 않습니다.
+
+Claude의 reply socket은 호출 동안만 유지됩니다. 종료 후 복구는 해당 native JSONL의
+assistant text 또는 원래 socket으로 보내는 SendMessage 본문에 있는 요청 표식에 한정합니다.
+답변 표식은 모델이 생성하므로 누락 가능하며, 누락을 성공이나 다른 답변으로 대체하지 않습니다.
+자세한 상태·종료 코드·시간 제한은 [README](../../README.ko.md#세션-간-메시지)를 따릅니다.
 
 ## Provider 경계
 
@@ -76,9 +98,24 @@ provider가 소유합니다. 사용법과 단축키는 [README](../../README.ko.
   세션을 변경하면 처음 위치로 돌아가고 같은 세션의 자동 갱신에서는 현재 위치를 유지합니다.
 
 - `auto`는 tmux가 있으면 `tmux`, 없으면 `direct`를 선택합니다.
-- `tmux`는 네이티브 TUI마다 window를 재사용하고 여러 terminal client에 같은 화면을
-  제공합니다. tmux 밖에서는 격리 server를, tmux 안에서는 현재 server의 Waga session을
-  사용해 중첩 tmux를 피합니다.
+- `tmux` 진입마다 별도 `waga-view-<uuid>` session과 overview 프로세스를 생성합니다.
+  목록 선택·미리보기·현재 window는 터미널별로 독립적입니다. tmux 밖에서는 격리 server를,
+  tmux 안에서는 현재 server를 사용해 중첩 tmux를 피합니다. 기존 공통 dock은 재시작하지 않습니다.
+- 네이티브 TUI는 제공자 포함 세션 ID의 SHA-256으로 이름 붙인 `waga-retained-<hash>`
+  session에 하나씩 보관하고 `link-window`로 각 화면에 연결합니다. 같은 server 내 동시 생성은
+  tmux의 session 이름 유일성으로 중복 실행을 막습니다. 초기화 중인 창은 재접속하지 않습니다.
+  다른 server 사이에는 창을 공유하지 않습니다.
+- 창 선택과 Agents View 호출은 호출한 화면의 session을 명시합니다. 단순 session group은
+  overview 프로세스까지 공유하므로 사용하지 않습니다. 한 터미널의 종료·연결 해제는 해당
+  overview와 링크만 정리하며, 보관된 TUI는 다음 진입에서도 재사용합니다.
+- 보관 창의 Codex frontend는 실제 client가 해당 window를 보고 있을 때 시작합니다.
+  host가 `window_active_clients`를 확인하며, dock은 화면 안정화 대기보다 먼저 창을 연결·선택합니다.
+  시작 시 터미널 배경색 조회가 숨겨진 창에서 실패한 채 캐시되는 경로를 피합니다.
+  30초 동안 표시되지 않거나 조회가 실패하면 Codex를 시작하지 않고 오류를 남깁니다.
+  이미 실행 중인 frontend의 색상 캐시는 바꾸지 않습니다.
+- 같은 에이전트 창을 동시에 보면 화면·입력·TUI 스크롤은 공유됩니다. 창 크기는 최근 활성
+  client를 따릅니다. 다른 terminal에 표시 중인 창은 자동 재접속하지 않고, 강제 재접속은
+  `TMUX_VIEW_IN_USE`로 거부합니다. 다른 화면을 dock으로 돌린 뒤 재접속할 수 있습니다.
 - Claude 창은 선택 시 Linux `/proc`의 frontend 명령이 요청한 `attach`와 일치하는지 확인합니다.
   native Agents View로 이동했거나 식별할 수 없으면 해당 창만 재접속합니다. 주기적 감시는 없습니다.
 - Codex 창은 실행별 `tui.terminal_title=["thread-id"]`와 선택 시 화면 상단 두 줄로 식별합니다.

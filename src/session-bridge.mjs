@@ -16,8 +16,9 @@ export class SessionBridge {
   #providers;
   #router;
   #createRouter;
+  #requests;
 
-  constructor({ providers, router = null, createRouter = null }) {
+  constructor({ providers, router = null, createRouter = null, requestStore = null }) {
     if (!Array.isArray(providers) || providers.length === 0) {
       throw new TypeError("SessionBridge requires at least one provider");
     }
@@ -26,6 +27,7 @@ export class SessionBridge {
     if (createRouter !== null && typeof createRouter !== "function") throw new TypeError("SessionBridge createRouter must be a function");
     this.#router = router;
     this.#createRouter = createRouter;
+    this.#requests = requestStore;
   }
 
   async discover({ provider, cwd, includeUsage = false } = {}) {
@@ -101,16 +103,64 @@ export class SessionBridge {
     return provider.rename(session, name.trim());
   }
 
-  async send(target, message, { cwd } = {}) {
+  async send(target, message, { cwd, onProgress, waitTimeoutMs = 30 * 60_000 } = {}) {
     const { provider, session } = await this.#resolve(target, cwd);
+    if (this.#requests) return this.#exchange(provider, session, message, { kind: "send", onProgress, waitTimeoutMs });
     const requestId = crypto.randomUUID();
     return provider.send(session, message, { requestId, expectsReply: false });
   }
 
   async ask(target, message, { cwd, waitTimeoutMs = 30 * 60 * 1_000, replyTimeoutMs = 3 * 60 * 1_000, untilIdle = false, onProgress } = {}) {
     const { provider, session } = await this.#resolve(target, cwd);
+    if (this.#requests) return this.#exchange(provider, session, message, { kind: "ask", waitTimeoutMs, replyTimeoutMs, untilIdle, onProgress });
     const requestId = crypto.randomUUID();
     return provider.ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, untilIdle, onProgress, expectsReply: true });
+  }
+
+  async #exchange(provider, session, message, options) {
+    const record = this.#requests.create(session, options);
+    const progress = (event) => {
+      const fields = { ...event };
+      delete fields.target;
+      if (fields.state === "replied") fields.state = "reply-received";
+      this.#requests.update(record, fields);
+      options.onProgress?.({ ...event, target: session.id, requestId: record.requestId, delivery: record.delivery });
+    };
+    try {
+      progress({ state: "not-sent", delivery: "not-sent" });
+      let waitTimeoutMs = options.waitTimeoutMs;
+      if (provider.name === "codex") waitTimeoutMs = await this.#requests.acquire(record, { timeoutMs: waitTimeoutMs, onProgress: progress });
+      let result = await provider[options.kind](session, message, {
+        ...options, waitTimeoutMs, requestId: record.requestId, onProgress: progress,
+      });
+      result = { ...result, delivery: result.delivery ?? record.delivery };
+      if (result.reply !== undefined) result = { ...result, ...this.#requests.reply(record.requestId, { state: "replied", delivery: "accepted", reply: result.reply }) };
+      const { reply, ...metadata } = result;
+      if (reply !== undefined) delete record.reply;
+      this.#requests.update(record, { ...metadata, state: reply !== undefined ? "replied" : result.delivery, finished: true });
+      return { ...result, requestId: record.requestId };
+    } catch (error) {
+      if (["MESSAGE_HELD", "MESSAGE_REFUSED"].includes(error.code)) record.delivery = error.code === "MESSAGE_HELD" ? "held" : "refused";
+      try { this.#requests.update(record, { finished: true, error: { code: error.code ?? "REQUEST_FAILED", message: error.message } }); }
+      catch (storageError) { error.message += `; request record update failed: ${storageError.message}`; }
+      Object.assign(error, { requestId: record.requestId, target: session.id, delivery: record.delivery });
+      throw error;
+    }
+  }
+
+  async result(requestId) {
+    if (!this.#requests) throw new BridgeError("REQUEST_STORE_UNAVAILABLE", "Request storage is unavailable");
+    const record = this.#requests.read(requestId);
+    const base = { requestId, target: record.target, delivery: record.delivery, state: record.state, lastError: record.error, turnId: record.turnId, messageId: record.messageId };
+    const cached = this.#requests.reply(requestId);
+    if (cached) return { ...base, ...cached };
+    if (record.state === "replied" && record.reply !== undefined) return { ...base, reply: record.reply };
+    if (record.delivery === "not-sent") return { ...base, state: this.#requests.active(record) ? record.state : "not-sent" };
+    if (["held", "refused"].includes(record.delivery)) return { ...base, state: record.delivery };
+    if (record.kind === "send") return base;
+    const provider = this.#provider(record.session.provider);
+    const result = await provider.result(record);
+    return { ...base, ...(result.state === "replied" ? this.#requests.reply(requestId, { ...result, delivery: "accepted" }) : result) };
   }
 
   async #resolve(target, cwd) {

@@ -1,10 +1,29 @@
 #!/usr/bin/env node
 
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { EventLog } from "./event-log.mjs";
+
+const execFileAsync = promisify(execFile);
+
+export async function waitForVisibleTerminal({
+  pane = process.env.TMUX_PANE,
+  query = async pane => (await execFileAsync("tmux", ["display-message", "-p", "-t", pane, "#{window_active_clients}"], { encoding: "utf8", timeout: 2000 })).stdout,
+  wait = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  attempts = 300,
+} = {}) {
+  if (!/^%[0-9]+$/.test(pane ?? "")) throw new Error("Native frontend requires a tmux pane");
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const count = String(await query(pane)).trim();
+    if (!/^\d+$/.test(count)) throw new Error("Invalid tmux active client count");
+    if (Number(count) > 0) return;
+    await wait(100);
+  }
+  throw Object.assign(new Error("No terminal is viewing the native frontend; reopen it from the dock"), { code: "TMUX_VIEW_TIMEOUT" });
+}
 
 function defaultLaunch(command, args, { cwd, onSignal }) {
   return new Promise((resolve, reject) => {
@@ -41,11 +60,13 @@ export async function runNativeSessionHost(args = process.argv.slice(2), {
   processId = process.pid,
   eventLog = new EventLog(),
   launch = defaultLaunch,
+  waitForTerminal = process.env.WAGA_WAIT_FOR_VISIBLE === "1" ? waitForVisibleTerminal : null,
 } = {}) {
   const { provider, sessionId, command, commandArgs } = parseArgs(args);
   const context = { provider, sessionId, hostPid: processId };
-  eventLog.record("native_session_started", { ...context, command });
   try {
+    if (waitForTerminal) await waitForTerminal();
+    eventLog.record("native_session_started", { ...context, command });
     const result = await launch(command, commandArgs, {
       cwd,
       onSignal: (signal) => eventLog.record("native_session_host_signal", { ...context, signal }),

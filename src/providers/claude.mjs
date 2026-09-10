@@ -11,6 +11,7 @@ import { ClaudeTitleSync } from "../claude-title-sync.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
 import { defaultClaudeAliasPath, SessionAliasCatalog } from "../session-alias-catalog.mjs";
 import { ClaudePeerEndpoint } from "./claude-peer.mjs";
+import { readClaudeReply } from "./claude-reply.mjs";
 import { ClaudePreviewReader } from "../session-preview.mjs";
 import { applyClaudeExecutionSettings } from "../provider-execution.mjs";
 
@@ -181,12 +182,16 @@ export class ClaudeProvider {
     return { target: session.id, renamed: true, name: renamed, nameSync: "local" };
   }
 
-  async send(session, message, { requestId }) {
+  async send(session, message, { requestId, onProgress = () => {} }) {
+    const envelope = buildPeerEnvelope({ message, requestId, expectsReply: false });
     const endpoint = this.#endpointFactory({ homeDirectory: this.#home, cwd: process.cwd() });
     try {
       await endpoint.start({ socketDirectory: path.dirname(session.socketPath) });
-      const messageId = await endpoint.send(session.socketPath, buildPeerEnvelope({ message, requestId, expectsReply: false }));
+      onProgress({ state: "submitting", delivery: "unknown" });
+      const messageId = await endpoint.send(session.socketPath, envelope);
+      onProgress({ state: "submitted", delivery: "submitted", messageId });
       const disposition = await endpoint.waitForDisposition(messageId, { timeoutMs: 150 });
+      onProgress({ state: disposition.state, delivery: disposition.state, messageId });
       return { target: session.id, requestId, messageId, delivery: disposition.state };
     } finally {
       await endpoint.stop();
@@ -194,31 +199,55 @@ export class ClaudeProvider {
   }
 
   async ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, timeoutMs, untilIdle = false, onProgress = () => {} }) {
+    const envelope = buildPeerEnvelope({ message, requestId, expectsReply: true });
     const fallbackTimeout = timeoutMs ?? 180_000;
-    const current = await this.#waitUntilIdle(session, {
-      timeoutMs: waitTimeoutMs ?? fallbackTimeout,
-      onProgress,
+    // Peer priority "next" queues natively even while Claude is working.
+    const identityTimeout = waitTimeoutMs ?? fallbackTimeout;
+    const identityError = Object.assign(new Error("Claude target lookup timed out; message was not sent"), { code: "TARGET_BUSY_TIMEOUT" });
+    const sessions = await readBeforeDeadline(signal => this.list({ cwd: session.projectCwd, signal }), {
+      deadline: this.#now() + identityTimeout, now: this.#now, error: identityError,
     });
+    const current = sessions.find(candidate => candidate.id === session.id && candidate.sessionId === session.sessionId);
+    if (!current || !["idle", "working", "needs-input"].includes(current.status)) throw Object.assign(new Error(`Claude target is unavailable: ${session.id}`), { code: "TARGET_UNAVAILABLE" });
     const endpoint = this.#endpointFactory({ homeDirectory: this.#home, cwd: process.cwd() });
     try {
       await endpoint.start({ socketDirectory: path.dirname(current.socketPath) });
-      const messageId = await endpoint.send(current.socketPath, buildPeerEnvelope({ message, requestId, expectsReply: true }));
-      onProgress({ state: "submitted", target: session.id });
+      onProgress({ state: "submitting", target: session.id, delivery: "unknown", fromSocket: endpoint.socketPath });
+      const messageId = await endpoint.send(current.socketPath, envelope);
+      onProgress({ state: "submitted", target: session.id, delivery: "submitted", messageId });
       const answerTimeout = replyTimeoutMs ?? fallbackTimeout;
       const replyDeadline = this.#now() + answerTimeout;
       const completionError = Object.assign(new Error(`Claude session did not ${untilIdle ? "complete" : "reply"} within ${answerTimeout}ms`), { code: "REPLY_TIMEOUT" });
-      const reply = await readBeforeDeadline(() => endpoint.waitForReply(current.socketPath, messageId, { timeoutMs: answerTimeout }), {
+      const disposition = await endpoint.waitForDisposition(messageId, { timeoutMs: Math.min(150, answerTimeout) });
+      if (disposition.state === "accepted") onProgress({ state: "accepted", target: session.id, delivery: "accepted", messageId });
+      const reply = await readBeforeDeadline(() => endpoint.waitForReply(current.socketPath, messageId, { timeoutMs: Math.max(1, replyDeadline - this.#now()), requestId }), {
         deadline: replyDeadline, now: this.#now, error: completionError,
       });
+      onProgress({ state: "reply-received", target: session.id, delivery: "accepted", reply: reply.text });
       if (untilIdle) {
         const remaining = replyDeadline - this.#now();
         await this.#waitUntilIdle(current, { timeoutMs: remaining, onProgress, waitingState: "working", timeoutError: completionError });
       }
-      onProgress({ state: "replied", target: session.id });
+      onProgress({ state: "replied", target: session.id, delivery: "accepted" });
       return { target: session.id, requestId, messageId, reply: reply.text, exchangeCount: 1, autoForwarded: false };
     } finally {
       await endpoint.stop();
     }
+  }
+
+  async result(record) {
+    // After the ephemeral reply socket closes, read only an explicitly tagged
+    // answer in the target's native transcript; never guess from its last reply.
+    const reply = record.reply ?? await readClaudeReply(record.session, record.requestId, {
+      homeDirectory: this.#home, since: record.createdAt, fromSocket: record.fromSocket,
+    });
+    if (!reply) return { state: "result-unknown" };
+    if (record.untilIdle) {
+      const sessions = await this.list({ cwd: record.session.projectCwd });
+      const target = sessions.find(session => session.id === record.target);
+      if (target?.status !== "idle") return { state: "reply-received", reply };
+    }
+    return { state: "replied", reply };
   }
 
   async #waitUntilIdle(session, { timeoutMs, onProgress, waitingState = "waiting", timeoutError }) {

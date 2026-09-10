@@ -710,7 +710,7 @@ test("Enter collapses and expands a workspace without opening a native session",
   assert.equal(await running, 0);
 });
 
-test("Alt+Enter forces an exact native session reattach", async () => {
+test("F4 forces an exact native session reattach", async () => {
   const input = ttyInput();
   const output = capturedOutput();
   const calls = [];
@@ -732,7 +732,7 @@ test("Alt+Enter forces an exact native session reattach", async () => {
   await new Promise((resolve) => setImmediate(resolve));
   input.emit("keypress", "", { name: "down" });
 
-  input.emit("keypress", "", { name: "return", meta: true });
+  input.emit("keypress", "", { name: "f4" });
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(calls[0][2], { force: true, knownNativeIds: [sessions[0].nativeId] });

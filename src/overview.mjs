@@ -475,8 +475,8 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     }
   }
   const helpLines = wide
-    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  Alt+Enter 재접속  / 검색  Tab 필터", "F2 이름 변경  Alt+N 새 세션  Alt+S 설정  Alt+Y Codex 실행  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기  PgUp/PgDn 응답"]
-    : ["↑↓ 이동  Shift+↑↓ 순서  Enter 열기  Alt+Q 나가기", "Alt+Enter 재접속  / 검색  Tab 필터  F2 이름  Alt+N 새 세션", "Alt+S 설정  Alt+Y Codex 실행  Alt+R 갱신  Alt+X 보관"];
+    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  F4 재접속  / 검색  Tab 필터", "F2 이름 변경  Alt+N 새 세션  Alt+S 설정  Alt+Y Codex 실행  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기  PgUp/PgDn 응답"]
+    : ["↑↓ 이동  Shift+↑↓ 순서  Enter 열기  Alt+Q 나가기", "F4 재접속  / 검색  Tab 필터  F2 이름  Alt+N 새 세션", "Alt+S 설정  Alt+Y Codex 실행  Alt+R 갱신  Alt+X 보관"];
   while (lines.length < height - helpLines.length - 4) lines.push("");
   if (newTask) {
     const providerName = newTask.provider === "claude" ? "CLAUDE" : "CODEX";
@@ -1145,7 +1145,7 @@ export async function runOverview({
       archiveSession(nodes[selected].session);
       return;
     }
-    if (key.meta && key.name === "return" && nodes[selected]?.type === "session") {
+    if (key.name === "f4" && !key.meta && !key.ctrl && !key.shift && nodes[selected]?.type === "session") {
       openSession(nodes[selected].session, { force: true });
       return;
     }

@@ -212,3 +212,53 @@ test("real isolated tmux reuses, revives, and removes one retained session view"
   assert.deepEqual(await workspace.leave(), { closeOverview: true });
   assert.notEqual((await call(["has-session", "-t", sessionName], { check: false })).code, 0);
 });
+
+test("real tmux independent docks share frontends while selection, resize and exit remain separate", { skip: !hasTmux, timeout: 20_000 }, async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-independent-"));
+  const prefix = ["-S", path.join(root, "tmux.sock"), "-f", "/dev/null"];
+  const call = async args => {
+    try {
+      const result = await execFileAsync("tmux", [...prefix, ...args], { encoding: "utf8", timeout: commandTimeoutMs, signal: t.signal });
+      return { code: 0, ...result };
+    } catch (error) {
+      if (error.killed || error.name === "AbortError") throw error;
+      return { code: Number.isInteger(error.code) ? error.code : 1, stdout: String(error.stdout ?? ""), stderr: String(error.stderr ?? error.message) };
+    }
+  };
+  const checked = async args => { const result = await call(args); assert.equal(result.code, 0, result.stderr); return result.stdout.trim(); };
+  t.after(() => {
+    spawnSync("tmux", [...prefix, "kill-server"], { stdio: "ignore", timeout: commandTimeoutMs });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const idle = shellCommand(process.execPath, ["-e", "console.log('waga-proof-overview'); setInterval(() => {}, 1000)"]);
+  for (const name of ["waga-proof-left", "waga-proof-right"]) {
+    await checked(["new-session", "-d", "-s", name, "-n", "overview", "-c", root, idle]);
+  }
+  const workspace = name => new TmuxWorkspace({
+    run: call, env: { WAGA_TMUX_SESSION: name, WAGA_TMUX_INDEPENDENT: "1" },
+    eventLog: { record() {} }, claudeViewMatches: async () => true,
+  });
+  const left = workspace("waga-proof-left");
+  const right = workspace("waga-proof-right");
+  const agent = { id: "claude:waga-proof-independent", provider: "claude", name: "waga-proof-shared" };
+  const command = { command: process.execPath, args: ["-e", "console.log('waga-proof-native'); setInterval(() => {}, 1000)"], cwd: root };
+  const results = await Promise.all([left.focusOrOpen(agent, command), right.focusOrOpen(agent, command)]);
+  assert.equal(results[0].windowId, results[1].windowId);
+  const windowId = results[0].windowId;
+  const panePid = await checked(["display-message", "-p", "-t", windowId, "#{pane_pid}"]);
+  await checked(["select-window", "-t", "waga-proof-left:overview"]);
+  assert.equal(await checked(["display-message", "-p", "-t", "waga-proof-right", "#{window_id}"]), windowId);
+  const second = await left.focusOrOpen({ ...agent, id: "claude:waga-proof-other" }, command);
+  assert.notEqual(second.windowId, windowId);
+  assert.equal(await checked(["display-message", "-p", "-t", "waga-proof-right", "#{window_id}"]), windowId);
+  await checked(["resize-window", "-t", "waga-proof-left:overview", "-x", "100", "-y", "25"]);
+  await checked(["resize-window", "-t", "waga-proof-right:overview", "-x", "160", "-y", "40"]);
+  assert.equal(await checked(["display-message", "-p", "-t", "waga-proof-left:overview", "#{window_width},#{window_height}"]), "100,25");
+  assert.equal(await checked(["display-message", "-p", "-t", "waga-proof-right:overview", "#{window_width},#{window_height}"]), "160,40");
+  await left.leave();
+  assert.equal((await call(["has-session", "-t", "waga-proof-left"])).code, 1);
+  assert.equal(await checked(["display-message", "-p", "-t", "waga-proof-right", "#{window_id}"]), windowId);
+  assert.equal(await checked(["display-message", "-p", "-t", windowId, "#{pane_pid}"]), panePid);
+  await right.leave();
+  assert.equal(await checked(["display-message", "-p", "-t", windowId, "#{pane_pid}"]), panePid);
+});

@@ -1,4 +1,4 @@
-const COMMANDS = new Set(["list", "agents", "send", "ask", "open", "overview", "tmux-agents-view", "doctor", "help"]);
+const COMMANDS = new Set(["list", "agents", "send", "ask", "result", "open", "overview", "tmux-agents-view", "doctor", "help"]);
 const DEFAULT_WAIT_TIMEOUT_MS = 30 * 60 * 1_000;
 const DEFAULT_REPLY_TIMEOUT_MS = 3 * 60 * 1_000;
 
@@ -57,6 +57,9 @@ export function parseCliArgs(args) {
     options.target = positional.shift();
     options.message = positional.join(" ").trim();
     if (!options.target || !options.message) throw invalid(`${options.command} requires a target and message`);
+  } else if (options.command === "result") {
+    options.requestId = positional.shift();
+    if (!options.requestId || positional.length) throw invalid("result requires one request ID");
   } else if (options.command === "open") {
     options.provider = positional.shift() ?? options.provider;
     if (!options.provider) throw invalid("open requires claude or codex");

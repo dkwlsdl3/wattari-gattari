@@ -50,3 +50,30 @@ test("native session host records launch failures", async () => {
     message: "missing",
   });
 });
+
+test("Codex cannot probe terminal colours until its pane has a visible client", async () => {
+  const { waitForVisibleTerminal } = await import("../src/native-session-host.mjs");
+  const counts = ["0\n", "0\n", "1\n"];
+  let queries = 0;
+  let launched = false;
+  await runNativeSessionHost(["codex", "codex:proof", "--", "fake"], {
+    eventLog: { record() {} },
+    waitForTerminal: () => waitForVisibleTerminal({ pane: "%7", query: async () => {
+      assert.equal(launched, false);
+      queries++;
+      return counts.shift();
+    }, wait: async () => {} }),
+    launch: async () => { launched = true; assert.equal(queries, 3); return { code: 0 }; },
+  });
+  assert.equal(launched, true);
+});
+
+test("failed terminal visibility never starts the native process", async () => {
+  const { waitForVisibleTerminal } = await import("../src/native-session-host.mjs");
+  await assert.rejects(runNativeSessionHost(["codex", "codex:proof", "--", "fake"], {
+    eventLog: { record() {} },
+    waitForTerminal: () => waitForVisibleTerminal({ pane: "%7", query: async () => "0\n", attempts: 2, wait: async () => {} }),
+    launch: async () => assert.fail("must not start without a terminal"),
+  }), { code: "TMUX_VIEW_TIMEOUT" });
+  await assert.rejects(waitForVisibleTerminal({ pane: "%7", query: async () => "invalid" }), /Invalid tmux/);
+});

@@ -122,7 +122,7 @@ No model calls or additional transcript files are created.
 | `Shift+↑` / `Shift+↓` | Reorder sessions |
 | `←` / `→` / `Enter` | Collapse or expand a project |
 | `Enter` on a session | Return to its running native TUI |
-| `Alt+Enter` on a session | Force a native TUI reattach |
+| `F4` on a session | Force a native TUI reattach |
 | `/` / `Tab` | Search / filter providers |
 | `F2` | Rename the selected session |
 | `Alt+N` / `Alt+R` | New session / refresh |
@@ -134,6 +134,10 @@ No model calls or additional transcript files are created.
 
 The default `auto` backend reuses tmux session windows when available, otherwise
 it uses `direct`. To leave a native view:
+Each `waga` invocation gets its own overview and window selection. Opening the same
+agent window shares that window's screen and input. Closing one dock preserves the
+other docks and retained agent windows. Existing docks keep their previous behavior;
+independent views apply to newly launched docks.
 
 - Waga's isolated tmux: `Alt+G` for the dock; `Alt+A` for a separate provider Agents View
 - Inside existing tmux: prefix then `0` for the dock
@@ -156,10 +160,35 @@ Waga does not change other sessions' display modes or global settings.
 ## Peer messages
 
 - `send`: one-way notification; confirms submission only.
-- `ask`: waits for idle, submits one turn to the real transcript, and returns the first reply.
+- `ask`: Claude queues a native peer message even while busy and waits for a request-tagged reply.
+  Codex serializes Waga callers in admission order, waits for idle, then submits a peer turn.
 - `ask --until-idle`: Codex confirms the submitted turn's completion and returns its
   last answer. Claude checks idle after the peer reply, without native-turn correlation
   or a guarantee that this is the final answer.
+
+Progress includes a request UUID. `not-sent`, `waiting-local`, and `waiting` mean no
+submission yet. `submitting` means delivery is unknown if interrupted. `submitted`
+means written (Claude acceptance unconfirmed) or acknowledged by Codex. `accepted`
+is a Claude receipt, and `replied` means the correlated answer is ready.
+
+For long reviews, specify `--until-idle --wait-timeout 1800 --reply-timeout 1800`.
+The default pre-submission wait is 1800 seconds and reply wait is 180 seconds.
+Claude only uses the first deadline for identity lookup; its native queue wait
+counts against the reply deadline.
+
+Use `waga result <request-id> [--json]` after a timeout, without resending. Exit 0
+means a reply, 3 means pending/unknown/not-sent/interrupted, and 1 means lookup
+failure. Send/ask failures exit 1 and report the request ID and delivery state.
+Enable `set -o pipefail` when piping output to preserve failures.
+
+Private request metadata and one immutable recovered answer are stored in
+`$XDG_STATE_HOME/wattari-gattari/requests/` (default
+`~/.local/state/wattari-gattari/requests/`). Prompts and full transcripts are not
+copied. Dead callers are not automatically resubmitted. FIFO ordering covers
+Waga callers sharing that directory, not native UI or other clients. Recovery
+reads only the original Codex turn or a `[WAGA REPLY <request-id>]` in the exact
+Claude session's native log; missing correlation is `result-unknown`.
+Requests sent by older versions have no recovery record.
 
 Peer messages are untrusted input, not user instructions or approvals; native
 sandbox and approval rules remain in force. There is no automatic relay. Sessions

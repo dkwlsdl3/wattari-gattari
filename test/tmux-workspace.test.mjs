@@ -5,7 +5,7 @@ import path from "node:path";
 import test, { after } from "node:test";
 
 import {
-  GLOBAL_DOCK_SESSION,
+  retainedSessionName,
   TmuxWorkspace,
   shellCommand,
   workspaceSessionName,
@@ -55,13 +55,14 @@ test("enter uses switch-client instead of nesting when already inside tmux", asy
   assert.deepEqual(await workspace.enter({ cwd: "/tmp/project" }), { code: 0, mode: "existing" });
   const created = calls.find((args) => args[0] === "new-session");
   assert.ok(created);
-  assert.ok(created.includes(GLOBAL_DOCK_SESSION));
+  const viewName = created[created.indexOf("-s") + 1];
+  assert.match(viewName, /^waga-view-/);
   assert.doesNotMatch(created.at(-1), /--cwd/);
   assert.ok(calls.some((args) => args[0] === "switch-client"));
   assert.ok(!calls.flat().includes("attach-session"));
   assert.deepEqual(
     calls.filter((args) => args.includes("mouse")),
-    [["set-option", "-t", GLOBAL_DOCK_SESSION, "mouse", "on"]],
+    [["set-option", "-t", viewName, "mouse", "on"]],
     "Waga must enable tmux mouse handling only for its own session",
   );
   assert.ok(calls.some((args) => args.includes("status-right") && args.some((value) => value.includes("prefix+0"))));
@@ -78,7 +79,7 @@ test("explicit cwd creates a workspace-scoped dock and filter", async () => {
   const workspace = new TmuxWorkspace({ run, launch: async () => ({ code: 0 }), env: {}, cliPath: "/app/cli.mjs", nodePath: "/usr/bin/node", socketName: "waga-test" });
   assert.deepEqual(await workspace.enter({ cwd: "/tmp/launch", filterCwd: "/tmp/project" }), { code: 0, mode: "isolated" });
   const created = calls.find((args) => args.includes("new-session"));
-  assert.ok(created.includes(workspaceSessionName("/tmp/project")));
+  assert.match(created[created.indexOf("-s") + 1], /^waga-view-/);
   assert.match(created.at(-1), /'overview' '--cwd' '\/tmp\/project'/);
 });
 
@@ -101,98 +102,34 @@ test("enter attaches an isolated server when outside tmux", async () => {
   assert.equal(launched[1].stdio, "inherit");
 });
 
-test("enter respawns only a stale overview and preserves native session windows", async () => {
+test("each entry gets a private overview without respawning an existing user's dock", async () => {
   const calls = [];
-  const run = async (args) => {
-    calls.push(args);
-    if (args.includes("has-session")) return { stdout: "", stderr: "", code: 0 };
-    if (args.includes("list-windows") && args.at(-1).includes("@waga_revision")) {
-      return { stdout: "overview\told-revision\nCodex · 작업\t\n", stderr: "", code: 0 };
-    }
-    if (args.includes("list-windows") && args.at(-1) === "#{window_name}") {
-      return { stdout: "overview\nCodex · 작업\n", stderr: "", code: 0 };
-    }
-    if (args.includes("list-windows")) return { stdout: "@0\n@1\n", stderr: "", code: 0 };
-    return { stdout: "", stderr: "", code: 0 };
-  };
   const workspace = new TmuxWorkspace({
-    run,
-    launch: async () => ({ code: 0 }),
-    env: {},
-    cliPath: "/app/cli.mjs",
-    nodePath: "/usr/bin/node",
-    socketName: "waga-test",
-    revision: "new-revision",
+    run: async args => { calls.push(args); return { code: 0, stdout: "" }; },
+    env: { TMUX: "existing-server" }, eventLog: { record() {} },
   });
-
   await workspace.enter({ cwd: "/tmp/project" });
-
-  const respawn = calls.find((args) => args.includes("respawn-window"));
-  assert.ok(respawn);
-  assert.ok(respawn.includes("-k"));
-  assert.ok(respawn.includes(`${GLOBAL_DOCK_SESSION}:overview`));
-  assert.match(respawn.at(-1), /'overview'/);
-  assert.ok(calls.some((args) => args.includes("set-window-option") && args.includes("@waga_revision") && args.at(-1) === "new-revision"));
-  assert.ok(!calls.some((args) => args.includes("kill-session") || args.includes("kill-window")));
+  await workspace.enter({ cwd: "/tmp/other" });
+  const created = calls.filter(args => args[0] === "new-session");
+  const names = created.map(args => args[args.indexOf("-s") + 1]);
+  assert.equal(new Set(names).size, 2);
+  assert.ok(created.every(args => args.at(-1).includes("WAGA_TMUX_INDEPENDENT=1")));
+  assert.deepEqual(calls.filter(args => args[0] === "switch-client").map(args => args.at(-1)), names);
+  assert.ok(!calls.some(args => ["respawn-window", "kill-window", "kill-session"].includes(args[0])));
+  assert.equal(calls.filter(args => args[0] === "set-hook" && args.includes("client-detached")).length, 2);
 });
 
-test("enter reuses an overview whose code revision is current", async () => {
+test("failed attachment cleans up only its private view", async () => {
   const calls = [];
-  const run = async (args) => {
-    calls.push(args);
-    if (args.includes("has-session")) return { stdout: "", stderr: "", code: 0 };
-    if (args.includes("list-windows") && args.at(-1).includes("@waga_revision")) {
-      return { stdout: "overview\tcurrent\t/tmp/project\n", stderr: "", code: 0 };
-    }
-    if (args.includes("list-windows")) return { stdout: "@0\n", stderr: "", code: 0 };
-    return { stdout: "", stderr: "", code: 0 };
-  };
-  const workspace = new TmuxWorkspace({ run, launch: async () => ({ code: 0 }), env: {}, revision: "current", socketName: "waga-test" });
-
-  await workspace.enter({ cwd: "/tmp/project" });
-
-  assert.ok(!calls.some((args) => args.includes("respawn-window")));
-  assert.ok(!calls.some((args) => args[0] === "set-option" || args[0] === "set-window-option"), "current docks must not rewrite unchanged tmux configuration");
-});
-
-test("enter respawns the overview when the launch workspace changes", async () => {
-  const calls = [];
-  const run = async (args) => {
-    calls.push(args);
-    if (args.includes("has-session")) return { stdout: "", stderr: "", code: 0 };
-    if (args.includes("list-windows") && args.at(-1).includes("@waga_revision")) {
-      return { stdout: "overview\tcurrent\t/tmp/old-project\n", stderr: "", code: 0 };
-    }
-    if (args.includes("list-windows")) return { stdout: "@0\n", stderr: "", code: 0 };
-    return { stdout: "", stderr: "", code: 0 };
-  };
-  const workspace = new TmuxWorkspace({ run, launch: async () => ({ code: 0 }), env: {}, revision: "current", socketName: "waga-test" });
-
-  await workspace.enter({ cwd: "/tmp/new-project" });
-
-  assert.ok(calls.some((args) => args.includes("respawn-window") && args.includes("/tmp/new-project")));
-  assert.ok(calls.some((args) => args.includes("set-window-option") && args.includes("@waga_cwd") && args.at(-1) === "/tmp/new-project"));
-});
-
-test("enter checks and replaces a stale overview from another window in the same Waga session", async () => {
-  const calls = [];
-  const run = async (args) => {
-    calls.push(args);
-    if (args[0] === "display-message") return { stdout: `${GLOBAL_DOCK_SESSION}\n`, stderr: "", code: 0 };
-    if (args.includes("has-session")) return { stdout: "", stderr: "", code: 0 };
-    if (args.includes("list-windows") && args.at(-1).includes("@waga_revision")) {
-      return { stdout: "overview\told\nCodex · 작업\t\n", stderr: "", code: 0 };
-    }
-    if (args.includes("list-windows")) return { stdout: "@0\n@1\n", stderr: "", code: 0 };
-    return { stdout: "", stderr: "", code: 0 };
-  };
-  const workspace = new TmuxWorkspace({ run, env: { TMUX: "/tmp/tmux,1,1" }, revision: "new" });
-
-  await workspace.enter({ cwd: "/tmp/project" });
-
-  assert.ok(calls.some((args) => args.includes("respawn-window")));
-  assert.ok(calls.some((args) => args[0] === "select-window" && args.includes(`${GLOBAL_DOCK_SESSION}:overview`)));
-  assert.ok(!calls.some((args) => args[0] === "switch-client"));
+  const workspace = new TmuxWorkspace({
+    run: async args => { calls.push(args); return { code: 0, stdout: "" }; },
+    launch: async () => { throw new Error("attachment failed"); }, env: {},
+  });
+  await assert.rejects(workspace.enter({ cwd: "/tmp/project" }), /attachment failed/);
+  const created = calls.find(args => args.includes("new-session"));
+  const name = created[created.indexOf("-s") + 1];
+  assert.equal(calls.filter(args => args.includes("kill-session")).length, 1);
+  assert.ok(calls.at(-1).includes(name));
 });
 
 test("enter reports a missing tmux binary as an unavailable dock", async () => {
@@ -421,4 +358,157 @@ test("leave switches or detaches clients and then destroys the Waga frontend ses
   assert.match(isolatedCalls[0][2], /Waga frontend를 종료했습니다/);
   assert.match(isolatedCalls[0][2], /세션과 로그는 유지됩니다/);
   assert.equal(isolatedCalls[1][2], "waga-project-deadbeef");
+});
+
+// Stateful boundary: windows are shared, current-window belongs to each session.
+function sharedTmux() {
+  const sessions = new Map([
+    ["waga-view-left", { windows: ["@0"], current: "@0" }],
+    ["waga-view-right", { windows: ["@1"], current: "@1" }],
+  ]);
+  const windows = new Map();
+  const calls = [];
+  let next = 2;
+  const run = async args => {
+    calls.push(args);
+    const value = flag => args[args.indexOf(flag) + 1];
+    const target = value("-t");
+    const ok = stdout => ({ code: 0, stdout: stdout ?? "", stderr: "" });
+    switch (args[0]) {
+      case "list-windows": {
+        const session = sessions.get(target);
+        if (!session) return { code: 1, stdout: "", stderr: "session missing" };
+        return ok(session.windows.map(id => args.at(-1).includes("@waga_session_id")
+          ? `${id}\t${windows.get(id)?.id ?? ""}\t0` : id).join("\n") + "\n");
+      }
+      case "new-session": {
+        const name = value("-s");
+        if (sessions.has(name)) return { code: 1, stdout: "", stderr: "duplicate session" };
+        const id = `@${next++}`;
+        sessions.set(name, { windows: [id], current: id });
+        windows.set(id, { id: "" });
+        return ok(id + "\n");
+      }
+      case "set-window-option":
+        if (args.at(-2) === "@waga_session_id") windows.get(target).id = args.at(-1);
+        return ok();
+      case "link-window":
+        sessions.get(target.slice(0, -1)).windows.push(value("-s"));
+        return ok();
+      case "select-window": {
+        const [name, id] = target.split(":");
+        assert.ok(sessions.get(name)?.windows.includes(id), `invalid window target ${target}`);
+        sessions.get(name).current = id;
+        return ok();
+      }
+      case "kill-session": sessions.delete(target); return ok();
+      case "capture-pane": return ok("ready\n");
+      case "display-message": return ok(args.at(-1) === "#{window_active_clients}" ? "0\n" : "100\n");
+      case "list-clients": return ok("/dev/pts/proof\n");
+      default: return ok();
+    }
+  };
+  const workspace = name => new TmuxWorkspace({ run,
+    env: { WAGA_TMUX_SESSION: name, WAGA_TMUX_INDEPENDENT: "1" },
+    eventLog: { record() {} }, wait: async () => {}, claudeViewMatches: async () => true,
+  });
+  return { run, calls, sessions, windows, workspace };
+}
+const sharedSession = { id: "claude:proof", provider: "claude", name: "waga-proof-shared" };
+const sharedCommand = { command: "fake-claude", args: ["attach", "proof"], cwd: "/tmp" };
+
+test("independent navigation and closing a view preserve the other view and retained frontend", async () => {
+  const model = sharedTmux();
+  const left = model.workspace("waga-view-left");
+  const right = model.workspace("waga-view-right");
+  const first = await left.focusOrOpen(sharedSession, sharedCommand);
+  assert.equal(model.sessions.get("waga-view-right").current, "@1");
+  const second = await right.focusOrOpen(sharedSession, sharedCommand);
+  assert.equal(second.windowId, first.windowId);
+  assert.equal(second.reused, true);
+  const other = await left.focusOrOpen({ ...sharedSession, id: "claude:other" }, sharedCommand);
+  assert.equal(model.sessions.get("waga-view-left").current, other.windowId);
+  assert.equal(model.sessions.get("waga-view-right").current, first.windowId);
+  await left.leave();
+  assert.equal(model.sessions.has("waga-view-left"), false);
+  assert.equal(model.sessions.get("waga-view-right").current, first.windowId);
+  assert.ok(model.sessions.has(retainedSessionName(sharedSession.id)));
+  assert.ok(!model.calls.some(args => ["respawn-window", "kill-window"].includes(args[0])));
+  assert.ok(model.calls.some(args => args[0] === "detach-client" && args.includes("/dev/pts/proof")));
+});
+
+test("simultaneous openers share one frontend even before its mapping is published", async () => {
+  const model = sharedTmux();
+  const results = await Promise.all([
+    model.workspace("waga-view-left").focusOrOpen(sharedSession, sharedCommand),
+    model.workspace("waga-view-right").focusOrOpen(sharedSession, sharedCommand),
+  ]);
+  assert.equal(results[0].windowId, results[1].windowId);
+  assert.equal(model.windows.size, 1);
+  assert.equal(results.filter(result => !result.reused).length, 1);
+  assert.equal(model.calls.filter(args => args[0] === "respawn-window").length, 0);
+});
+
+test("visible shared frontend cannot be respawned from another view", async () => {
+  const model = sharedTmux();
+  await model.workspace("waga-view-left").focusOrOpen(sharedSession, sharedCommand);
+  const workspace = new TmuxWorkspace({
+    env: { WAGA_TMUX_SESSION: "waga-view-right", WAGA_TMUX_INDEPENDENT: "1" },
+    run: args => args[0] === "display-message" ? { code: 0, stdout: "1\n" } : model.run(args),
+  });
+  await assert.rejects(workspace.focusOrOpen(sharedSession, sharedCommand, { force: true }), { code: "TMUX_VIEW_IN_USE" });
+  assert.ok(!model.calls.some(args => args[0] === "respawn-window"));
+});
+
+test("Alt+A explicitly targets the calling session even when the source window has several links", async () => {
+  const calls = [];
+  const workspace = new TmuxWorkspace({ run: async args => {
+    calls.push(args);
+    if (args[0] === "show-options") return { code: 0, stdout: args.at(-1) === "@waga_provider" ? "codex\n" : "/tmp\n" };
+    if (args[0] === "list-windows") return { code: 0, stdout: "@8\tcodex\t0\n" };
+    return { code: 0, stdout: "" };
+  } });
+  await workspace.focusAgentsViewFromWindow("@2", "$7");
+  assert.deepEqual(calls.at(-1), ["select-window", "-t", "$7:@8"]);
+  assert.ok(!calls.some(args => args[0] === "display-message"));
+  await assert.rejects(workspace.focusAgentsViewFromWindow("@2", "other:window"), { code: "TMUX_SESSION_UNAVAILABLE" });
+});
+
+test("a shared frontend navigated to another native session is not mislabeled or killed", async () => {
+  const model = sharedTmux();
+  await model.workspace("waga-view-left").focusOrOpen(sharedSession, sharedCommand);
+  const workspace = new TmuxWorkspace({
+    env: { WAGA_TMUX_SESSION: "waga-view-right", WAGA_TMUX_INDEPENDENT: "1" },
+    claudeViewMatches: async () => false,
+    run: args => args[0] === "display-message" ? { code: 0, stdout: "1\n" } : model.run(args),
+  });
+  await assert.rejects(workspace.focusOrOpen(sharedSession, sharedCommand), { code: "TMUX_VIEW_IN_USE" });
+  assert.equal(model.sessions.get("waga-view-right").current, "@1");
+  assert.ok(!model.calls.some(args => args[0] === "respawn-window"));
+});
+
+test("dead shared view revival does not kill a concurrent opener's live frontend", async () => {
+  const calls = [];
+  const workspace = new TmuxWorkspace({
+    env: { WAGA_TMUX_SESSION: "waga-view-right", WAGA_TMUX_INDEPENDENT: "1" },
+    eventLog: { record() {} },
+    run: async args => {
+      calls.push(args);
+      if (args[0] === "list-windows") return { code: 0, stdout: args.at(-1).includes("@waga_session_id") ? "@4\tclaude:proof\t1\n" : "@4\n" };
+      if (args[0] === "respawn-window") return { code: 1, stdout: "", stderr: "pane is still active" };
+      if (args[0] === "display-message") return { code: 0, stdout: "0\n" };
+      return { code: 0, stdout: "" };
+    },
+  });
+  assert.deepEqual(await workspace.focusOrOpen(sharedSession, sharedCommand), { reused: true, windowId: "@4" });
+  assert.ok(!calls.find(args => args[0] === "respawn-window").includes("-k"));
+  assert.deepEqual(calls.at(-1), ["select-window", "-t", "waga-view-right:@4"]);
+});
+
+test("shared Codex is selected before waiting for its startup frame", async () => {
+  const model = sharedTmux();
+  await model.workspace("waga-view-left").focusOrOpen({ id: "codex:colour-proof", provider: "codex" }, { command: "fake", args: [], cwd: "/tmp" });
+  const create = model.calls.find(args => args[0] === "new-session");
+  assert.match(create.at(-1), /WAGA_WAIT_FOR_VISIBLE=1/);
+  assert.ok(model.calls.findIndex(args => args[0] === "select-window") < model.calls.findIndex(args => args[0] === "capture-pane"));
 });

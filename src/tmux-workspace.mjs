@@ -90,6 +90,10 @@ export function workspaceSessionName(cwd) {
   return `waga-${readable}-${digest}`;
 }
 
+export function retainedSessionName(sessionId) {
+  return `waga-retained-${crypto.createHash("sha256").update(sessionId).digest("hex")}`;
+}
+
 function safeWindowName(session) {
   const provider = session.provider === "claude" ? "Claude" : "Codex";
   const name = String(session.name ?? session.nativeId ?? "session")
@@ -137,7 +141,7 @@ export class TmuxWorkspace {
   async enter({ cwd = process.cwd(), filterCwd = null } = {}) {
     const workspace = path.resolve(cwd);
     const filter = filterCwd ? path.resolve(filterCwd) : null;
-    const sessionName = filter ? workspaceSessionName(filter) : GLOBAL_DOCK_SESSION;
+    const sessionName = `waga-view-${crypto.randomUUID()}`;
     const insideTmux = Boolean(this.#env.TMUX);
     const mode = insideTmux ? "existing" : "isolated";
     const prefix = insideTmux ? [] : ["-L", this.#socketName, "-f", "/dev/null"];
@@ -147,58 +151,58 @@ export class TmuxWorkspace {
       throw Object.assign(new Error("tmux is required for the interactive dock; use `waga list` for text output"), { code: "TMUX_UNAVAILABLE" });
     }
 
-    const currentSession = insideTmux
-      ? (await this.#call(["display-message", "-p", "#{session_name}"])).stdout.trim()
-      : null;
-
-    const exists = await this.#call([...prefix, "has-session", "-t", sessionName], { check: false });
     const commandArgs = [
       `WAGA_TMUX_MODE=${mode}`,
       `WAGA_TMUX_SESSION=${sessionName}`,
+      "WAGA_TMUX_INDEPENDENT=1",
       this.#nodePath,
       this.#cliPath,
       "overview",
     ];
     if (filter) commandArgs.push("--cwd", filter);
     const command = shellCommand("env", commandArgs);
-    let replaceOverview = false;
-    if (exists.code !== 0) {
-      await this.#call([...prefix, "new-session", "-d", "-s", sessionName, "-n", "overview", "-c", workspace, command]);
-      replaceOverview = true;
-    } else {
-      const windows = await this.#call([...prefix, "list-windows", "-t", sessionName, "-F", "#{window_name}\t#{@waga_revision}\t#{@waga_cwd}"]);
-      const overview = windows.stdout.split("\n").find((line) => line.split("\t", 1)[0] === "overview");
-      if (!overview) {
-        await this.#call([...prefix, "new-window", "-d", "-t", sessionName, "-n", "overview", "-c", workspace, command]);
-        replaceOverview = true;
-      } else {
-        const [, revision, launchCwd] = overview.split("\t");
-        if (revision !== this.#revision || launchCwd !== workspace) {
-          await this.#call([...prefix, "respawn-window", "-k", "-t", `${sessionName}:overview`, "-c", workspace, command]);
-          replaceOverview = true;
-        }
-      }
-    }
-    if (replaceOverview) {
+    await this.#call([...prefix, "new-session", "-d", "-s", sessionName, "-n", "overview", "-c", workspace, command]);
+    try {
       await this.#call([...prefix, "set-window-option", "-t", `${sessionName}:overview`, "@waga_revision", this.#revision]);
       await this.#call([...prefix, "set-window-option", "-t", `${sessionName}:overview`, "@waga_cwd", workspace]);
+      await this.#configure(prefix, sessionName, mode);
+      // A closed terminal only releases its private overview and window links.
+      await this.#call([...prefix, "set-hook", "-t", sessionName, "client-detached",
+        `if-shell -t ${sessionName}:overview -F '#{==:#{session_attached},0}' 'kill-session -t ${sessionName}'`]);
+      if (insideTmux) {
+        await this.#call(["switch-client", "-t", sessionName]);
+        return { code: 0, mode };
+      }
+      const result = await this.#launch([...prefix, "attach-session", "-t", sessionName], { env: this.#env, stdio: "inherit" });
+      await this.#call([...prefix, "kill-session", "-t", sessionName], { check: false });
+      return { code: result.code, mode };
+    } catch (error) {
+      await this.#call([...prefix, "kill-session", "-t", sessionName], { check: false });
+      throw error;
     }
-    if (replaceOverview) await this.#configure(prefix, sessionName, mode);
-
-    if (insideTmux) {
-      if (currentSession === sessionName) await this.#call(["select-window", "-t", `${sessionName}:overview`]);
-      else await this.#call(["switch-client", "-t", sessionName]);
-      return { code: 0, mode };
-    }
-    const result = await this.#launch([...prefix, "attach-session", "-t", sessionName], { env: this.#env, stdio: "inherit" });
-    return { code: result.code, mode };
   }
 
   async focusOrOpen(session, commandSpec, { force = false, knownNativeIds = [] } = {}) {
     const sessionName = this.#env.WAGA_TMUX_SESSION || (await this.#call(["display-message", "-p", "#{session_name}"])).stdout.trim();
     if (!sessionName) throw Object.assign(new Error("Waga tmux session is unavailable"), { code: "TMUX_SESSION_UNAVAILABLE" });
-    const listed = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}\t#{@waga_session_id}\t#{pane_dead}"]);
-    const existing = parseWindows(listed.stdout).find((entry) => entry.sessionId === session.id);
+    const shared = this.#env.WAGA_TMUX_INDEPENDENT === "1";
+    const storageName = shared ? retainedSessionName(session.id) : sessionName;
+    const listed = await this.#call(["list-windows", "-t", storageName, "-F", "#{window_id}\t#{@waga_session_id}\t#{pane_dead}"], { check: !shared });
+    const existing = shared
+      ? parseWindows(listed.code === 0 ? listed.stdout : "")[0]
+      : parseWindows(listed.stdout).find((entry) => entry.sessionId === session.id);
+    const select = (windowId) => this.#selectView(sessionName, windowId, shared);
+    // Do not respawn a frontend being used by another terminal during navigation.
+    const visible = shared && existing && !existing.paneDead
+      ? await this.#call(["display-message", "-p", "-t", existing.windowId, "#{window_active_clients}"], { check: false }) : null;
+    const inUse = visible && (visible.code !== 0 || Number(visible.stdout.trim()) > 0);
+    const viewInUse = () => Object.assign(new Error("The shared frontend is visible in another terminal; return it to the dock before reattaching"), { code: "TMUX_VIEW_IN_USE" });
+    if (inUse && force) throw viewInUse();
+    if (shared && existing && !existing.paneDead && !force && existing.sessionId !== session.id) {
+      // The winning creator may still be starting the frontend. Never spawn it twice.
+      await select(existing.windowId);
+      return { reused: true, windowId: existing.windowId };
+    }
     let changedView = false;
     if (existing && !existing.paneDead && !force && (session.provider ?? session.id.split(":", 1)[0]) === "claude") {
       const pane = await this.#call(["display-message", "-p", "-t", existing.windowId, "#{pane_pid}"], { check: false });
@@ -210,49 +214,82 @@ export class TmuxWorkspace {
       changedView = title.code !== 0 || frame.code !== 0
         || !retainedCodexViewMatches(session.nativeId, title.stdout, frame.stdout, knownNativeIds);
     }
+    if (inUse && changedView) throw viewInUse();
     if (existing && !existing.paneDead && !force && !changedView) {
       await this.#setSessionWindowMetadata(existing.windowId, session, commandSpec);
-      await this.#call(["select-window", "-t", existing.windowId]);
+      await select(existing.windowId);
       return { reused: true, windowId: existing.windowId };
     }
     if (existing) {
       const reason = force ? "forced_reattach" : changedView ? "native_view_changed" : "dead_view";
       this.#eventLog.record("session_view_respawn_requested", { sessionId: session.id, windowId: existing.windowId, reason });
-      await this.#call([
-        "respawn-window", "-k", "-t", existing.windowId, "-c", commandSpec.cwd,
+      const revived = await this.#call([
+        "respawn-window", ...(shared && existing.paneDead ? [] : ["-k"]), "-t", existing.windowId, "-c", commandSpec.cwd,
         this.#sessionCommand(session, commandSpec),
-      ]);
+      ], { check: !(shared && existing.paneDead) });
+      if (revived.code !== 0) {
+        // Without -k, tmux atomically refuses a second opener once the pane is live.
+        const current = await this.#call(["display-message", "-p", "-t", existing.windowId, "#{pane_dead}"]);
+        if (current.stdout.trim() !== "0") throw Object.assign(new Error(revived.stderr || "Cannot revive frontend"), { code: "TMUX_WINDOW_FAILED" });
+        await select(existing.windowId);
+        return { reused: true, windowId: existing.windowId };
+      }
       await this.#setSessionWindowMetadata(existing.windowId, session, commandSpec);
       this.#eventLog.record("session_view_respawned", { sessionId: session.id, windowId: existing.windowId, reason });
+      if (shared && (session.provider ?? session.id.split(":", 1)[0]) === "codex") await select(existing.windowId);
       await this.#waitForSettledFrame(existing.windowId);
-      await this.#call(["select-window", "-t", existing.windowId]);
+      await this.#call(["set-window-option", "-t", existing.windowId, "@waga_session_id", session.id]);
+      await select(existing.windowId);
       return { reused: true, windowId: existing.windowId };
     }
 
     this.#eventLog.record("session_view_open_requested", { sessionId: session.id, reason: "dock_open" });
     const created = await this.#call([
-      "new-window", "-d", "-P", "-F", "#{window_id}", "-t", sessionName,
+      ...(shared ? ["new-session", "-d", "-P", "-F", "#{window_id}", "-s", storageName] : ["new-window", "-d", "-P", "-F", "#{window_id}", "-t", sessionName]),
       "-n", safeWindowName(session), "-c", commandSpec.cwd,
       this.#sessionCommand(session, commandSpec),
-    ]);
+    ], { check: !shared });
+    if (created.code !== 0) {
+      // tmux's unique session name is the atomic admission point across processes.
+      const winner = await this.#call(["list-windows", "-t", storageName, "-F", "#{window_id}"]);
+      const windowId = winner.stdout.trim();
+      if (!/^@[0-9]+$/.test(windowId)) throw Object.assign(new Error(created.stderr || "Cannot open retained frontend"), { code: "TMUX_WINDOW_FAILED" });
+      await select(windowId);
+      return { reused: true, windowId };
+    }
     const windowId = created.stdout.trim();
     if (!/^@[0-9]+$/.test(windowId)) throw Object.assign(new Error("tmux did not return the native session window id"), { code: "TMUX_WINDOW_FAILED" });
     try {
-      await this.#call(["set-window-option", "-t", windowId, "@waga_session_id", session.id]);
       await this.#setSessionWindowMetadata(windowId, session, commandSpec);
       await this.#call(["set-window-option", "-t", windowId, "automatic-rename", "off"]);
       await this.#styleWindow([], windowId);
+      if (shared && (session.provider ?? session.id.split(":", 1)[0]) === "codex") await select(windowId);
+      if (shared) await this.#waitForSettledFrame(windowId);
+      await this.#call(["set-window-option", "-t", windowId, "@waga_session_id", session.id]);
       this.#eventLog.record("session_view_opened", { sessionId: session.id, windowId, reason: "dock_open" });
-      await this.#call(["select-window", "-t", windowId]);
+      await select(windowId);
     } catch (error) {
-      // Only this invocation's newly created frontend may be rolled back.
-      try { await this.#call(["kill-window", "-t", windowId]); } catch {}
+      // A shared frontend may already be linked by another opener; retain it on failure.
+      if (!shared) { try { await this.#call(["kill-window", "-t", windowId]); } catch {} }
       throw error;
     }
     return { reused: false, windowId };
   }
 
-  async focusAgentsViewFromWindow(windowId) {
+  async #selectView(sessionName, windowId, shared = false) {
+    if (shared) {
+      const listed = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}"]);
+      if (!listed.stdout.split("\n").includes(windowId)) {
+        await this.#call(["link-window", "-d", "-s", windowId, "-t", `${sessionName}:`]);
+      }
+      await this.#call(["set-window-option", "-t", windowId, "window-size", "latest"]);
+      await this.#call(["set-window-option", "-t", windowId, "aggressive-resize", "on"]);
+    }
+    await this.#call(["select-window", "-t", `${sessionName}:${windowId}`]);
+  }
+
+  async focusAgentsViewFromWindow(windowId, targetSession = null) {
+    if (targetSession !== null && !/^\$[0-9]+$/.test(targetSession)) throw Object.assign(new Error("Invalid tmux session id"), { code: "TMUX_SESSION_UNAVAILABLE" });
     if (!/^@[0-9]+$/.test(windowId)) {
       throw Object.assign(new Error(`Invalid tmux window id: ${windowId}`), { code: "TMUX_WINDOW_INVALID" });
     }
@@ -262,13 +299,12 @@ export class TmuxWorkspace {
     const cwdResult = await this.#call(["show-options", "-w", "-v", "-t", windowId, "@waga_project_cwd"], { check: false });
     const cwd = cwdResult.stdout.trim();
     if (!cwd) throw Object.assign(new Error(`Waga session window is missing its project cwd: ${windowId}`), { code: "TMUX_WINDOW_INVALID" });
-    const sessionResult = await this.#call(["display-message", "-p", "-t", windowId, "#{session_name}"]);
-    const sessionName = sessionResult.stdout.trim();
+    const sessionName = targetSession ?? (await this.#call(["display-message", "-p", "-t", windowId, "#{session_name}"])).stdout.trim();
     const commandSpec = nativeAgentsCommand(provider, { cwd });
     const listed = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}\t#{@waga_agents_provider}\t#{pane_dead}"]);
     const existing = parseWindows(listed.stdout).find((entry) => entry.sessionId === provider);
     if (existing && !existing.paneDead) {
-      await this.#call(["select-window", "-t", existing.windowId]);
+      await this.#selectView(sessionName, existing.windowId);
       return { reused: true, windowId: existing.windowId };
     }
 
@@ -289,14 +325,16 @@ export class TmuxWorkspace {
     await this.#call(["set-window-option", "-t", agentsWindowId, "@waga_project_cwd", commandSpec.cwd]);
     await this.#call(["set-window-option", "-t", agentsWindowId, "automatic-rename", "off"]);
     await this.#styleWindow([], agentsWindowId);
-    await this.#call(["select-window", "-t", agentsWindowId]);
+    await this.#selectView(sessionName, agentsWindowId);
     return { reused: false, windowId: agentsWindowId };
   }
 
   async closeSessionView(session) {
     const sessionName = this.#env.WAGA_TMUX_SESSION || (await this.#call(["display-message", "-p", "#{session_name}"])).stdout.trim();
     if (!sessionName) throw Object.assign(new Error("Waga tmux session is unavailable"), { code: "TMUX_SESSION_UNAVAILABLE" });
-    const listed = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}\t#{@waga_session_id}"]);
+    const storageName = this.#env.WAGA_TMUX_INDEPENDENT === "1" ? retainedSessionName(session.id) : sessionName;
+    const listed = await this.#call(["list-windows", "-t", storageName, "-F", "#{window_id}\t#{@waga_session_id}"], { check: false });
+    if (listed.code !== 0) return { closed: false };
     const existing = parseWindows(listed.stdout).find((entry) => entry.sessionId === session.id);
     if (!existing) return { closed: false };
     this.#eventLog.record("session_view_close_requested", { sessionId: session.id, windowId: existing.windowId, reason: "session_archived" });
@@ -338,6 +376,18 @@ export class TmuxWorkspace {
   async leave() {
     const sessionName = await this.#currentSessionName();
     this.#eventLog.record("dock_shutdown_requested", { tmuxSession: sessionName, reason: "user_leave" });
+    if (this.#env.WAGA_TMUX_INDEPENDENT === "1") {
+      const clients = await this.#call(["list-clients", "-t", sessionName, "-F", "#{client_name}"]);
+      for (const client of clients.stdout.split("\n").filter(Boolean)) {
+        if (this.#env.WAGA_TMUX_MODE === "existing") {
+          const switched = await this.#call(["switch-client", "-c", client, "-l"], { check: false });
+          if (switched.code === 0) continue;
+        }
+        await this.#call(["detach-client", "-t", client, "-E", EXIT_COMMAND], { check: false });
+      }
+      await this.#call(["kill-session", "-t", sessionName], { check: false });
+      return { closeOverview: true };
+    }
     if (this.#env.WAGA_TMUX_MODE === "existing") {
       const switched = await this.#call(["switch-client", "-l"], { check: false });
       if (switched.code !== 0) await this.#call(["detach-client", "-E", EXIT_COMMAND], { check: false });
@@ -356,14 +406,18 @@ export class TmuxWorkspace {
 
   #sessionCommand(session, commandSpec) {
     const provider = session.provider ?? String(session.id).split(":", 1)[0];
-    return shellCommand(this.#nodePath, [
+    const args = [
       this.#sessionHostPath,
       provider,
       session.id,
       "--",
       commandSpec.command,
       ...commandSpec.args,
-    ]);
+    ];
+    if (provider === "codex" && this.#env.WAGA_TMUX_INDEPENDENT === "1") {
+      return shellCommand("env", ["WAGA_WAIT_FOR_VISIBLE=1", this.#nodePath, ...args]);
+    }
+    return shellCommand(this.#nodePath, args);
   }
 
   async #setSessionWindowMetadata(windowId, session, commandSpec) {
@@ -415,7 +469,7 @@ export class TmuxWorkspace {
       await this.#call([...prefix, "set-option", "-s", "extended-keys", "on"]);
       await this.#call([...prefix, "set-option", "-s", "escape-time", "0"]);
       await this.#call([...prefix, "bind-key", "-n", "M-g", "select-window -t :overview ; send-keys -t :overview M-r"]);
-      const agentsViewCommand = shellCommand(this.#nodePath, [this.#cliPath, "tmux-agents-view", "#{window_id}"]);
+      const agentsViewCommand = shellCommand("env", ["WAGA_TMUX_TARGET_SESSION=#{session_id}", this.#nodePath, this.#cliPath, "tmux-agents-view", "#{window_id}"]);
       await this.#call([...prefix, "bind-key", "-n", "M-a", "run-shell", "-b", agentsViewCommand]);
       await this.#call([...prefix, "bind-key", "-n", "S-Enter", "send-keys", "C-j"]);
     }

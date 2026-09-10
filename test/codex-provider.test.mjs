@@ -511,6 +511,7 @@ test("Codex rename updates the native user-facing thread name", async () => {
 
 test("Codex send uses standalone tool output, not a user message", async () => {
   const { provider, calls } = harness((method) => {
+    if (method === "thread/read") return { thread: { status: { type: "idle" } } };
     if (method === "turn/start") return { turn: { id: "turn-1" } };
     throw new Error(method);
   });
@@ -543,7 +544,7 @@ test("Codex ask waits for idle and returns only the matching turn answer", async
   });
   assert.equal(result.reply, "CODEX_OK");
   assert.equal(result.exchangeCount, 1);
-  assert.deepEqual(progress, ["waiting", "submitted", "replied"]);
+  assert.deepEqual(progress, ["waiting", "submitting", "submitted", "replied"]);
 });
 
 test("Codex ask can wait for the matching turn to complete and return its final answer", async () => {

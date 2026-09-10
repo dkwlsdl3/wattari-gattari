@@ -177,8 +177,9 @@ export class ClaudePeerEndpoint {
     return frame.msg_id;
   }
 
-  waitForReply(targetSocket, messageId, { timeoutMs }) {
-    const match = (record) => record.type === "user" && record.fromSocket === targetSocket;
+  waitForReply(targetSocket, messageId, { timeoutMs, requestId }) {
+    const match = (record) => record.type === "user" && record.fromSocket === targetSocket &&
+      (!requestId || record.text.startsWith(`[WAGA REPLY ${requestId}]`));
     const existing = this.#records.find(match);
     if (existing) return Promise.resolve(existing);
     const rejected = this.#records.find((record) => (

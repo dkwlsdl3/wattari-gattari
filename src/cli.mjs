@@ -14,6 +14,7 @@ import { runOverview } from "./overview.mjs";
 import { CLI_NAME, VERSION } from "./product.mjs";
 import { ClaudeProvider } from "./providers/claude.mjs";
 import { CodexProvider } from "./providers/codex.mjs";
+import { RequestStore } from "./request-store.mjs";
 import { SessionBridge } from "./session-bridge.mjs";
 import { enterSessionDock } from "./session-dock.mjs";
 import { TmuxWorkspace } from "./tmux-workspace.mjs";
@@ -26,6 +27,8 @@ function usage() {
     `${CLI_NAME} list [--provider claude|codex] [--cwd PATH] [--json]`,
     `${CLI_NAME} send <session-id-or-name> <message> [--cwd PATH]    One-way notification`,
     `${CLI_NAME} ask <session-id-or-name> <message> [--until-idle] [--wait-timeout SEC] [--reply-timeout SEC] [--cwd PATH]`,
+    `${CLI_NAME} result <request-id> [--json]    Read an existing request; never resend`,
+    "                                ask: busy wait 1800s; reply wait 180s. Use explicit timeouts for long work.",
     `${CLI_NAME} open <claude|codex> [--cwd PATH]`,
     `${CLI_NAME} doctor`,
     `${CLI_NAME} --version`,
@@ -36,6 +39,7 @@ function defaultBridge() {
   const localRouter = new LocalRouterClient();
   return new SessionBridge({
     providers: [new ClaudeProvider(), new CodexProvider()],
+    requestStore: new RequestStore(),
     router: fallbackRouting,
     createRouter: async (input) => {
       try {
@@ -48,7 +52,7 @@ function defaultBridge() {
 }
 
 async function openTmuxAgentsView(windowId) {
-  return new TmuxWorkspace().focusAgentsViewFromWindow(windowId);
+  return new TmuxWorkspace().focusAgentsViewFromWindow(windowId, process.env.WAGA_TMUX_TARGET_SESSION ?? null);
 }
 
 function writeList(output, errorOutput, { sessions, warnings }, json) {
@@ -73,6 +77,7 @@ export async function runCli(args = process.argv.slice(2), {
   tmuxAgentsView = openTmuxAgentsView,
   orderStore = new DockOrderStore(),
   settingsStore = new WagaSettingsStore(),
+  handleSignals = false,
 } = {}) {
   let options;
   try { options = parseCliArgs(args); }
@@ -84,6 +89,31 @@ export async function runCli(args = process.argv.slice(2), {
     return 2;
   }
 
+  let lastProgress;
+  const progress = ({ state, target, requestId, delivery }) => {
+    lastProgress = { state, target, requestId, delivery };
+    const explanation = {
+      "not-sent": "not sent", "waiting-local": "not sent; waiting behind another Waga request",
+      waiting: "not sent; target busy", submitting: "submission in progress; delivery unknown",
+      submitted: delivery === "accepted" ? "native submission acknowledged" : "written; receiver acceptance unconfirmed",
+      accepted: "receiver acknowledged", "reply-received": "reply received; waiting for idle", working: "reply received; target still busy",
+      replied: "reply ready",
+    }[state] ?? state;
+    stderr.write(`status\t${state}\t${target}\t${requestId ?? "-"}\t${explanation}\n`);
+  };
+  const signals = new Map();
+  if (handleSignals && ["ask", "send"].includes(options.command)) {
+    for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]]) {
+      const stop = () => {
+        if (lastProgress?.requestId) stderr.write(`REQUEST_INTERRUPTED: delivery=${lastProgress.delivery}; inspect without resending: ${CLI_NAME} result ${lastProgress.requestId}\n`);
+        // process.exit emits the exit hook that removes our ephemeral Claude
+        // identity. No native target is interrupted; the request record survives.
+        process.exit(code);
+      };
+      signals.set(signal, stop);
+      process.once(signal, stop);
+    }
+  }
   try {
     if (options.command === "version") stdout.write(`${VERSION}\n`);
     else if (options.command === "help") stdout.write(`${usage()}\n`);
@@ -103,17 +133,21 @@ export async function runCli(args = process.argv.slice(2), {
     else if (options.command === "tmux-agents-view") return (await tmuxAgentsView(options.windowId)).code ?? 0;
     else if (options.command === "list" || options.command === "default") writeList(stdout, stderr, await bridge.discover({ provider: options.provider, cwd: options.cwd ? cwd : undefined }), options.json);
     else if (options.command === "send") {
-      const result = await bridge.send(options.target, options.message, { cwd: options.cwd ? cwd : undefined });
-      stdout.write(options.json ? `${JSON.stringify(result)}\n` : `sent\t${result.target}\t${result.requestId}\n`);
+      const result = await bridge.send(options.target, options.message, { cwd: options.cwd ? cwd : undefined, onProgress: progress, waitTimeoutMs: options.waitTimeoutMs });
+      stdout.write(options.json ? `${JSON.stringify(result)}\n` : `${result.delivery ?? "submitted"}\t${result.target}\t${result.requestId}\n`);
     } else if (options.command === "ask") {
       const result = await bridge.ask(options.target, options.message, {
         cwd: options.cwd ? cwd : undefined,
         waitTimeoutMs: options.waitTimeoutMs,
         replyTimeoutMs: options.replyTimeoutMs,
         untilIdle: options.untilIdle,
-        onProgress: ({ state, target }) => stderr.write(`status\t${state}\t${target}\n`),
+        onProgress: progress,
       });
       stdout.write(options.json ? `${JSON.stringify(result)}\n` : `${result.reply}\n`);
+    } else if (options.command === "result") {
+      const result = await bridge.result(options.requestId);
+      stdout.write(options.json ? `${JSON.stringify(result)}\n` : result.state === "replied" ? `${result.reply}\n` : `${result.state}\t${result.target}\t${result.requestId}\tdelivery=${result.delivery}\n`);
+      return result.state === "replied" ? 0 : 3;
     } else if (options.command === "open") {
       const result = await launcher(options.provider, { cwd });
       return result.code;
@@ -121,7 +155,13 @@ export async function runCli(args = process.argv.slice(2), {
     return 0;
   } catch (error) {
     stderr.write(`${error.code ? `${error.code}: ` : ""}${error.message}\n`);
+    if (error.requestId) {
+      stderr.write(`request\t${error.requestId}\ttarget=${error.target}\tdelivery=${error.delivery}\nInspect without resending: ${CLI_NAME} result ${error.requestId}\n`);
+      if (options.json) stdout.write(`${JSON.stringify({ error: { code: error.code ?? "REQUEST_FAILED", message: error.message }, requestId: error.requestId, target: error.target, delivery: error.delivery })}\n`);
+    }
     return 1;
+  } finally {
+    for (const [signal, stop] of signals) process.removeListener(signal, stop);
   }
 }
 
@@ -130,4 +170,4 @@ function isDirectExecution() {
   try { return fileURLToPath(import.meta.url) === fs.realpathSync(process.argv[1]); } catch { return false; }
 }
 
-if (isDirectExecution()) process.exitCode = await runCli();
+if (isDirectExecution()) process.exitCode = await runCli(process.argv.slice(2), { handleSignals: true });
