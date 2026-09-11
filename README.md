@@ -79,6 +79,10 @@ in the creation notice. Waga does not change models in existing sessions or fetc
 data itself. The subprocess request and v1 response are defined in the
 [local-router contract](docs/adr/2026-09-09-local-router-contract.md).
 
+In the new-session prompt, Shift+Enter (or Ctrl+J) inserts a newline and Enter submits.
+Multiline paste is preserved; Up/Down moves between lines. A creation modal shows
+model selection, session submission, metadata lookup, and elapsed time.
+
 ### Execution settings for new sessions
 
 Press `Alt+S` in the dock to open the execution settings for new Claude and Codex

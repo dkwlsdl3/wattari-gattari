@@ -15,3 +15,8 @@
 - 소켓 접근 가능한 환경에서 `test/tmux-integration.test.mjs`를 실행하고,
   폐기용 두 terminal client로 목록 선택·Alt+G·Alt+A·연결 해제·크기 변경을 확인합니다.
   현재 sandbox에서는 tmux 소켓 연결이 `Operation not permitted`로 차단됩니다.
+
+## 새 세션 입력·진행 모달 실측
+
+- 새 dock에서 Shift+Enter 여러 줄 입력·↑↓ 커서 이동·생성 단계 모달을 실제 터미널로
+  확인합니다. LF/CSI-u 입력 및 생성 단계 전달은 자동 테스트로 검증합니다.

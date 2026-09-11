@@ -97,6 +97,10 @@ provider가 소유합니다. 사용법과 단축키는 [README](../../README.ko.
   넓은 화면의 응답 영역은 `PgUp`·`PgDn`으로 선택 세션을 유지한 채 페이지 스크롤하며,
   세션을 변경하면 처음 위치로 돌아가고 같은 세션의 자동 갱신에서는 현재 위치를 유지합니다.
 
+- 새 세션 프롬프트는 여러 줄을 보존하고 Shift+Enter/입력 LF/Ctrl+J로 개행,
+  Enter로 생성합니다. ↑↓·Home·End는 논리 줄 기준으로 이동하며 최대 5줄을 표시합니다.
+  생성 중 중앙 모달은 bridge의 모델 선택·provider 생성 요청·접수 후 목록 조회 이벤트와
+  경과 시간을 표시합니다. 임의 진행률은 사용하지 않으며 실패 시 원문 편집기로 복귀합니다.
 - `auto`는 tmux가 있으면 `tmux`, 없으면 `direct`를 선택합니다.
 - `tmux` 진입마다 별도 `waga-view-<uuid>` session과 overview 프로세스를 생성합니다.
   목록 선택·미리보기·현재 window는 터미널별로 독립적입니다. tmux 밖에서는 격리 server를,
@@ -116,6 +120,9 @@ provider가 소유합니다. 사용법과 단축키는 [README](../../README.ko.
 - 같은 에이전트 창을 동시에 보면 화면·입력·TUI 스크롤은 공유됩니다. 창 크기는 최근 활성
   client를 따릅니다. 다른 terminal에 표시 중인 창은 자동 재접속하지 않고, 강제 재접속은
   `TMUX_VIEW_IN_USE`로 거부합니다. 다른 화면을 dock으로 돌린 뒤 재접속할 수 있습니다.
+- RGB 전달을 설정한 Waga 격리 tmux server에서는 Claude 세션·Agents View 실행에만
+  `CLAUDE_CODE_TMUX_TRUECOLOR=1`을 전달해 Claude의 기본 256색 제한을 해제합니다.
+  기존 사용자 tmux server와 Codex 실행 환경에는 추가하지 않습니다.
 - Claude 창은 선택 시 Linux `/proc`의 frontend 명령이 요청한 `attach`와 일치하는지 확인합니다.
   native Agents View로 이동했거나 식별할 수 없으면 해당 창만 재접속합니다. 주기적 감시는 없습니다.
 - Codex 창은 실행별 `tui.terminal_title=["thread-id"]`와 선택 시 화면 상단 두 줄로 식별합니다.

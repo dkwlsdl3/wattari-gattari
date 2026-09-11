@@ -1128,7 +1128,7 @@ test("late creation completion cannot repaint a closed overview", async () => {
   assert.equal(output.writes.length, writes); assert.equal(reads, 1);
 });
 
-test("overview creates a provider-owned session from its one-line composer", async (t) => {
+test("overview creates a provider-owned session from its prompt composer", async (t) => {
   const input = ttyInput();
   t.after(() => input.emit("end"));
   const output = capturedOutput();
@@ -1173,7 +1173,7 @@ test("overview creates a provider-owned session from its one-line composer", asy
 
   assert.equal(created.provider, "codex");
   assert.equal(created.prompt, "작새업");
-  assert.deepEqual(created.options, { cwd: "/work/new", executionMode: "default" });
+  assert.deepEqual({ ...created.options, onProgress: undefined }, { onProgress: undefined, cwd: "/work/new", executionMode: "default" });
   assert.equal(selectedSessionName(output), "작새업");
   pressAlt(input, "q");
   assert.equal(await running, 0);
@@ -1210,7 +1210,7 @@ test("new-session composer batches bracketed multiline paste and preserves line 
   assert.equal(output.writes.length, writesBeforePaste + 1);
   assert.equal(routeCalls, routesBeforePaste + 1);
   assert.match(plain(output.writes.at(-1)), /쿼터 증량 요청 접수/);
-  assert.match(plain(output.writes.at(-1)), /↵/);
+  assert.match(plain(output.writes.at(-1)), /1분 전/);
 
   input.write("\r");
   await waitFor(() => created !== null);
@@ -1242,7 +1242,7 @@ test("overview shows the provider fallback until the external router runs", asyn
   assert.match(plain(output.writes.at(-1)), /local-llm-router 조회 전/);
   input.emit("keypress", "", { name: "return" });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(created.options, { cwd: "/work/sample-app", executionMode: "default" });
+  assert.deepEqual({ ...created.options, onProgress: undefined }, { onProgress: undefined, cwd: "/work/sample-app", executionMode: "default" });
   input.emit("end");
   assert.equal(await running, 0);
 });
@@ -1324,4 +1324,56 @@ test("new-session composer keeps a failed prompt editable and Escape cancels it"
   assert.doesNotMatch(plain(output.writes.at(-1)), /새 세션 생성|provider unavailable|실패해도 유지/);
   pressAlt(input, "q");
   assert.equal(await running, 0);
+});
+
+for (const newline of ["\n", "\x1b[13;2u"]) {
+  test(`multiline prompt preserves ${JSON.stringify(newline)} without submitting and reports creation stages`, async () => {
+    const input = rawTtyInput();
+    const output = capturedOutput();
+    let created;
+    let finish;
+    const gate = new Promise(resolve => { finish = resolve; });
+    const bridge = {
+      async discover() { return { sessions: [], warnings: [] }; },
+      async create(provider, prompt, options) {
+        created = { provider, prompt };
+        options.onProgress({ message: "세션 생성 요청 중" });
+        await gate;
+        return { provider, nativeId: "multiline-proof" };
+      },
+    };
+    const running = runOverview({ bridge, workspace: { async leave() { return { closeOverview: true }; } }, defaultCwd: "/tmp", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+    await new Promise(setImmediate);
+    pressAlt(input, "n");
+    input.write("첫 줄");
+    input.write(newline);
+    input.write("둘째 줄");
+    await new Promise(setImmediate);
+    assert.equal(created, undefined);
+    const frame = plain(output.writes.at(-1));
+    assert.match(frame, /첫 줄/);
+    assert.match(frame, /둘째 줄/);
+    assert.ok(frame.split("\n").findIndex(line => line.includes("첫 줄")) < frame.split("\n").findIndex(line => line.includes("둘째 줄")));
+    input.write("\r");
+    await new Promise(setImmediate);
+    assert.equal(created.prompt, "첫 줄\n둘째 줄");
+    assert.match(plain(output.writes.at(-1)), /┌─/);
+    assert.match(plain(output.writes.at(-1)), /세션 생성 요청 중/);
+    input.write("\r"); // no duplicate submission while busy
+    finish();
+    await new Promise(setImmediate);
+    assert.doesNotMatch(plain(output.writes.at(-1)), /새 세션 생성 중/);
+    input.end();
+    assert.equal(await running, 0);
+  });
+}
+
+test("multiline editor keeps its cursor visible on compact terminals", () => {
+  for (const [width, height] of [[80, 24], [40, 16]]) {
+    const prompt = Array.from({ length: 10 }, (_, index) => `line ${index}`).join("\n");
+    const frame = plain(buildOverviewFrame({ sessions, width, height, newTask: { provider: "codex", cwd: "/tmp", prompt, cursor: [...prompt].length } }));
+    assert.ok(frame.split("\n").length <= height);
+    assert.match(frame, /line 9/);
+    assert.match(frame, /Shift\+Enter/);
+  }
 });

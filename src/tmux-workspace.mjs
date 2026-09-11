@@ -310,12 +310,12 @@ export class TmuxWorkspace {
 
     let agentsWindowId = existing?.windowId;
     if (agentsWindowId) {
-      await this.#call(["respawn-window", "-k", "-t", agentsWindowId, "-c", commandSpec.cwd, shellCommand(commandSpec.command, commandSpec.args)]);
+      await this.#call(["respawn-window", "-k", "-t", agentsWindowId, "-c", commandSpec.cwd, this.#colorCommand(provider, commandSpec.command, commandSpec.args)]);
     } else {
       const created = await this.#call([
         "new-window", "-d", "-P", "-F", "#{window_id}", "-t", sessionName,
         "-n", `${provider === "claude" ? "Claude" : "Codex"} Agents`, "-c", commandSpec.cwd,
-        shellCommand(commandSpec.command, commandSpec.args),
+        this.#colorCommand(provider, commandSpec.command, commandSpec.args),
       ]);
       agentsWindowId = created.stdout.trim();
       if (!agentsWindowId) throw Object.assign(new Error("tmux did not return the Agents view window id"), { code: "TMUX_WINDOW_FAILED" });
@@ -417,7 +417,14 @@ export class TmuxWorkspace {
     if (provider === "codex" && this.#env.WAGA_TMUX_INDEPENDENT === "1") {
       return shellCommand("env", ["WAGA_WAIT_FOR_VISIBLE=1", this.#nodePath, ...args]);
     }
-    return shellCommand(this.#nodePath, args);
+    return this.#colorCommand(provider, this.#nodePath, args);
+  }
+
+  #colorCommand(provider, command, args) {
+    if (provider === "claude" && this.#env.WAGA_TMUX_MODE === "isolated") {
+      return shellCommand("env", ["CLAUDE_CODE_TMUX_TRUECOLOR=1", command, ...args]);
+    }
+    return shellCommand(command, args);
   }
 
   async #setSessionWindowMetadata(windowId, session, commandSpec) {
@@ -469,7 +476,7 @@ export class TmuxWorkspace {
       await this.#call([...prefix, "set-option", "-s", "extended-keys", "on"]);
       await this.#call([...prefix, "set-option", "-s", "escape-time", "0"]);
       await this.#call([...prefix, "bind-key", "-n", "M-g", "select-window -t :overview ; send-keys -t :overview M-r"]);
-      const agentsViewCommand = shellCommand("env", ["WAGA_TMUX_TARGET_SESSION=#{session_id}", this.#nodePath, this.#cliPath, "tmux-agents-view", "#{window_id}"]);
+      const agentsViewCommand = shellCommand("env", ["WAGA_TMUX_TARGET_SESSION=#{session_id}", "WAGA_TMUX_MODE=isolated", this.#nodePath, this.#cliPath, "tmux-agents-view", "#{window_id}"]);
       await this.#call([...prefix, "bind-key", "-n", "M-a", "run-shell", "-b", agentsViewCommand]);
       await this.#call([...prefix, "bind-key", "-n", "S-Enter", "send-keys", "C-j"]);
     }

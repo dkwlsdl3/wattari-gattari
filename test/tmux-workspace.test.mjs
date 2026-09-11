@@ -512,3 +512,24 @@ test("shared Codex is selected before waiting for its startup frame", async () =
   assert.match(create.at(-1), /WAGA_WAIT_FOR_VISIBLE=1/);
   assert.ok(model.calls.findIndex(args => args[0] === "select-window") < model.calls.findIndex(args => args[0] === "capture-pane"));
 });
+
+test("Claude truecolor override is scoped to Waga's RGB-configured server", async () => {
+  for (const mode of ["isolated", "existing"]) {
+    const calls = [];
+    const workspace = new TmuxWorkspace({
+      env: { WAGA_TMUX_SESSION: "waga-proof-colour", WAGA_TMUX_MODE: mode },
+      eventLog: { record() {} },
+      run: async args => {
+        calls.push(args);
+        if (args[0] === "new-window") return { code: 0, stdout: "@7\n" };
+        if (args[0] === "show-options") return { code: 0, stdout: args.at(-1) === "@waga_provider" ? "claude\n" : "/tmp\n" };
+        return { code: 0, stdout: "" };
+      },
+    });
+    await workspace.focusOrOpen({ id: "claude:proof", provider: "claude" }, { command: "claude", args: ["attach", "proof"], cwd: "/tmp" });
+    await workspace.focusAgentsViewFromWindow("@7", "$2");
+    const commands = calls.filter(args => args[0] === "new-window").map(args => args.at(-1));
+    assert.equal(commands.length, 2);
+    for (const command of commands) assert.equal(command.includes("CLAUDE_CODE_TMUX_TRUECOLOR=1"), mode === "isolated");
+  }
+});

@@ -97,6 +97,53 @@ function editorLine(value, cursor, width) {
   return `› ${before}${ESC}7m${atCursor}${RESET}${after}`;
 }
 
+function promptRows(value, cursor, width, maxRows = 5) {
+  const cells = graphemes(value);
+  const rows = [];
+  let start = 0;
+  for (let index = 0; index <= cells.length; index++) {
+    if (index === cells.length || cells[index] === "\n") {
+      rows.push({ start, end: index, text: cells.slice(start, index).join("") });
+      start = index + 1;
+    }
+  }
+  const current = Math.max(0, rows.findIndex(row => cursor >= row.start && cursor <= row.end));
+  const offset = Math.max(0, current - maxRows + 1);
+  return rows.slice(offset, offset + maxRows).map((row, index) => index + offset === current
+    ? editorLine(row.text, cursor - row.start, width)
+    : `  ${fit(row.text, Math.max(1, width - 2))}`);
+}
+
+function movePromptCursor(value, cursor, direction) {
+  const cells = graphemes(value);
+  let start = cursor;
+  let end = cursor;
+  while (start > 0 && cells[start - 1] !== "\n") start--;
+  while (end < cells.length && cells[end] !== "\n") end++;
+  if (direction === "home") return start;
+  if (direction === "end") return end;
+  const column = cursor - start;
+  if (direction === "up") {
+    if (start === 0) return cursor;
+    let previous = start - 1;
+    while (previous > 0 && cells[previous - 1] !== "\n") previous--;
+    return previous + Math.min(column, start - 1 - previous);
+  }
+  return end === cells.length ? cursor : end + 1 + Math.min(column, cells.slice(end + 1).indexOf("\n") < 0 ? cells.length - end - 1 : cells.slice(end + 1).indexOf("\n"));
+}
+
+function creationModal(lines, task, width, height) {
+  const inner = Math.max(1, Math.min(68, width - 6));
+  const content = [`새 세션 생성 중 · ${Math.max(0, Math.floor((Date.now() - (task.startedAt ?? Date.now())) / 1000))}초`, `${task.provider === "claude" ? "Claude" : "Codex"} · ${task.cwd}`, "",
+    ...(task.progress ?? ["생성 요청 준비 중"]), "", "완료되면 목록으로 돌아갑니다."];
+  const box = [`┌${"─".repeat(inner + 2)}┐`, ...content.map(text => `│ ${fit(text, inner)} │`), `└${"─".repeat(inner + 2)}┘`];
+  const top = Math.max(0, Math.floor((height - box.length) / 2));
+  const left = " ".repeat(Math.max(0, Math.floor((width - inner - 4) / 2)));
+  while (lines.length < height) lines.push("");
+  box.slice(0, height).forEach((line, index) => { lines[top + index] = `${left}${color(THEME.title, line)}`; });
+  return lines;
+}
+
 function cleanPastedPrompt(value) {
   return String(value ?? "")
     .replace(/\r\n?/g, "\n")
@@ -429,7 +476,8 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     { text: formatClaudeUsage(providerUsage.claude), color: THEME.claude },
     { text: formatCodexUsage(providerUsage.codex), color: THEME.codex },
   ].filter(({ text }) => text);
-  const visibleRows = Math.max(1, height - (usageLabels.length ? 10 : 9));
+  const editorHeight = newTask ? Math.min(5, String(newTask.prompt).split("\n").length) : 1;
+  const visibleRows = Math.max(1, height - (usageLabels.length ? 10 : 9) - (newTask ? editorHeight + 3 : 0));
   const safeSelected = Math.max(0, Math.min(selected, Math.max(0, nodes.length - 1)));
   const offset = Math.max(0, Math.min(safeSelected - Math.floor(visibleRows / 2), Math.max(0, nodes.length - visibleRows)));
   const wide = listWidth >= 64;
@@ -477,7 +525,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
   const helpLines = wide
     ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  F4 재접속  / 검색  Tab 필터", "F2 이름 변경  Alt+N 새 세션  Alt+S 설정  Alt+Y Codex 실행  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기  PgUp/PgDn 응답"]
     : ["↑↓ 이동  Shift+↑↓ 순서  Enter 열기  Alt+Q 나가기", "F4 재접속  / 검색  Tab 필터  F2 이름  Alt+N 새 세션", "Alt+S 설정  Alt+Y Codex 실행  Alt+R 갱신  Alt+X 보관"];
-  while (lines.length < height - helpLines.length - 4) lines.push("");
+  while (lines.length < height - helpLines.length - 4 - (newTask ? editorHeight + 1 : 0)) lines.push("");
   if (newTask) {
     const providerName = newTask.provider === "claude" ? "CLAUDE" : "CODEX";
     const providerSymbol = newTask.provider === "claude" ? "◆" : "■";
@@ -495,9 +543,9 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
       : newTask.provider === "codex" ? codexExecutionLabel(codexExecutionMode) : "Claude 실행 설정";
     const composerHint = newTask.error
       ? `오류: ${safeText(newTask.error)}`
-      : `${executionSummary}   Alt+S 설정   Tab → ${alternateProvider} 전환   ←→ 커서   Enter 생성   Esc 취소   Ctrl+U 지우기`;
+      : `Shift+Enter 개행 · Enter 생성 · Esc 취소   Tab → ${alternateProvider} 전환   Alt+S 설정   ${executionSummary}`;
     lines.push(`  ${color(newTask.error ? THEME.error : providerColor, fit(composerHint, usableWidth))}`);
-    lines.push(`  ${editorLine(newTask.prompt, newTask.cursor, usableWidth)}`);
+    lines.push(...promptRows(newTask.prompt, newTask.cursor, usableWidth).map(row => `  ${row}`));
     lines.push("");
   } else if (renameTask) {
     const providerName = renameTask.session.provider === "claude" ? "CLAUDE" : "CODEX";
@@ -518,6 +566,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     if (query) lines.push(`  ${color(THEME.cursor, fit(`검색: ${query}`, usableWidth))}`);
     else lines.push("");
   }
+  if (newTask?.submitting) creationModal(lines, newTask, width, height);
   return lines.slice(0, height).join("\n");
 }
 
@@ -873,14 +922,20 @@ export async function runOverview({
       render();
       return;
     }
-    const draft = { ...newTask, prompt, cursor: Math.min(newTask.cursor, graphemes(prompt).length), submitting: true, error: "", routing: routeNewTask({ ...newTask, prompt }) };
+    const draft = { ...newTask, prompt, cursor: Math.min(newTask.cursor, graphemes(prompt).length), submitting: true, startedAt: Date.now(), progress: [], error: "", routing: routeNewTask({ ...newTask, prompt }) };
     newTask = draft;
     busy = true;
     render();
     void (async () => {
       let created;
       try {
-        const createOptions = { cwd: draft.cwd };
+        const createOptions = { cwd: draft.cwd, onProgress: ({ message, routing }) => {
+          if (closed) return;
+          if (routing) draft.routing = routing;
+          draft.progress = [...(draft.progress ?? []), message].slice(-4);
+          newTask = { ...draft };
+          render();
+        } };
         if (settingsStore) createOptions.executionSettings = structuredClone(providerSettings[draft.provider]);
         if (draft.provider === "codex") createOptions.executionMode = codexExecutionMode;
         created = await bridge.create(draft.provider, draft.prompt, createOptions);
@@ -1104,11 +1159,14 @@ export async function runOverview({
       const cells = graphemes(newTask.prompt);
       if (key.name === "escape") newTask = null;
       else if (key.name === "tab") newTask = { ...newTask, provider: newTask.provider === "claude" ? "codex" : "claude", error: "" };
+      else if ((key.shift && key.name === "return") || key.name === "enter" || (key.ctrl && key.name === "j") || key.sequence === "\x1b[13;2u") {
+        cells.splice(newTask.cursor, 0, "\n");
+        newTask = { ...newTask, prompt: cells.join(""), cursor: newTask.cursor + 1, error: "" };
+      }
       else if (key.name === "return") { submitNewTask(); return; }
       else if (key.name === "left") newTask.cursor = Math.max(0, newTask.cursor - 1);
       else if (key.name === "right") newTask.cursor = Math.min(cells.length, newTask.cursor + 1);
-      else if (key.name === "home") newTask.cursor = 0;
-      else if (key.name === "end") newTask.cursor = cells.length;
+      else if (["up", "down", "home", "end"].includes(key.name)) newTask.cursor = movePromptCursor(newTask.prompt, newTask.cursor, key.name);
       else if (key.name === "backspace" && newTask.cursor > 0) {
         cells.splice(newTask.cursor - 1, 1);
         newTask = { ...newTask, prompt: cells.join(""), cursor: newTask.cursor - 1, error: "" };
@@ -1216,7 +1274,7 @@ export async function runOverview({
   const onResize = () => render();
   inputStream.on("keypress", onKeypress);
   outputStream.on("resize", onResize);
-  const timer = setInterval(() => void refresh(), refreshMs);
+  const timer = setInterval(() => { if (newTask?.submitting) render(); else void refresh(); }, refreshMs);
   let resolveRun;
   const completed = new Promise((resolve) => { resolveRun = resolve; });
   const cleanup = () => {

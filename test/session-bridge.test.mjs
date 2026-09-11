@@ -358,3 +358,12 @@ test("provider delivery failure is propagated without retrying or relaying", asy
     assert.deepEqual(calls.map(([kind]) => kind), ["list", method]);
   }
 });
+
+test("creation progress reflects routing, provider acknowledgement and discovery in order", async () => {
+  const steps = [];
+  const bridge = new SessionBridge({ providers: [{ name: "codex", async create(prompt) {
+    steps.push("create"); assert.equal(prompt, "first\nsecond"); return { provider: "codex", nativeId: "proof" };
+  }, async list() { steps.push("list"); return []; } }], createRouter: async () => { steps.push("route"); return null; } });
+  await bridge.create("codex", "first\nsecond", { onProgress: ({ message }) => steps.push(message) });
+  assert.deepEqual(steps, ["모델과 실행 설정 선택 중", "route", "Codex 세션 생성 요청 중", "create", "세션 생성 접수 완료 · 목록 확인 중", "list"]);
+});
