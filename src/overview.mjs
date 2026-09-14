@@ -1208,7 +1208,8 @@ export async function runOverview({
       return;
     }
     if (key.name === "f2" && nodes[selected]?.type === "session") {
-      renameTask = { session: nodes[selected].session, name: "", cursor: 0, error: "", submitting: false };
+      const session = nodes[selected].session;
+      renameTask = { session, name: session.name, cursor: graphemes(session.name).length, error: "", submitting: false };
       render();
       return;
     }

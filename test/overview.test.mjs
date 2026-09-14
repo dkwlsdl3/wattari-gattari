@@ -1251,7 +1251,7 @@ for (const nameSync of [undefined, "pending", "local"]) test(`F2 renames the sel
   const input = ttyInput();
   t.after(() => input.emit("end"));
   const output = capturedOutput();
-  let discovered = [{ id: "claude:full-id", nativeId: "1234abcd", provider: "claude", status: "idle", name: "before", cwd: "/work/new", updatedAt: 1 }];
+  let discovered = [{ id: "claude:full-id", nativeId: "1234abcd", provider: "claude", status: "idle", name: "검토 👩‍💻", cwd: "/work/new", updatedAt: 1 }];
   let renamed = null;
   let resolveRename;
   const renameCalled = new Promise((resolve) => { resolveRename = resolve; });
@@ -1274,8 +1274,10 @@ for (const nameSync of [undefined, "pending", "local"]) test(`F2 renames the sel
   input.emit("keypress", "", { name: "down" });
   input.emit("keypress", "", { name: "f2" });
   assert.match(plain(output.writes.at(-1)), /세션 이름 변경\s+◆\s+CLAUDE\s+◆/);
-  assert.match(plain(output.writes.at(-1)), /현재: before/);
-  input.emit("keypress", "검토 세션", { sequence: "검토 세션" });
+  assert.match(plain(output.writes.at(-1)), /현재: 검토 👩‍💻/);
+  assert.match(plain(output.writes.at(-1)), /› 검토 👩‍💻/);
+  input.emit("keypress", "", { name: "backspace" });
+  input.emit("keypress", "세션", { sequence: "세션" });
   input.emit("keypress", "", { name: "return" });
   await renameCalled;
   await new Promise((resolve) => setImmediate(resolve));
