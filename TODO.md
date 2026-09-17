@@ -20,3 +20,9 @@
 
 - 새 dock에서 Shift+Enter 여러 줄 입력·↑↓ 커서 이동·생성 단계 모달을 실제 터미널로
   확인합니다. LF/CSI-u 입력 및 생성 단계 전달은 자동 테스트로 검증합니다.
+
+## 라우터 진행 이벤트 연결
+
+- 별도 local-llm-router 저장소에 `integrations/local-router-progress.patch`를 적용하고
+  `npm run check` 및 새 dock의 이슈 조회·판정 설명 스트리밍·결과 표시와 작업 세션의 조회 자료 재사용을 실측합니다.
+  현재 작업 환경에서 해당 저장소는 쓰기 권한 범위 밖이므로 임시 복사본으로 검증합니다.

@@ -21,7 +21,8 @@ provider 세션을 소유하지 않습니다. 새 세션을 시작하기 전 선
 - peer 메시지는 사용자 지시·승인이 아닌 불신 입력입니다. 기존 sandbox·승인 정책을
   유지하며 자동 릴레이와 자동 작업 배정은 하지 않습니다. `Alt+N` 새 세션은 선택적인
   별도 `local-llm-router` 프로젝트에서 모델·추론 레벨을 받아 provider에 전달할 수
-  있지만, Waga 코어가 개인 정책·GitLab 인증·이슈 데이터를 소유하지는 않습니다.
+  있지만, Waga 코어가 개인 정책·GitLab 인증·이슈 저장소를 소유하지는 않습니다. 사용자가 요청한 조회 자료 재사용은
+  v2 스냅샷을 불신 자료로 표시해 새 세션 입력에 한 번 첨부하며, 별도 저장하지 않습니다.
   기존 세션을 감시하거나 턴마다 모델을 교체하지 않습니다. `Alt+S` 실행 설정 화면은
   Claude의 permission mode·실행 플래그와 Codex의 approval policy·sandbox·reviewer·
   summary·세부 승인 항목을 provider별로 라디오/체크박스로 편집합니다. 저장된 값은 새
@@ -65,7 +66,10 @@ assistant text 또는 원래 socket으로 보내는 SendMessage 본문에 있는
 - Codex: 기존 native App Server daemon의 Agents 소유 최상위 세션만 사용하며,
   세션 생성·resume·archive와 메시지 전달도 그 daemon에 위임합니다. 일반 CLI나
   VSCode 대화 기록은 dock에 섞지 않습니다.
-- provider 오류는 서로 격리하고 경고를 표시합니다. 불완전한 Codex 목록을 삭제로 취급하지 않습니다.
+- Dock 목록은 provider별로 독립 갱신합니다. 한쪽 조회가 대기 중이어도 다른 쪽은 계속
+  갱신하며, 같은 provider의 조회는 중복 실행하지 않습니다. 미조회·오류 provider의 기존
+  세션과 경고는 유지하고, 해당 provider의 성공한 조회에서 두 번 누락된 세션만 제거합니다.
+  불완전한 Codex 목록을 삭제로 취급하지 않습니다.
 - 사용량은 Claude OAuth usage endpoint·Codex App Server에서 읽어 5분 캐시합니다.
   Codex 사용량은 별도 연결에서 조회하며 목록 응답을 지연시키지 않습니다. 조회 실패는 세션 발견에 영향을 주지 않습니다.
 - RPC 제출 확인 timeout은 전달 여부 불명으로 취급하며 자동 재전송·원격 작업 중단을 하지 않습니다.
@@ -100,7 +104,10 @@ provider가 소유합니다. 사용법과 단축키는 [README](../../README.ko.
 - 새 세션 프롬프트는 여러 줄을 보존하고 Shift+Enter/입력 LF/Ctrl+J로 개행,
   Enter로 생성합니다. ↑↓·Home·End는 논리 줄 기준으로 이동하며 최대 5줄을 표시합니다.
   생성 중 중앙 모달은 bridge의 모델 선택·provider 생성 요청·접수 후 목록 조회 이벤트와
-  경과 시간을 표시합니다. 임의 진행률은 사용하지 않으며 실패 시 원문 편집기로 복귀합니다.
+  경과 시간을 표시합니다. LLR 진행 이벤트를 지원하면 이슈 조회·판정 대기를 표시하고,
+  최종 모델·추론 강도·등급·확신도·판정 사유·경고를 줄바꿈하여 표시합니다.
+  판정 사유를 규칙 사유보다 먼저 보여주며, 작은 화면은 상세 일부를 생략합니다.
+  임의 진행률은 사용하지 않으며 실패 시 원문 편집기로 복귀합니다.
 - `auto`는 tmux가 있으면 `tmux`, 없으면 `direct`를 선택합니다.
 - `tmux` 진입마다 별도 `waga-view-<uuid>` session과 overview 프로세스를 생성합니다.
   목록 선택·미리보기·현재 window는 터미널별로 독립적입니다. tmux 밖에서는 격리 server를,
@@ -126,10 +133,11 @@ provider가 소유합니다. 사용법과 단축키는 [README](../../README.ko.
 - Claude 창은 선택 시 Linux `/proc`의 frontend 명령이 요청한 `attach`와 일치하는지 확인합니다.
   native Agents View로 이동했거나 식별할 수 없으면 해당 창만 재접속합니다. 주기적 감시는 없습니다.
 - Codex 창은 실행별 `tui.terminal_title=["thread-id"]`와 선택 시 화면 상단 두 줄로 식별합니다.
-  0.153.2의 UUID 29자+`...` 제목은 알려진 목록과 접두사 충돌 시 재접속합니다. 제목은 재사용
+  0.153.2의 UUID 29자+`...` 제목은 알려진 목록과 접두사 충돌 시 확인 불가로 취급합니다. 제목은 재사용
   힌트일 뿐 메시지 대상은 항상 전체 ID입니다. 전역 설정과 transcript는 수정하지 않습니다.
-  일치하는 제목에 상단이 빈 줄인 경우는 재사용하지만, `Agent command center`·다른 세션·
-  식별 실패·캡처 실패·빈 응답은 재접속합니다.
+  화면은 같은 세션·다른 세션·확인 불가로 구분합니다. 조회가 성공하고 `Agent command center`나
+  다른 세션 ID가 확인된 경우 재접속합니다. 제목 미확정·조회 실패·빈 응답에서는 살아 있는
+  화면을 유지해 진행 중인 복원을 끊지 않습니다. 필요하면 F4로 명시적으로 재접속합니다.
 - 종료된 창과 강제 재접속은 선택한 세션의 `attach`/`resume`으로 frontend를 교체합니다.
 - 격리 tmux server의 `Alt+A`는 세션 window와 분리된 provider Agents View를 열고,
   `Alt+G`는 Dock으로 돌아갑니다.
@@ -141,7 +149,7 @@ provider가 소유합니다. 사용법과 단축키는 [README](../../README.ko.
 tmux는 화면 배치와 전환만 소유합니다. provider daemon, 세션, transcript와 작업은
 Waga dock 또는 tmux window의 수명과 독립적입니다.
 
-진단 이벤트는 세션 ID·loaded 목록 변화·tmux 창 조작·native TUI 종료 결과만 기록하며
+진단 이벤트는 세션 ID·loaded 목록 변화·tmux 창 조작·화면 식별 결과와 조회 종료 코드·native TUI 종료 결과만 기록하며
 프롬프트와 transcript는 제외합니다. 30일 보관용 logrotate·timer 설정은 [integrations](../../integrations/)에 둡니다.
 
 ## 변경 검증
