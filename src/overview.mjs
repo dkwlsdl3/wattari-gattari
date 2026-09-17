@@ -216,6 +216,7 @@ export function reconcileDiscoveredSessions(previousSessions, discovered, missin
       || (availableProviders && !availableProviders.has(session.provider));
     if (providerUnavailable) {
       sessions.push(session);
+      if (missingCounts.has(session.id)) nextMissingCounts.set(session.id, missingCounts.get(session.id));
       continue;
     }
     const misses = (missingCounts.get(session.id) ?? 0) + 1;
@@ -639,9 +640,8 @@ export async function runOverview({
   let renameTask = null;
   let pasteBuffer = null;
   let provider = null;
-  let refreshing = false;
-  let refreshQueued = false;
-  let refreshGeneration = 0;
+  const refreshStates = new Map((bridge.providerNames?.() ?? [undefined]).map(name =>
+    [name, { refreshing: false, queued: false, generation: 0, warnings: [] }]));
   let notice = "세션을 불러오는 중입니다.";
   let closed = false;
   let busy = false;
@@ -838,20 +838,24 @@ export async function runOverview({
     if (newTask) newTask = { ...newTask, routing: routeNewTask(newTask) };
   };
 
-  const refresh = async ({ whileBusy = false, force = false } = {}) => {
+  const refreshProvider = async (providerName, { whileBusy = false, force = false } = {}) => {
     if (closed || (busy && !whileBusy)) return;
-    if (refreshing) {
-      if (force) { refreshQueued = true; refreshGeneration++; }
+    const state = refreshStates.get(providerName);
+    if (state.refreshing) {
+      if (force) { state.queued = true; state.generation++; }
       return;
     }
-    refreshing = true;
-    const generation = ++refreshGeneration;
+    state.refreshing = true;
+    const generation = ++state.generation;
     let renderAfter = false;
     try {
       if (!force && workspace.shouldRefreshOverview && !await workspace.shouldRefreshOverview()) return;
       renderAfter = true;
-      const discovered = await bridge.discover(filterCwd ? { cwd: path.resolve(filterCwd), includeUsage: true } : { includeUsage: true });
-      if (closed || nativeOpen || generation !== refreshGeneration) return;
+      const discovered = await bridge.discover({
+        ...(providerName ? { provider: providerName } : {}),
+        ...(filterCwd ? { cwd: path.resolve(filterCwd) } : {}), includeUsage: true,
+      });
+      if (closed || nativeOpen || generation !== state.generation) return;
       const snapshot = reconcileDiscoveredSessions(
         allSessions.filter((session) => !archivedSessionIds.has(session.id)),
         { ...discovered, sessions: discovered.sessions.filter((session) => !archivedSessionIds.has(session.id)) },
@@ -874,19 +878,23 @@ export async function runOverview({
           reconcileWarning = { provider: "waga", message: `비활성 세션 창을 정리하지 못했습니다: ${error.message}` };
         }
       }
-      warnings = reconcileWarning ? [reconcileWarning, ...discovered.warnings] : discovered.warnings;
+      state.warnings = reconcileWarning ? [reconcileWarning, ...discovered.warnings] : discovered.warnings;
+      warnings = [...refreshStates.values()].flatMap(entry => entry.warnings);
       notice = `마지막 갱신 ${new Date().toLocaleTimeString()}`;
     } catch (error) {
-      warnings = [{ provider: "waga", message: error.message }];
+      state.warnings = [{ provider: providerName ?? "waga", message: error.message }];
+      warnings = [...refreshStates.values()].flatMap(entry => entry.warnings);
     } finally {
-      refreshing = false;
+      state.refreshing = false;
       if (!closed && renderAfter) render();
-      if (refreshQueued && !closed) {
-        refreshQueued = false;
-        void refresh({ force: true, whileBusy: true });
+      if (state.queued && !closed) {
+        state.queued = false;
+        void refreshProvider(providerName, { force: true, whileBusy: true });
       }
     }
   };
+
+  const refresh = (options) => Promise.all([...refreshStates.keys()].map(name => refreshProvider(name, options)));
 
   outputStream.write(`${ESC}?1049h${ESC}?25l${BRACKETED_PASTE_ON}${ESC}2J`);
   readline.emitKeypressEvents(inputStream, { escapeCodeTimeout: ESCAPE_CODE_TIMEOUT_MS });

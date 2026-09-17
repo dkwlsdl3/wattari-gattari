@@ -94,7 +94,7 @@
     ]
   },
   "overview": {
-    "tests": ["test/overview.test.mjs", "test/overview-lifecycle.test.mjs", "test/dock-order.test.mjs", "test/session-alias-catalog.test.mjs", "test/storage-failures.test.mjs", "test/session-bridge.test.mjs"],
+    "tests": ["test/discovery-refresh.test.mjs", "test/overview.test.mjs", "test/overview-lifecycle.test.mjs", "test/dock-order.test.mjs", "test/session-alias-catalog.test.mjs", "test/storage-failures.test.mjs", "test/session-bridge.test.mjs"],
     "mutations": [
       {"id":"archive-wait-view-before-unlock","file":"src/overview.mjs","from":"archived = true;\n        archivedSessionIds.add(target.id);","to":"archived = true; await workspace.closeSessionView?.(target);\n        archivedSessionIds.add(target.id);"},
       {"id":"archive-wait-list-before-unlock","file":"src/overview.mjs","from":"archived = true;\n        archivedSessionIds.add(target.id);","to":"archived = true; await refresh({ whileBusy: true, force: true });\n        archivedSessionIds.add(target.id);"},
@@ -112,8 +112,11 @@
       {"id":"ignore-manual-rank","file":"src/overview.mjs","from":"return leftRank - rightRank || left.index - right.index;","to":"return left.index - right.index;"},
       {"id":"reverse-manual-move","file":"src/overview.mjs","from":"direction === \"up\" ? visibleIndex - 1 : visibleIndex + 1","to":"direction === \"down\" ? visibleIndex - 1 : visibleIndex + 1"},
       {"id":"paint-over-native","file":"src/overview.mjs","from":"if (closed || nativeOpen) return;","to":"if (closed) return;"},
-      {"id":"accept-late-discovery","file":"src/overview.mjs","from":"if (closed || nativeOpen || generation !== refreshGeneration) return;","to":"if (nativeOpen) return;"},
-      {"id":"lose-forced-refresh","file":"src/overview.mjs","from":"refreshQueued = true; refreshGeneration++;","to":"refreshGeneration++;"},
+      {"id":"block-healthy-provider-refresh","file":"src/overview.mjs","from":"bridge.providerNames?.() ?? [undefined]","to":"[undefined]"},
+      {"id":"reset-unobserved-provider-removals","file":"src/overview.mjs","from":"if (missingCounts.has(session.id)) nextMissingCounts.set(session.id, missingCounts.get(session.id));","to":";"},
+      {"id":"erase-other-provider-warning","file":"src/overview.mjs","from":"warnings = [...refreshStates.values()].flatMap(entry => entry.warnings);\n      notice =","to":"warnings = state.warnings;\n      notice ="},
+      {"id":"accept-late-discovery","file":"src/overview.mjs","from":"if (closed || nativeOpen || generation !== state.generation) return;","to":"if (nativeOpen) return;"},
+      {"id":"lose-forced-refresh","file":"src/overview.mjs","from":"state.queued = true; state.generation++;","to":"state.generation++;"},
       {"id":"leak-signal-listener","file":"src/overview.mjs","from":"process.off(\"SIGTERM\", cleanup);","to":";"},
       {"id":"block-exit-on-discovery","file":"src/overview.mjs","from":"void refresh({ force: true });\n  return await completed;","to":"await refresh({ force: true });\n  return await completed;"},
       {"id":"skip-order-persist","file":"src/dock-order.mjs","from":"this.#write(document);","to":";"},

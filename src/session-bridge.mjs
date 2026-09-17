@@ -31,6 +31,10 @@ export class SessionBridge {
     this.#requests = requestStore;
   }
 
+  providerNames() {
+    return [...this.#providers.keys()];
+  }
+
   async discover({ provider, cwd, includeUsage = false } = {}) {
     const selected = provider ? [this.#provider(provider)] : [...this.#providers.values()];
     const results = await Promise.allSettled(selected.map((adapter) => adapter.list(includeUsage ? { cwd, includeUsage: true } : { cwd })));
