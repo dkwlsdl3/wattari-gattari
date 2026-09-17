@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 import { EventLog } from "./event-log.mjs";
 import { nativeAgentsCommand } from "./native-launcher.mjs";
 import { retainedClaudeViewMatches } from "./providers/claude-view.mjs";
-import { retainedCodexViewMatches } from "./providers/codex-view.mjs";
+import { retainedCodexViewState } from "./providers/codex-view.mjs";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_SOCKET = `waga-${typeof process.getuid === "function" ? process.getuid() : "user"}`;
@@ -211,8 +211,13 @@ export class TmuxWorkspace {
     if (existing && !existing.paneDead && !force && (session.provider ?? session.id.split(":", 1)[0]) === "codex") {
       const title = await this.#call(["display-message", "-p", "-t", existing.windowId, "#{pane_title}"], { check: false });
       const frame = await this.#call(["capture-pane", "-p", "-t", existing.windowId, "-S", "0", "-E", "1"], { check: false });
-      changedView = title.code !== 0 || frame.code !== 0
-        || !retainedCodexViewMatches(session.nativeId, title.stdout, frame.stdout, knownNativeIds);
+      const viewState = title.code !== 0 || frame.code !== 0 ? "unknown"
+        : retainedCodexViewState(session.nativeId, title.stdout, frame.stdout, knownNativeIds);
+      this.#eventLog.record("session_view_identity_checked", {
+        sessionId: session.id, windowId: existing.windowId, viewState,
+        titleQueryCode: title.code, frameQueryCode: frame.code,
+      });
+      changedView = viewState === "different";
     }
     if (inUse && changedView) throw viewInUse();
     if (existing && !existing.paneDead && !force && !changedView) {
@@ -475,9 +480,13 @@ export class TmuxWorkspace {
       await this.#call([...prefix, "set-option", "-as", "terminal-features", ",*:RGB:extkeys"]);
       await this.#call([...prefix, "set-option", "-s", "extended-keys", "on"]);
       await this.#call([...prefix, "set-option", "-s", "escape-time", "0"]);
-      await this.#call([...prefix, "bind-key", "-n", "M-g", "select-window -t :overview ; send-keys -t :overview M-r"]);
+      for (const key of ["M-g", "M-G"]) {
+        await this.#call([...prefix, "bind-key", "-n", key, "select-window -t :overview ; send-keys -t :overview M-r"]);
+      }
       const agentsViewCommand = shellCommand("env", ["WAGA_TMUX_TARGET_SESSION=#{session_id}", "WAGA_TMUX_MODE=isolated", this.#nodePath, this.#cliPath, "tmux-agents-view", "#{window_id}"]);
-      await this.#call([...prefix, "bind-key", "-n", "M-a", "run-shell", "-b", agentsViewCommand]);
+      for (const key of ["M-a", "M-A"]) {
+        await this.#call([...prefix, "bind-key", "-n", key, "run-shell", "-b", agentsViewCommand]);
+      }
       await this.#call([...prefix, "bind-key", "-n", "S-Enter", "send-keys", "C-j"]);
     }
   }

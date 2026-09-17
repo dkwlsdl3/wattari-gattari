@@ -55,13 +55,17 @@
     ]
   },
   "lifecycle": {
-    "tests": ["test/native-process.test.mjs", "test/tmux-workspace.test.mjs", "test/tmux-integration.test.mjs", "test/direct-workspace.test.mjs", "test/native-session-host.test.mjs", "test/native-launcher.test.mjs", "test/session-dock.test.mjs", "test/claude-view.test.mjs", "test/codex-view.test.mjs"],
+    "tests": ["test/native-process.test.mjs", "test/tmux-workspace.test.mjs", "test/tmux-integration.test.mjs", "test/direct-workspace.test.mjs", "test/native-session-host.test.mjs", "test/native-launcher.test.mjs", "test/session-dock.test.mjs", "test/claude-view.test.mjs", "test/codex-view.test.mjs", "test/codex-view-recovery.test.mjs"],
     "mutations": [
-      {"id":"ignore-codex-view-target","file":"src/tmux-workspace.mjs","from":"!retainedCodexViewMatches(session.nativeId, title.stdout, frame.stdout, knownNativeIds)","to":"false"},
-      {"id":"reuse-codex-agents-screen","file":"src/providers/codex-view.mjs","from":"firstLine !== \"Agent command center\"","to":"true"},
-      {"id":"respawn-blank-codex-view","file":"src/providers/codex-view.mjs","from":"return firstLine !== \"Agent command center\";","to":"return Boolean(firstLine) && firstLine !== \"Agent command center\";"},
-      {"id":"trust-codex-title-prefix-collision","file":"src/providers/codex-view.mjs","from":"knownNativeIds.some((id) => id !== nativeId && typeof id === \"string\" && `${id.slice(0, 29)}...` === marker)","to":"false"},
-      {"id":"reject-unchanged-codex-title","file":"src/providers/codex-view.mjs","from":"marker !== nativeId && marker !== `${nativeId.slice(0, 29)}...`","to":"marker !== nativeId"},
+      {"id":"ignore-codex-view-target","file":"src/tmux-workspace.mjs","from":"changedView = viewState === \"different\";","to":"changedView = false;"},
+      {"id":"reuse-codex-agents-screen","file":"src/providers/codex-view.mjs","from":"if (firstLine === \"Agent command center\") return \"different\";","to":"if (firstLine === \"Agent command center\") return \"same\";"},
+      {"id":"respawn-blank-codex-view","file":"src/providers/codex-view.mjs","from":"if (firstLine === \"Agent command center\")","to":"if (!firstLine || firstLine === \"Agent command center\")"},
+      {"id":"trust-codex-title-prefix-collision","file":"src/providers/codex-view.mjs","from":"return ambiguous ? \"unknown\" : \"same\";","to":"return \"same\";"},
+      {"id":"reuse-undiscovered-codex-thread","file":"src/providers/codex-view.mjs","from":"if (marker !== `${nativeId.slice(0, 29)}...`) return \"different\";","to":"if (marker !== `${nativeId.slice(0, 29)}...`) return \"unknown\";"},
+      {"id":"ignore-truncated-title-shape","file":"src/providers/codex-view.mjs","from":"if (!TRUNCATED_THREAD_ID.test(marker)) return \"unknown\";","to":"if (false) return \"unknown\";"},
+      {"id":"reject-unchanged-codex-title","file":"src/providers/codex-view.mjs","from":"`${id.slice(0, 29)}...` === marker","to":"id === marker"},
+      {"id":"restart-unknown-codex-view","file":"src/tmux-workspace.mjs","from":"changedView = viewState === \"different\";","to":"changedView = viewState !== \"same\";"},
+      {"id":"ignore-codex-view-query-errors","file":"src/tmux-workspace.mjs","from":"title.code !== 0 || frame.code !== 0 ? \"unknown\"","to":"false ? \"unknown\""},
       {"id":"respawn-live-view","file":"src/tmux-workspace.mjs","from":"existing && !existing.paneDead && !force && !changedView","to":"false"},
       {"id":"ignore-force-reattach","file":"src/tmux-workspace.mjs","from":"existing && !existing.paneDead && !force && !changedView","to":"existing && !existing.paneDead && !changedView"},
       {"id":"reuse-navigated-claude-view","file":"src/tmux-workspace.mjs","from":"!force && !changedView","to":"!force"},
