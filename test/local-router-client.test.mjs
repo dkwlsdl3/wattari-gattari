@@ -136,3 +136,71 @@ test("missing router project is copied, while a nonempty directory is never over
   await assert.rejects(ensureLocalRouterProject({ dir: occupied }), /덮어쓰지 않았습니다/);
   assert.equal(await fs.readFile(path.join(occupied, "keep.txt"), "utf8"), "keep");
 });
+
+test("router forwards actual CLI progress before completion with the extended judge budget", async () => {
+  const { PassThrough } = await import("node:stream");
+  const { runRouter } = await import("../src/local-router-client.mjs");
+  const fixture = await fs.readFile(new URL("./fixtures/local-router-progress.txt", import.meta.url));
+  const events = [];
+  let finish;
+  const stderr = new PassThrough();
+  stderr.setEncoding("utf8"); // execFile uses decoded streams by default.
+  const pending = new Promise(resolve => { finish = resolve; });
+  pending.child = { stderr };
+  const client = new LocalRouterClient({ dir: "/tmp/waga-proof-router",
+    ensure: async () => ({ entry: "/tmp/router.mjs" }),
+    run: (command, args, options) => runRouter(command, args, options, (_, __, opts) => {
+      assert.equal(opts.timeout, 75_000);
+      assert.equal(opts.env.WAGA_ROUTER_PROGRESS, "1");
+      return pending;
+    }),
+  });
+  const routed = client.route({ prompt: "hello", cwd: "/work/project", onProgress: event => events.push(event) });
+  await new Promise(resolve => setImmediate(resolve));
+  stderr.write(fixture);
+  assert.equal(events.some(event => event.stage === "judge" && event.message.includes("Astra")), true);
+  assert.equal(events.some(event => event.routing), false);
+  finish({ stdout: JSON.stringify(routingFixture()) });
+  assert.deepEqual(await routed, routingFixture());
+  assert.deepEqual(events.at(-1).routing, routingFixture());
+  stderr.end();
+});
+
+test("stderr progress handles split UTF-8, junk and oversized lines without leaking diagnostics", async () => {
+  const { PassThrough } = await import("node:stream");
+  const { readRouterProgress } = await import("../src/local-router-client.mjs");
+  const stream = new PassThrough();
+  const events = [];
+  readRouterProgress(stream, event => events.push(event));
+  const line = 'WAGA_ROUTER_PROGRESS '+JSON.stringify({ version: 1, stage: "judge", message: "판정 대기" })+'\n';
+  for (const byte of Buffer.from(line)) stream.write(Buffer.from([byte]));
+  stream.write('diagnostic secret\nWAGA_ROUTER_PROGRESS broken\n');
+  stream.write('x'.repeat(5000));
+  stream.write(line);
+  stream.write('WAGA_ROUTER_PROGRESS '+JSON.stringify({version: 2, stage: "judge", message: "ignore"})+'\n');
+  stream.write(line);
+  stream.end();
+  assert.deepEqual(events, Array(2).fill({ stage: "judge", message: "판정 대기" }));
+});
+
+test("failed router diagnostics exclude progress and retain timeout status", async () => {
+  const client = new LocalRouterClient({ dir: "/tmp/waga-proof-router", ensure: async () => ({ entry: "/tmp/router.mjs" }),
+    run: async () => { throw Object.assign(new Error("terminated"), { killed: true, stderr: 'WAGA_ROUTER_PROGRESS {"message":"old progress"}\n' }); },
+  });
+  await assert.rejects(client.route({ prompt: "hello" }), error => /75초/.test(error.message) && !error.message.includes("old progress"));
+});
+
+test('v2 CLI fixture accepts explicit issue context and streams cumulative public reason', async () => {
+  const fixture = JSON.parse(await fs.readFile(new URL('./fixtures/local-router-v2.json', import.meta.url), 'utf8'));
+  const client = new LocalRouterClient({ dir: '/tmp/waga-proof-router', ensure: async () => ({entry:'/tmp/router.mjs'}),
+    run: async (_, __, options) => { assert.equal(options.env.WAGA_ROUTER_CONTEXT, '1'); return { stdout: JSON.stringify(fixture) }; },
+  });
+  assert.deepEqual(await client.route({ prompt: '#201 검토', cwd: fixture.cwd }), fixture);
+  const { PassThrough } = await import('node:stream');
+  const { readRouterProgress } = await import('../src/local-router-client.mjs');
+  const input = new PassThrough();
+  const seen = [];
+  readRouterProgress(input, event => seen.push(event));
+  input.end(await fs.readFile(new URL('./fixtures/local-router-stream.txt', import.meta.url)));
+  assert.deepEqual(seen.filter(event => event.stage === 'judge-text').map(event => event.message), ['동시성 복구', '동시성 복구 검토 필요']);
+});

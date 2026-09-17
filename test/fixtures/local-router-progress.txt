@@ -1,0 +1,6 @@
+WAGA_ROUTER_PROGRESS {"version":1,"stage":"prepare","message":"라우팅 설정과 프롬프트 확인 완료"}
+WAGA_ROUTER_PROGRESS {"version":1,"stage":"issue","message":"이슈 #201 조회 중"}
+WAGA_ROUTER_PROGRESS {"version":1,"stage":"issue","message":"이슈 #201 조회 완료"}
+WAGA_ROUTER_PROGRESS {"version":1,"stage":"judge","message":"판정 응답 대기 · GPT-6 Astra · medium"}
+WAGA_ROUTER_PROGRESS {"version":1,"stage":"decision","message":"판정 완료 · complex · 확신도 high: 동시성 복구 검토 필요"}
+WAGA_ROUTER_PROGRESS {"version":1,"stage":"decision","message":"실행 설정 선택 완료 · GPT-6 Astra · medium"}

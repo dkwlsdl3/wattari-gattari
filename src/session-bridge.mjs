@@ -1,3 +1,4 @@
+import { promptWithIssueContext } from "./issue-context.mjs";
 import crypto from "node:crypto";
 
 export class BridgeError extends Error {
@@ -63,14 +64,18 @@ export class SessionBridge {
     if (typeof prompt !== "string" || !prompt.trim()) throw new BridgeError("PROMPT_REQUIRED", "Prompt is required");
     const adapter = this.#provider(provider);
     onProgress({ message: "모델과 실행 설정 선택 중" });
-    const selectedRouting = routing ?? await this.#resolveCreateRouting(provider, prompt.trim(), { cwd });
+    const selectedRouting = routing ?? await this.#resolveCreateRouting(provider, prompt.trim(), { cwd, onProgress });
     const options = { cwd };
     if (selectedRouting?.model) options.model = selectedRouting.model;
     if (selectedRouting?.effort) options.effort = selectedRouting.effort;
     if (adapter.name === "codex" && executionMode !== undefined) options.executionMode = executionMode;
     if (executionSettings !== undefined) options.executionSettings = executionSettings;
     onProgress({ message: `${provider === "claude" ? "Claude" : "Codex"} 세션 생성 요청 중`, routing: selectedRouting });
-    const created = await adapter.create(prompt.trim(), options);
+    const taskPrompt = promptWithIssueContext(prompt.trim(), selectedRouting);
+    if (selectedRouting?.issueContext?.issues?.length) {
+      onProgress({ message: taskPrompt === prompt.trim() ? "프롬프트 크기 제한 · 이슈 자료 첨부 생략, 작업 세션에서 조회 필요" : `조회한 이슈 자료 ${selectedRouting.issueContext.issues.length}건 전달` });
+    }
+    const created = await adapter.create(taskPrompt, options);
     onProgress({ message: "세션 생성 접수 완료 · 목록 확인 중" });
     // Resolve real metadata only on the creating provider, without usage or unrelated providers.
     // Creation is already acknowledged: discovery failure must not offer a duplicate submission.
@@ -82,10 +87,10 @@ export class SessionBridge {
     return { ...created, ...(selectedRouting ? { routing: selectedRouting } : {}) };
   }
 
-  async #resolveCreateRouting(provider, prompt, { cwd } = {}) {
+  async #resolveCreateRouting(provider, prompt, { cwd, onProgress } = {}) {
     const resolver = this.#createRouter ?? this.#router;
     if (!resolver) return null;
-    return resolver({ provider, prompt, cwd });
+    return resolver({ provider, prompt, cwd, onProgress });
   }
 
   // Takes an already discovered identity; never rediscover or resolve by display name.

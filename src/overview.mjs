@@ -134,8 +134,22 @@ function movePromptCursor(value, cursor, direction) {
 
 function creationModal(lines, task, width, height) {
   const inner = Math.max(1, Math.min(68, width - 6));
-  const content = [`새 세션 생성 중 · ${Math.max(0, Math.floor((Date.now() - (task.startedAt ?? Date.now())) / 1000))}초`, `${task.provider === "claude" ? "Claude" : "Codex"} · ${task.cwd}`, "",
-    ...(task.progress ?? ["생성 요청 준비 중"]), "", "완료되면 목록으로 돌아갑니다."];
+  const routing = task.routing;
+  const details = routing && (routing.source === "local-llm-router" || routing.warnings?.length) ? [
+    `실행 모델: ${routing.model ?? "provider 기본값"} · 추론: ${routing.effort ?? "기본값"}`,
+    `작업 등급: ${routing.tier} · 확신도: ${routing.confidence}`,
+    ...(routing.warnings ?? []).map(value => `경고: ${value}`),
+    ...[...(routing.reasons ?? [])].sort((a, b) => Number(b.startsWith("LLM 판정기")) - Number(a.startsWith("LLM 판정기"))),
+    ...(routing.issues ?? []).map(issue => `이슈 #${issue.iid}: ${issue.title} · 댓글 ${issue.commentCount}개`),
+  ] : [];
+  const header = [`새 세션 생성 중 · ${Math.max(0, Math.floor((Date.now() - (task.startedAt ?? Date.now())) / 1000))}초`, `${task.provider === "claude" ? "Claude" : "Codex"} · ${task.cwd}`];
+  const progress = (task.progress?.length ? task.progress : ["생성 요청 준비 중"]).slice(-3);
+  const explanation = task.judgeText ? [`판정 설명 (수신 중): ${task.judgeText}`] : [];
+  const rows = [...progress, ...explanation, ...details].flatMap(text => wrapPreviewLines(safeText(text), inner));
+  const available = Math.max(0, height - header.length - 4);
+  const visible = rows.slice(0, available);
+  if (rows.length > available && visible.length) visible[visible.length - 1] = "… 상세 일부 생략";
+  const content = [...header, ...visible, "", "완료되면 목록으로 돌아갑니다."];
   const box = [`┌${"─".repeat(inner + 2)}┐`, ...content.map(text => `│ ${fit(text, inner)} │`), `└${"─".repeat(inner + 2)}┘`];
   const top = Math.max(0, Math.floor((height - box.length) / 2));
   const left = " ".repeat(Math.max(0, Math.floor((width - inner - 4) / 2)));
@@ -929,10 +943,12 @@ export async function runOverview({
     void (async () => {
       let created;
       try {
-        const createOptions = { cwd: draft.cwd, onProgress: ({ message, routing }) => {
+        const createOptions = { cwd: draft.cwd, onProgress: ({ message, routing, stage }) => {
           if (closed) return;
           if (routing) draft.routing = routing;
-          draft.progress = [...(draft.progress ?? []), message].slice(-4);
+          if (stage === "judge-text") draft.judgeText = message;
+          else draft.progress = [...(draft.progress ?? []), message].slice(-4);
+          if (stage === "fallback" || routing) draft.judgeText = "";
           newTask = { ...draft };
           render();
         } };

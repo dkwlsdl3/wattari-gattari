@@ -1379,3 +1379,42 @@ test("multiline editor keeps its cursor visible on compact terminals", () => {
     assert.match(frame, /Shift\+Enter/);
   }
 });
+
+test("creation modal prioritizes judge reason and includes selected profile and fallback warnings", () => {
+  const frame = buildOverviewFrame({ sessions: [], width: 110, height: 32, newTask: {
+    provider: "codex", cwd: "/work/project", prompt: "hello", cursor: 5, submitting: true,
+    progress: ["프롬프트 전달", "판정 완료"],
+    routing: { source: "local-llm-router", model: "gpt-6-astra", effort: "medium", tier: "complex", confidence: "high",
+      reasons: ["규칙 하나", "규칙 둘", "LLM 판정기 · 동시성 복구 검토 필요"],
+      warnings: ["이슈 조회 실패"], issues: [{ iid: "201", title: "복구", commentCount: 3 }] },
+  } });
+  assert.match(frame, /실행 모델: gpt-6-astra/);
+  assert.match(frame, /추론: medium/);
+  assert.match(frame, /작업 등급: complex · 확신도: high/);
+  assert.match(frame, /LLM 판정기 · 동시성 복구 검토 필요/);
+  assert.match(frame, /경고: 이슈 조회 실패/);
+  assert.match(frame, /이슈 #201/);
+});
+
+test('streamed judge explanation updates the same modal before creation resolves', async () => {
+  const input = rawTtyInput();
+  const output = capturedOutput();
+  let report, finish;
+  const gate = new Promise(resolve => { finish = resolve; });
+  const bridge = { discover: async () => ({sessions:[], warnings:[]}),
+    create: async (_, __, options) => { report = options.onProgress; await gate; return {provider:'codex', nativeId:'proof'}; },
+  };
+  const running = runOverview({bridge, workspace:{async leave(){return {closeOverview:true};}}, defaultCwd:'/tmp', inputStream:input, outputStream:output, refreshMs:60000, listenForSignals:false});
+  await new Promise(setImmediate);
+  pressAlt(input, 'n'); input.write('test\r');
+  await new Promise(setImmediate);
+  report({stage:'judge-text', message:'본문 분석'});
+  assert.match(plain(output.writes.at(-1)), /본문 분석/);
+  report({stage:'judge-text', message:'본문 분석과 댓글 검토'});
+  const frame = plain(output.writes.at(-1));
+  assert.match(frame, /본문 분석과 댓글 검토/);
+  assert.equal(frame.split('본문 분석').length - 1, 1);
+  report({stage:'fallback', message:'판정 실패'});
+  assert.doesNotMatch(plain(output.writes.at(-1)), /본문 분석/);
+  finish(); await new Promise(setImmediate); input.end(); await running;
+});

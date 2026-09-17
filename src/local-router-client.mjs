@@ -1,11 +1,47 @@
+import { validateIssueContext } from "./issue-context.mjs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const PROGRESS_PREFIX = "WAGA_ROUTER_PROGRESS ";
+const PROGRESS_STAGES = new Set(["prepare", "issue", "judge", "judge-text", "decision", "fallback"]);
+
+// Optional stderr side channel; stdout remains the strict v1 result.
+export function readRouterProgress(stream, onProgress) {
+  const decoder = new StringDecoder("utf8");
+  let pending = "";
+  let dropping = false;
+  const consume = (chunk) => {
+    for (const part of chunk.split(/(?<=\n)/)) {
+      if (!dropping) pending += part;
+      if (pending.length > 4096) { pending = ""; dropping = true; }
+      if (!part.endsWith("\n")) continue;
+      if (!dropping && pending.startsWith(PROGRESS_PREFIX)) {
+        try {
+          const event = JSON.parse(pending.slice(PROGRESS_PREFIX.length));
+          if (event.version === 1 && PROGRESS_STAGES.has(event.stage) && typeof event.message === "string" && event.message.length <= 1000) {
+            onProgress?.({ stage: event.stage, message: event.message.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ") });
+          }
+        } catch { /* Diagnostics and malformed events cannot affect routing. */ }
+      }
+      pending = ""; dropping = false;
+    }
+  };
+  stream.on("data", chunk => consume(typeof chunk === "string" ? chunk : decoder.write(chunk)));
+  stream.on("end", () => consume(decoder.end()));
+}
+
+export async function runRouter(command, args, { onProgress, ...options }, execute = execFileAsync) {
+  const pending = execute(command, args, options);
+  readRouterProgress(pending.child.stderr, onProgress);
+  return pending;
+}
+
 const DEFAULT_ROUTER_DIR = path.join(os.homedir(), "Projects", "local-llm-router");
 const TEMPLATE_DIR = fileURLToPath(new URL("./local-router-template/", import.meta.url));
 const ROUTER_ENTRY = path.join("src", "cli.mjs");
@@ -91,8 +127,8 @@ function validateRouting(routing, provider, expectedCwd) {
   if (!routing || typeof routing !== "object" || Array.isArray(routing)) {
     throw new Error("local-llm-router 응답 형식이 객체가 아닙니다.");
   }
-  allowedKeys(routing, ROUTING_FIELDS, "응답");
-  if (routing.contractVersion !== CONTRACT_VERSION) {
+  allowedKeys(routing, routing.contractVersion === 2 ? new Set([...ROUTING_FIELDS, "issueContext"]) : ROUTING_FIELDS, "응답");
+  if (![CONTRACT_VERSION, 2].includes(routing.contractVersion)) {
     throw new Error(`local-llm-router 응답 contractVersion이 ${CONTRACT_VERSION}이 아닙니다.`);
   }
   if (routing.provider !== provider || !ROUTING_PROVIDERS.has(routing.provider)) {
@@ -126,6 +162,7 @@ function validateRouting(routing, provider, expectedCwd) {
     throw new Error("local-llm-router 응답의 issues 필드가 배열이 아닙니다.");
   }
   routing.issues.forEach(validateIssue);
+  if (routing.contractVersion === 2) validateIssueContext(routing.issueContext, routing.issueRefs);
   return routing;
 }
 
@@ -144,7 +181,7 @@ export class LocalRouterClient {
   #run;
   #ensure;
 
-  constructor({ dir = process.env.WAGA_LOCAL_ROUTER_DIR || DEFAULT_ROUTER_DIR, run = execFileAsync, ensure = ensureLocalRouterProject } = {}) {
+  constructor({ dir = process.env.WAGA_LOCAL_ROUTER_DIR || DEFAULT_ROUTER_DIR, run = runRouter, ensure = ensureLocalRouterProject } = {}) {
     this.#dir = path.resolve(dir);
     this.#run = run;
     this.#ensure = ensure;
@@ -154,12 +191,13 @@ export class LocalRouterClient {
     return this.#dir;
   }
 
-  async route({ provider = "codex", prompt = "", cwd = process.cwd() } = {}) {
+  async route({ provider = "codex", prompt = "", cwd = process.cwd(), onProgress = () => {} } = {}) {
     if (!ROUTING_PROVIDERS.has(provider)) throw new TypeError(`local-llm-router provider is unsupported: ${provider}`);
     if (typeof prompt !== "string" || !prompt.trim()) throw new TypeError("local-llm-router prompt is required");
     if (Buffer.byteLength(prompt.trim(), "utf8") > MAX_PROMPT_BYTES) throw new TypeError(`local-llm-router prompt must be at most ${MAX_PROMPT_BYTES} UTF-8 bytes`);
     if (typeof cwd !== "string" || !cwd.trim()) throw new TypeError("local-llm-router cwd is required");
     const normalizedCwd = path.resolve(cwd);
+    onProgress({ message: "local-llm-router 실행 준비 중" });
     const project = await this.#ensure({ dir: this.#dir });
     const args = [
       project.entry,
@@ -169,18 +207,24 @@ export class LocalRouterClient {
       "--cwd", normalizedCwd,
       "--json",
     ];
+    onProgress({ message: "프롬프트 전달 · 라우터 응답 대기 중" });
     let result;
     try {
       result = await this.#run(process.execPath, args, {
         cwd: normalizedCwd,
-        timeout: 15_000,
+        timeout: 75_000,
+        env: { ...process.env, WAGA_ROUTER_PROGRESS: "1", WAGA_ROUTER_CONTEXT: "1" },
+        onProgress,
         maxBuffer: MAX_OUTPUT_BYTES,
       });
     } catch (error) {
-      const detail = String(error.stderr || error.message || error).trim();
+      const diagnostic = String(error.stderr ?? "").split("\n").filter(line => !line.startsWith(PROGRESS_PREFIX)).join("\n").trim();
+      const detail = error.killed ? "대기 한도 75초 초과 또는 실행 중단" : (diagnostic || String(error.message || error));
       throw new Error(`local-llm-router 실행에 실패했습니다${detail ? `: ${detail}` : ""}`);
     }
-    return parseOutput(result.stdout, provider, normalizedCwd);
+    const routing = parseOutput(result.stdout, provider, normalizedCwd);
+    onProgress({ message: "라우팅 결과 수신 완료", routing });
+    return routing;
   }
 }
 

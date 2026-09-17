@@ -22,7 +22,7 @@ export function fallbackRouting({ provider = "codex", cwd = "" } = {}) {
 
 export function routingSummary(routing) {
   if (!routing) return "자동 라우팅: provider 기본값";
-  const reason = routing.reasons?.slice(0, 2).join(", ") || "provider 기본값 (+0)";
+  const reason = [...(routing.reasons ?? [])].sort((a, b) => Number(b.startsWith("LLM 판정기")) - Number(a.startsWith("LLM 판정기"))).slice(0, 2).join(", ") || "provider 기본값 (+0)";
   const warning = routing.warnings?.length ? ` · 경고: ${routing.warnings[0]}` : "";
   const source = routing.source === "local-llm-router" ? "local-llm-router" : "기본값";
   return `자동 라우팅: ${routing.label} · ${source} · ${reason}${warning}`;

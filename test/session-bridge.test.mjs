@@ -179,7 +179,8 @@ test("create awaits the dedicated router only at session creation", async () => 
     providers: [provider("codex", [], calls)],
     router: () => { throw new Error("preview router must not be used when createRouter is provided"); },
     createRouter: async (input) => {
-      assert.deepEqual(input, { provider: "codex", prompt: "inspect the issue", cwd: "/work/project" });
+      assert.equal(typeof input.onProgress, "function");
+      assert.deepEqual({ ...input, onProgress: undefined }, { provider: "codex", prompt: "inspect the issue", cwd: "/work/project", onProgress: undefined });
       return routing;
     },
   });
@@ -363,7 +364,7 @@ test("creation progress reflects routing, provider acknowledgement and discovery
   const steps = [];
   const bridge = new SessionBridge({ providers: [{ name: "codex", async create(prompt) {
     steps.push("create"); assert.equal(prompt, "first\nsecond"); return { provider: "codex", nativeId: "proof" };
-  }, async list() { steps.push("list"); return []; } }], createRouter: async () => { steps.push("route"); return null; } });
+  }, async list() { steps.push("list"); return []; } }], createRouter: async ({ onProgress }) => { steps.push("route"); onProgress({ message: "판정 대기" }); return null; } });
   await bridge.create("codex", "first\nsecond", { onProgress: ({ message }) => steps.push(message) });
-  assert.deepEqual(steps, ["모델과 실행 설정 선택 중", "route", "Codex 세션 생성 요청 중", "create", "세션 생성 접수 완료 · 목록 확인 중", "list"]);
+  assert.deepEqual(steps, ["모델과 실행 설정 선택 중", "route", "판정 대기", "Codex 세션 생성 요청 중", "create", "세션 생성 접수 완료 · 목록 확인 중", "list"]);
 });
