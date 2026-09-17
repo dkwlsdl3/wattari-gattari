@@ -57,6 +57,8 @@ waga open codex --cwd ~/work/my-app
 
 ### 새 세션 자동 모델 라우팅
 
+`Alt+D`는 이 조회를 건너뛰고 provider 기본값으로 바로 생성합니다.
+
 `Alt+N`으로 새 세션을 만들면 Waga가 별도 로컬 프로젝트인
 `local-llm-router`를 생성·호출할 수 있습니다. Waga 코어에는 개인 모델 정책이나
 GitLab 인증을 넣지 않으며, 라우터가 없거나 실패하면 provider 기본값으로 세션을
@@ -127,6 +129,7 @@ version 1 Codex 전환 설정은 읽을 때 provider 설정으로 변환되며, 
 | `/` / `Tab` | 검색 / provider 필터 |
 | `F2` | 선택한 세션 이름 변경 |
 | `Alt+N` / `Alt+R` | 새 세션 / 새로고침 |
+| `Alt+D` | local-llm-router를 거치지 않는 provider 기본값 새 세션 (편집 중 `Alt+D`로 전환) |
 | `Alt+S` | 새 세션 Claude·Codex 실행 설정 |
 | `Alt+Y` | 새 Codex 세션 실행 모드 기본값 / YOLO 전환 |
 | `Alt+X` 두 번 | 세션 보관 |

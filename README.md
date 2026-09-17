@@ -57,6 +57,8 @@ waga open codex --cwd ~/work/my-app
 
 ### Automatic model routing for new sessions
 
+`Alt+D` skips that lookup and creates the session with provider defaults.
+
 When `Alt+N` creates a session, Waga can create and invoke a separate local project named
 `local-llm-router`. Waga's public core does not contain a personal model policy or GitLab
 credentials; if the router is absent or fails, the provider creates the session with its
@@ -130,6 +132,7 @@ No model calls or additional transcript files are created.
 | `/` / `Tab` | Search / filter providers |
 | `F2` | Rename the selected session |
 | `Alt+N` / `Alt+R` | New session / refresh |
+| `Alt+D` | New session with provider defaults, skipping local-llm-router (`Alt+D` toggles it while composing) |
 | `Alt+S` | New-session Claude and Codex execution settings |
 | `Alt+Y` | Toggle the new Codex session execution mode |
 | `Alt+X` twice | Archive a session |

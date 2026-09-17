@@ -4,7 +4,7 @@ function providerLabel(provider) {
 
 // Waga intentionally has no product-specific routing policy. The optional
 // local-llm-router supplies the real decision at session creation time.
-export function fallbackRouting({ provider = "codex", cwd = "" } = {}) {
+export function fallbackRouting({ provider = "codex", cwd = "", skipped = false } = {}) {
   return {
     provider,
     model: null,
@@ -14,7 +14,7 @@ export function fallbackRouting({ provider = "codex", cwd = "" } = {}) {
     score: 0,
     confidence: "low",
     skills: [],
-    reasons: ["local-llm-router 조회 전 provider 기본값 (+0)"],
+    reasons: [skipped ? "local-llm-router 조회 생략 · provider 기본값 (+0)" : "local-llm-router 조회 전 provider 기본값 (+0)"],
     cwd: typeof cwd === "string" ? cwd : "",
     source: "waga-fallback",
   };

@@ -116,6 +116,8 @@
       {"id":"ignore-manual-rank","file":"src/overview.mjs","from":"return leftRank - rightRank || left.index - right.index;","to":"return left.index - right.index;"},
       {"id":"reverse-manual-move","file":"src/overview.mjs","from":"direction === \"up\" ? visibleIndex - 1 : visibleIndex + 1","to":"direction === \"down\" ? visibleIndex - 1 : visibleIndex + 1"},
       {"id":"paint-over-native","file":"src/overview.mjs","from":"if (closed || nativeOpen) return;","to":"if (closed) return;"},
+      {"id":"always-route-new-session","file":"src/overview.mjs","from":"if (draft.skipRouting) return fallbackRouting({ provider: draft.provider, cwd: draft.cwd, skipped: true });","to":";"},
+      {"id":"drop-skipped-routing-at-create","file":"src/overview.mjs","from":"...(draft.skipRouting ? { routing: draft.routing } : {}), ","to":""},
       {"id":"block-healthy-provider-refresh","file":"src/overview.mjs","from":"bridge.providerNames?.() ?? [undefined]","to":"[undefined]"},
       {"id":"reset-unobserved-provider-removals","file":"src/overview.mjs","from":"if (missingCounts.has(session.id)) nextMissingCounts.set(session.id, missingCounts.get(session.id));","to":";"},
       {"id":"erase-other-provider-warning","file":"src/overview.mjs","from":"warnings = [...refreshStates.values()].flatMap(entry => entry.warnings);\n      notice =","to":"warnings = state.warnings;\n      notice ="},

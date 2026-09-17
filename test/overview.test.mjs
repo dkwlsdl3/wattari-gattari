@@ -1418,3 +1418,58 @@ test('streamed judge explanation updates the same modal before creation resolves
   assert.doesNotMatch(plain(output.writes.at(-1)), /본문 분석/);
   finish(); await new Promise(setImmediate); input.end(); await running;
 });
+
+test("Alt+D creates with provider defaults and never consults the routers", async () => {
+  const input = rawTtyInput();
+  const output = capturedOutput();
+  let createOptions = null;
+  let routeCalls = 0;
+  const bridge = {
+    discover: async () => ({ sessions: [], warnings: [] }),
+    route: () => { routeCalls += 1; return { label: "규칙 라우팅", model: "picked", effort: "high", source: "waga-fallback", reasons: [] }; },
+    create: async (_provider, _prompt, options) => { createOptions = options; return { provider: "claude", nativeId: "proof" }; },
+  };
+  const running = runOverview({ bridge, workspace: { async leave() { return { closeOverview: true }; } }, defaultCwd: "/tmp", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise(setImmediate);
+  pressAlt(input, "d");
+  await new Promise(setImmediate);
+  const composer = plain(output.writes.at(-1));
+  assert.match(composer, /local-llm-router 조회 생략/);
+  assert.match(composer, /Alt\+D 라우팅 사용/);
+  assert.equal(routeCalls, 0, "Alt+D must not consult the preview router either");
+  input.write("hello\r");
+  await waitFor(() => createOptions !== null);
+  // Supplying routing is what keeps SessionBridge from awaiting local-llm-router.
+  assert.equal(createOptions.routing.source, "waga-fallback");
+  assert.equal(createOptions.routing.model, null);
+  assert.equal(createOptions.routing.effort, null);
+  input.end();
+  await running;
+});
+
+test("Alt+N leaves routing to local-llm-router and Alt+D toggles it off in the composer", async () => {
+  const input = rawTtyInput();
+  const output = capturedOutput();
+  let createOptions = null;
+  const bridge = {
+    discover: async () => ({ sessions: [], warnings: [] }),
+    route: () => ({ label: "규칙 라우팅", model: null, effort: null, source: "waga-fallback", reasons: ["규칙 하나"] }),
+    create: async (_provider, _prompt, options) => { createOptions = options; return { provider: "claude", nativeId: "proof" }; },
+  };
+  const running = runOverview({ bridge, workspace: { async leave() { return { closeOverview: true }; } }, defaultCwd: "/tmp", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise(setImmediate);
+  pressAlt(input, "n");
+  await new Promise(setImmediate);
+  assert.match(plain(output.writes.at(-1)), /Alt\+D 라우팅 생략/);
+  pressAlt(input, "d");
+  await new Promise(setImmediate);
+  assert.match(plain(output.writes.at(-1)), /local-llm-router 조회 생략/);
+  pressAlt(input, "d");
+  await new Promise(setImmediate);
+  assert.doesNotMatch(plain(output.writes.at(-1)), /local-llm-router 조회 생략/);
+  input.write("hello\r");
+  await waitFor(() => createOptions !== null);
+  assert.equal(createOptions.routing, undefined, "creation must await the router when Alt+D is off");
+  input.end();
+  await running;
+});

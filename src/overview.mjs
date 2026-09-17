@@ -538,8 +538,10 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     }
   }
   const helpLines = wide
-    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  F4 재접속  / 검색  Tab 필터", "F2 이름 변경  Alt+N 새 세션  Alt+S 설정  Alt+Y Codex 실행  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기  PgUp/PgDn 응답"]
-    : ["↑↓ 이동  Shift+↑↓ 순서  Enter 열기  Alt+Q 나가기", "F4 재접속  / 검색  Tab 필터  F2 이름  Alt+N 새 세션", "Alt+S 설정  Alt+Y Codex 실행  Alt+R 갱신  Alt+X 보관"];
+    // Alt+S stays visible in the status header, so the action line spends its
+    // width on Alt+D next to Alt+N instead.
+    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  F4 재접속  / 검색  Tab 필터", "F2 이름 변경  Alt+N 새 세션  Alt+D 기본값  Alt+Y Codex 실행  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기  PgUp/PgDn 응답"]
+    : ["↑↓ 이동  Shift+↑↓ 순서  Enter 열기  Alt+Q 나가기", "F4 재접속  / 검색  Tab 필터  F2 이름  Alt+N 새 세션", "Alt+D 기본값  Alt+S 설정  Alt+Y 실행  Alt+R 갱신  Alt+X 보관"];
   while (lines.length < height - helpLines.length - 4 - (newTask ? editorHeight + 1 : 0)) lines.push("");
   if (newTask) {
     const providerName = newTask.provider === "claude" ? "CLAUDE" : "CODEX";
@@ -558,7 +560,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
       : newTask.provider === "codex" ? codexExecutionLabel(codexExecutionMode) : "Claude 실행 설정";
     const composerHint = newTask.error
       ? `오류: ${safeText(newTask.error)}`
-      : `Shift+Enter 개행 · Enter 생성 · Esc 취소   Tab → ${alternateProvider} 전환   Alt+S 설정   ${executionSummary}`;
+      : `Shift+Enter 개행 · Enter 생성 · Esc 취소   Tab → ${alternateProvider} 전환   Alt+D ${newTask.skipRouting ? "라우팅 사용" : "라우팅 생략"}   Alt+S 설정   ${executionSummary}`;
     lines.push(`  ${color(newTask.error ? THEME.error : providerColor, fit(composerHint, usableWidth))}`);
     lines.push(...promptRows(newTask.prompt, newTask.cursor, usableWidth).map(row => `  ${row}`));
     lines.push("");
@@ -830,6 +832,8 @@ export async function runOverview({
 
   const routeNewTask = (draft) => {
     if (!draft) return null;
+    // Alt+D creates with provider defaults and never consults local-llm-router.
+    if (draft.skipRouting) return fallbackRouting({ provider: draft.provider, cwd: draft.cwd, skipped: true });
     const selected = typeof bridge.route === "function" ? bridge.route(draft.provider, draft.prompt, { cwd: draft.cwd }) : null;
     return selected ?? fallbackRouting({ provider: draft.provider, cwd: draft.cwd });
   };
@@ -951,7 +955,7 @@ export async function runOverview({
     void (async () => {
       let created;
       try {
-        const createOptions = { cwd: draft.cwd, onProgress: ({ message, routing, stage }) => {
+        const createOptions = { cwd: draft.cwd, ...(draft.skipRouting ? { routing: draft.routing } : {}), onProgress: ({ message, routing, stage }) => {
           if (closed) return;
           if (routing) draft.routing = routing;
           if (stage === "judge-text") draft.judgeText = message;
@@ -1183,6 +1187,7 @@ export async function runOverview({
       const cells = graphemes(newTask.prompt);
       if (key.name === "escape") newTask = null;
       else if (key.name === "tab") newTask = { ...newTask, provider: newTask.provider === "claude" ? "codex" : "claude", error: "" };
+      else if (key.meta && key.name === "d") newTask = { ...newTask, skipRouting: !newTask.skipRouting, error: "" };
       else if ((key.shift && key.name === "return") || key.name === "enter" || (key.ctrl && key.name === "j") || key.sequence === "\x1b[13;2u") {
         cells.splice(newTask.cursor, 0, "\n");
         newTask = { ...newTask, prompt: cells.join(""), cursor: newTask.cursor + 1, error: "" };
@@ -1263,7 +1268,7 @@ export async function runOverview({
       selectFirstSession();
     }
     else if (key.sequence === "/") searching = true;
-    else if (key.meta && key.name === "n") {
+    else if (key.meta && (key.name === "n" || key.name === "d")) {
       const node = nodes[selected];
       newTask = {
         provider: node?.type === "session" ? node.session.provider : provider ?? "claude",
@@ -1273,6 +1278,7 @@ export async function runOverview({
         error: "",
         submitting: false,
         routing: null,
+        skipRouting: key.name === "d",
       };
       refreshNewTaskRouting();
     }
