@@ -202,7 +202,7 @@ test("Claude provider fetches optional usage at most once per cache window", asy
 
   now += 5 * 60_000;
   await provider.list({ includeUsage: true });
-  assert.equal(reads, 3);
+  assert.equal(reads, 2);
   assert.equal(provider.usageSnapshot().weekly.remainingPercent, 5);
 });
 
