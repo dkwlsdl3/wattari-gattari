@@ -3,12 +3,15 @@ import { spawnSync } from "node:child_process";
 import { parseClaudeAgents } from "./providers/claude.mjs";
 import { parseDaemonVersion } from "./providers/codex.mjs";
 
-function command(args) {
+function runCommand(args) {
   const result = spawnSync(args[0], args.slice(1), { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 10_000 });
-  return { ok: result.status === 0, detail: (result.stdout || result.stderr || result.error?.message || "not found").trim(), stdout: result.stdout };
+  return {
+    ok: result.status === 0, spawned: !result.error,
+    detail: (result.stdout || result.stderr || result.error?.message || "not found").trim(), stdout: result.stdout,
+  };
 }
 
-export function defaultDoctorProbes() {
+export function defaultDoctorProbes({ command = runCommand } = {}) {
   return {
     node: async () => ({ ok: Number(process.versions.node.split(".")[0]) >= 22, detail: process.version }),
     tmux: async () => command(["tmux", "-V"]),
@@ -26,7 +29,9 @@ export function defaultDoctorProbes() {
     },
     codexDaemon: async () => {
       const result = command(["codex", "app-server", "daemon", "version"]);
-      if (!result.ok) return result;
+      // A stopped daemon reports itself only by exiting non-zero on the control socket,
+      // so a failed run that still reached the CLI is "stopped", not a broken install.
+      if (!result.ok) return result.spawned ? { ok: true, detail: "stopped" } : result;
       try {
         const daemon = parseDaemonVersion(result.stdout);
         return { ok: ["running", "stopped"].includes(daemon.status), detail: `${daemon.status}${daemon.socketPath ? ` at ${daemon.socketPath}` : ""}` };

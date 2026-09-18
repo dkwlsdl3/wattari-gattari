@@ -12,6 +12,17 @@ process.env.XDG_STATE_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "waga-codex-t
 const testStateDirectory = process.env.XDG_STATE_HOME;
 after(() => fs.rmSync(testStateDirectory, { recursive: true, force: true }));
 
+// 2026-09-18 measured on codex 0.152.1-0.155.0: `daemon version` never prints a
+// "stopped" JSON. With the socket stale it exits non-zero on ECONNREFUSED, and with
+// no socket file at all on ENOENT, so both stopped shapes arrive as a run failure.
+const STOPPED_DAEMON_STDERR = "Error: failed to connect to /home/admin/.codex/app-server-control/app-server-control.sock\n\nCaused by:\n    Connection refused (os error 111)\n";
+
+function stoppedDaemonFailure() {
+  return Object.assign(new Error(`Command failed: codex app-server daemon version\n${STOPPED_DAEMON_STDERR}`), {
+    code: 1, stdout: "", stderr: STOPPED_DAEMON_STDERR,
+  });
+}
+
 function harness(responder, options = {}) {
   const calls = [];
   const client = {
@@ -76,11 +87,39 @@ test("Codex preview bounds history scans, isolates empty history and closes on p
 
 test("Codex preview does not start a daemon and respects cancellation", async () => {
   const calls = [];
-  const provider = new CodexProvider({ run: async (args) => { calls.push(args); return { stdout: '{"status":"stopped"}' }; }, eventLog: { record() {} } });
+  const provider = new CodexProvider({
+    run: async (args) => { calls.push(args); throw stoppedDaemonFailure(); },
+    eventLog: { record() {} },
+  });
   await assert.rejects(provider.preview({ nativeId: "t" }), { code: "CODEX_DAEMON_UNAVAILABLE" });
   assert.deepEqual(calls, [["app-server", "daemon", "version"]]);
   await assert.rejects(provider.preview({ nativeId: "t" }, { signal: AbortSignal.abort() }));
   assert.equal(calls.length, 1);
+});
+
+test("A stopped daemon is started instead of surfacing the raw command failure", async () => {
+  const calls = [];
+  const client = { async initialize() {}, async request() { return { data: [], nextCursor: null }; }, async close() {} };
+  const provider = new CodexProvider({
+    run: async (args) => {
+      const started = calls.includes("app-server daemon start");
+      calls.push(args.join(" "));
+      if (args[2] === "start") return { stdout: "" };
+      if (!started) throw stoppedDaemonFailure();
+      return { stdout: JSON.stringify({ status: "running", socketPath: "/tmp/codex.sock" }) };
+    },
+    clientFactory: async () => client, eventLog: { record() {} },
+  });
+  assert.deepEqual(await provider.list(), []);
+  assert.deepEqual(calls, ["app-server daemon version", "app-server daemon start", "app-server daemon version"]);
+});
+
+test("A daemon that stays stopped after start reports unavailability, not a shell error", async () => {
+  const provider = new CodexProvider({
+    run: async (args) => { if (args[2] === "start") return { stdout: "" }; throw stoppedDaemonFailure(); },
+    eventLog: { record() {} },
+  });
+  await assert.rejects(provider.list(), { code: "CODEX_DAEMON_UNAVAILABLE" });
 });
 
 test("Codex completion finds the matching turn and answer beyond the first page", async () => {

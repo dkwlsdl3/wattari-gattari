@@ -427,10 +427,10 @@ export class CodexProvider {
     if (!fresh && this.#daemonCache && this.#now() - this.#daemonCache.observedAt < this.#daemonCacheMs) {
       return this.#daemonCache.value;
     }
-    let result = parseDaemonVersion((await this.#run(["app-server", "daemon", "version"])).stdout);
+    let result = await this.#readDaemonVersion();
     if (result.status !== "running" && start) {
       await this.#run(["app-server", "daemon", "start"]);
-      result = parseDaemonVersion((await this.#run(["app-server", "daemon", "version"])).stdout);
+      result = await this.#readDaemonVersion();
     }
     if (result.status === "running" && typeof result.socketPath === "string" && path.isAbsolute(result.socketPath)) {
       this.#daemonCache = { value: result, observedAt: this.#now() };
@@ -438,6 +438,17 @@ export class CodexProvider {
       this.#daemonCache = null;
     }
     return result;
+  }
+
+  // `daemon version` reads the control socket, so a stopped daemon has no JSON form:
+  // codex 0.152.1-0.155.0 exit non-zero with a plain connect error whether the socket
+  // file is stale or missing entirely (2026-09-18 measured). A non-zero exit is the
+  // only signal for "stopped"; a successful run still must match the JSON contract.
+  async #readDaemonVersion() {
+    let stdout;
+    try { ({ stdout } = await this.#run(["app-server", "daemon", "version"])); }
+    catch { return { status: "stopped" }; }
+    return parseDaemonVersion(stdout);
   }
 
   async #withClient(operation) {
