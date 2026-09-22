@@ -27,12 +27,17 @@ provider 세션을 소유하지 않습니다. 새 세션을 시작하기 전 선
   기존 세션을 감시하거나 턴마다 모델을 교체하지 않습니다. `Alt+S` 실행 설정 화면은
   Claude의 permission mode·실행 플래그와 Codex의 approval policy·sandbox·reviewer·
   summary·세부 승인 항목을 provider별로 라디오/체크박스로 편집합니다. 저장된 값은 새
-  세션 생성 시에만 각 provider 공개 경계로 전달합니다. Codex `Alt+Y`는 이 설정의
+  세션 생성 시 각 provider 공개 경계로 전달합니다. Codex `Alt+Y`는 이 설정의
   approval policy와 sandbox를 기본값↔YOLO로 빠르게 바꾸는 호환 단축키입니다. YOLO를
   선택하면 App Server `thread/start`와 첫 `turn/start`에 각각
   `approvalPolicy=never`, `sandbox=danger-full-access`와
-  `sandboxPolicy={type:dangerFullAccess}`를 전달합니다. 기존 세션·`send`·`ask`에는
-  적용하지 않습니다.
+  `sandboxPolicy={type:dangerFullAccess}`를 전달합니다. 또한 YOLO가 켜진 동안 기존 Codex
+  세션을 Dock에서 열면 명시적 `--remote`를 쓰지 않고 로컬 daemon 자동 탐색과
+  `--dangerously-bypass-approvals-and-sandbox`로 같은 실행 모드를 다시 적용합니다.
+  Codex는 명시적 remote resume의 권한 덮어쓰기를 거부하며, 권한을 생략한 재접속이
+  저장된 YOLO 대신 제한 프로필을 적용한 실측이 있기 때문입니다. 다른 기존 세션 설정과
+  `send`·`ask`에는 적용하지 않습니다. 이미 실행 중인 Dock 화면은 재사용하며,
+  새 설정은 F4 재접속 시 적용합니다.
 
 ## 요청 상태와 복구
 

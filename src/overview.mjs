@@ -932,7 +932,7 @@ export async function runOverview({
       }
       settingsWarning = null;
       notice = next === CODEX_EXECUTION_MODES.YOLO
-        ? "Codex 새 세션을 YOLO로 켰습니다. 승인과 샌드박스 제한이 해제됩니다. Alt+Y로 끌 수 있습니다."
+        ? "Codex 생성·열기를 YOLO로 켰습니다. 승인과 샌드박스 제한이 해제됩니다. 기존 화면은 F4 재접속 시 적용됩니다. Alt+Y로 끌 수 있습니다."
         : "Codex 새 세션을 기본 실행 모드로 되돌렸습니다.";
     } catch (error) {
       settingsWarning = { provider: "waga", message: `실행 설정을 저장하지 못했습니다: ${error.message}` };
@@ -1119,7 +1119,7 @@ export async function runOverview({
     notice = force ? `${target.name} 세션에 다시 연결하는 중입니다.` : `${target.name} 세션을 여는 중입니다.`;
     render();
     nativeOpen = true;
-    void Promise.resolve().then(() => commandFor(target))
+    void Promise.resolve().then(() => commandFor(target, { codexExecutionMode }))
       .then((command) => {
         if (!closed) return workspace.focusOrOpen(target, command, {
           force, knownNativeIds: allSessions.filter((session) => session.provider === "codex").map((session) => session.nativeId),

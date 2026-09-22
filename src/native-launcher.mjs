@@ -24,7 +24,7 @@ export function nativeAgentsCommand(provider, { cwd = process.cwd() } = {}) {
   return { command, args, cwd: workspace };
 }
 
-export async function nativeSessionCommand(session, { codexProvider = new CodexProvider() } = {}) {
+export async function nativeSessionCommand(session, { codexProvider = new CodexProvider(), codexExecutionMode } = {}) {
   if (!session || !["claude", "codex"].includes(session.provider)) {
     throw Object.assign(new Error("Native session requires a known provider"), { code: "PROVIDER_NOT_FOUND" });
   }
@@ -44,10 +44,15 @@ export async function nativeSessionCommand(session, { codexProvider = new CodexP
   if (daemon.status !== "running" || typeof daemon.socketPath !== "string" || !path.isAbsolute(daemon.socketPath)) {
     throw Object.assign(new Error("Codex native app-server daemon is unavailable"), { code: "CODEX_DAEMON_UNAVAILABLE" });
   }
-  return {
-    command: "codex",
-    args: ["resume", session.nativeId, "--remote", `unix://${daemon.socketPath}`, "-C", cwd,
-      "-c", 'tui.terminal_title=["thread-id"]'],
-    cwd,
-  };
+  const args = ["resume", session.nativeId];
+  if (codexExecutionMode === "yolo") {
+    // An explicit --remote endpoint makes Codex treat the local daemon as a remote
+    // workspace, where resume permission overrides are rejected. Let Codex discover
+    // its local daemon and assert YOLO through the dedicated supported flag instead.
+    args.push("--dangerously-bypass-approvals-and-sandbox");
+  } else {
+    args.push("--remote", `unix://${daemon.socketPath}`);
+  }
+  args.push("-C", cwd, "-c", 'tui.terminal_title=["thread-id"]');
+  return { command: "codex", args, cwd };
 }

@@ -102,13 +102,18 @@ Waga는 선택한 값을 새 세션 생성 시 Claude CLI의 실행별 플래그
 `thread/start`·첫 `turn/start` 파라미터로 전달합니다. provider의 native 승인 화면과
 실행은 각 provider가 계속 소유합니다. `Alt+Y`는 Codex의 기본값과 YOLO
 (`approvalPolicy=never` + `sandbox=danger-full-access`)를 빠르게 전환하는 호환
-단축키입니다.
+단축키입니다. YOLO가 켜진 동안 기존 Codex 세션을 Dock에서 열 때도 Waga는 Codex의
+로컬 daemon 자동 탐색과 전용 `--dangerously-bypass-approvals-and-sandbox` 플래그로
+YOLO를 다시 명시합니다. 로컬 daemon을 `--remote`로 지정하면 Codex가 원격 resume로
+분류해 권한 덮어쓰기를 거부하거나 저장된 권한을 제한 모드로 되돌릴 수 있기 때문입니다.
+이미 실행 중인 Dock 화면은 그대로 재사용하므로, 변경한 설정을 적용하려면 F4로 재접속해야 합니다.
 
 설정은 `$XDG_CONFIG_HOME/wattari-gattari/settings.json`(기본값
 `~/.config/wattari-gattari/settings.json`)의 version 2 문서에 저장됩니다. 기존
 version 1 Codex 전환 설정은 읽을 때 provider 설정으로 변환되며, 파일이 없거나
-읽을 수 없으면 provider 기본값으로 닫힙니다. 기존 세션과 `send`·`ask`에는 영향을
-주지 않고, 다음에 만드는 Claude·Codex 세션부터 적용됩니다.
+읽을 수 없으면 provider 기본값으로 닫힙니다. `send`·`ask`에는 영향을 주지 않고,
+일반 설정은 다음에 만드는 Claude·Codex 세션부터 적용됩니다. 단, Codex YOLO 조합은
+위 재접속 회귀를 막기 위해 Dock에서 기존 Codex 세션을 열 때도 적용됩니다.
 
 ## Dock 조작
 

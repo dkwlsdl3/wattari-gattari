@@ -50,3 +50,23 @@ test("a resumed Codex view carries no permission overrides", async () => {
   const spec = await nativeSessionCommand({ provider: "codex", nativeId: "thread-1", cwd: "/work" }, { codexProvider });
   assert.deepEqual(spec.args.filter((arg) => /^(approval_policy|sandbox_mode)=/.test(String(arg))), []);
 });
+
+test("a YOLO Codex view uses local daemon discovery and the dedicated bypass flag", async () => {
+  const codexProvider = {
+    async daemonInfo(options) {
+      assert.deepEqual(options, { start: true });
+      return { status: "running", socketPath: "/tmp/codex.sock" };
+    },
+  };
+  const spec = await nativeSessionCommand(
+    { provider: "codex", nativeId: "thread-1", cwd: "/work" },
+    { codexProvider, codexExecutionMode: "yolo" },
+  );
+  assert.deepEqual(spec, {
+    command: "codex",
+    args: ["resume", "thread-1", "--dangerously-bypass-approvals-and-sandbox", "-C", path.resolve("/work"),
+      "-c", 'tui.terminal_title=["thread-id"]'],
+    cwd: path.resolve("/work"),
+  });
+  assert.equal(spec.args.includes("--remote"), false);
+});
