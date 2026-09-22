@@ -175,6 +175,25 @@ test("focusOrOpen reuses live mapped sessions and creates only missing views", a
   assert.ok(calls.some((args) => args[0] === "set-window-option" && args.includes("window-status-current-format") && args.at(-1).includes("#{window_name}")));
 });
 
+test("renameSessionView updates the existing native window title", async () => {
+  const calls = [];
+  const workspace = new TmuxWorkspace({
+    env: { WAGA_TMUX_SESSION: "waga-proof" },
+    run: async (args) => {
+      calls.push(args);
+      if (args[0] === "list-windows") return { code: 0, stdout: "@7\tcodex:known\t0\n" };
+      return { code: 0, stdout: "", stderr: "" };
+    },
+  });
+
+  assert.deepEqual(await workspace.renameSessionView({
+    id: "codex:known", provider: "codex", name: "Cargo Rust 용량 문제 해결",
+  }), { renamed: true, windowId: "@7" });
+  assert.deepEqual(calls.find((args) => args[0] === "rename-window"), [
+    "rename-window", "-t", "@7", "Codex · Cargo Rust 용량 문제 해결",
+  ]);
+});
+
 test("native navigation from Claude session one to two cannot reuse session one's stale mapping", async () => {
   const calls = [];
   let visible = "session-two";

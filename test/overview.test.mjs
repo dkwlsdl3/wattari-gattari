@@ -1253,6 +1253,7 @@ for (const nameSync of [undefined, "pending", "local"]) test(`F2 renames the sel
   const output = capturedOutput();
   let discovered = [{ id: "claude:full-id", nativeId: "1234abcd", provider: "claude", status: "idle", name: "검토 👩‍💻", cwd: "/work/new", updatedAt: 1 }];
   let renamed = null;
+  let viewRenamed = null;
   let resolveRename;
   const renameCalled = new Promise((resolve) => { resolveRename = resolve; });
   const bridge = {
@@ -1266,6 +1267,7 @@ for (const nameSync of [undefined, "pending", "local"]) test(`F2 renames the sel
   };
   const workspace = {
     async focusOrOpen() {},
+    async renameSessionView(session) { viewRenamed = session; },
     async leave() { return { closeOverview: true }; },
   };
   const running = runOverview({ bridge, workspace, defaultCwd: "/work/new", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
@@ -1283,6 +1285,7 @@ for (const nameSync of [undefined, "pending", "local"]) test(`F2 renames the sel
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(renamed, { target: "claude:full-id", name: "검토 세션", options: {} });
+  assert.deepEqual({ id: viewRenamed?.id, name: viewRenamed?.name }, { id: "claude:full-id", name: "검토 세션" });
   assert.equal(selectedSessionName(output), "검토");
   assert.match(plain(output.writes.at(-1)), /이름을 '검토 세션'\(으\)로 변경했습니다/);
   if (nameSync === "pending") assert.match(plain(output.writes.at(-1)), /다음 프롬프트/);

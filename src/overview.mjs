@@ -1053,12 +1053,19 @@ export async function runOverview({
     void (async () => {
       try {
         const result = await bridge.rename(draft.session.id, draft.name, scope);
+        let viewRenameWarning = null;
+        try {
+          await workspace.renameSessionView?.({ ...draft.session, name: result.name ?? draft.name });
+        } catch (error) {
+          viewRenameWarning = { provider: "waga", message: `세션 창 제목을 갱신하지 못했습니다: ${error.message}` };
+        }
         renameTask = null;
         selectedKey = draft.session.id;
         await refresh({ whileBusy: true, force: true });
         notice = `세션 이름을 '${draft.name}'(으)로 변경했습니다.`;
         if (result.nameSync === "pending") notice += " Claude에는 다음 프롬프트에서 반영 요청됩니다.";
         else if (result.nameSync === "local") notice += " Waga 로컬 이름만 변경했습니다.";
+        if (viewRenameWarning) warnings = [viewRenameWarning, ...warnings];
       } catch (error) {
         renameTask = { ...draft, submitting: false, error: error.message };
       } finally {

@@ -266,7 +266,6 @@ export class TmuxWorkspace {
     if (!/^@[0-9]+$/.test(windowId)) throw Object.assign(new Error("tmux did not return the native session window id"), { code: "TMUX_WINDOW_FAILED" });
     try {
       await this.#setSessionWindowMetadata(windowId, session, commandSpec);
-      await this.#call(["set-window-option", "-t", windowId, "automatic-rename", "off"]);
       await this.#styleWindow([], windowId);
       if (shared && (session.provider ?? session.id.split(":", 1)[0]) === "codex") await select(windowId);
       if (shared) await this.#waitForSettledFrame(windowId);
@@ -279,6 +278,17 @@ export class TmuxWorkspace {
       throw error;
     }
     return { reused: false, windowId };
+  }
+
+  async renameSessionView(session) {
+    const sessionName = await this.#currentSessionName();
+    const storageName = this.#env.WAGA_TMUX_INDEPENDENT === "1" ? retainedSessionName(session.id) : sessionName;
+    const listed = await this.#call(["list-windows", "-t", storageName, "-F", "#{window_id}\t#{@waga_session_id}\t#{pane_dead}"], { check: false });
+    if (listed.code !== 0) return { renamed: false };
+    const existing = parseWindows(listed.stdout).find((entry) => entry.sessionId === session.id);
+    if (!existing) return { renamed: false };
+    await this.#setSessionWindowName(existing.windowId, session);
+    return { renamed: true, windowId: existing.windowId };
   }
 
   async #selectView(sessionName, windowId, shared = false) {
@@ -437,6 +447,12 @@ export class TmuxWorkspace {
     const projectCwd = path.resolve(session.projectCwd ?? commandSpec.cwd);
     await this.#call(["set-window-option", "-t", windowId, "@waga_provider", provider]);
     await this.#call(["set-window-option", "-t", windowId, "@waga_project_cwd", projectCwd]);
+    await this.#setSessionWindowName(windowId, session);
+  }
+
+  async #setSessionWindowName(windowId, session) {
+    await this.#call(["set-window-option", "-t", windowId, "automatic-rename", "off"]);
+    await this.#call(["rename-window", "-t", windowId, safeWindowName(session)]);
   }
 
   async #waitForSettledFrame(windowId) {
