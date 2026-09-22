@@ -231,7 +231,7 @@ test("overview formats and displays cached Codex weekly usage", () => {
   assert.match(frame, /Codex 주간 2% 남음 · 9\/7 11:24 초기화/);
 });
 
-test("Alt+Y toggles and persists the Codex execution mode for creating and opening sessions", async (t) => {
+test("Alt+Y toggles and persists the Codex execution mode for new sessions", async (t) => {
   const input = ttyInput();
   t.after(() => input.emit("end"));
   const output = capturedOutput();
@@ -252,7 +252,7 @@ test("Alt+Y toggles and persists the Codex execution mode for creating and openi
   assert.match(plain(output.writes.at(-1)), /Codex 새 세션: 기본값/);
   pressAlt(input, "y");
   assert.equal(mode, "yolo");
-  assert.match(plain(output.writes.at(-1)), /Codex 생성·열기: YOLO/);
+  assert.match(plain(output.writes.at(-1)), /Codex 새 세션: YOLO/);
   assert.match(plain(output.writes.at(-1)), /승인과 샌드박스 제한이 해제됩니다/);
 
   pressAlt(input, "n");
@@ -714,7 +714,6 @@ test("F4 forces an exact native session reattach", async () => {
   const input = ttyInput();
   const output = capturedOutput();
   const calls = [];
-  let commandOptions;
   const bridge = { async discover() { return { sessions: [sessions[0]], warnings: [] }; } };
   const workspace = {
     async focusOrOpen(...args) { calls.push(args); },
@@ -723,12 +722,8 @@ test("F4 forces an exact native session reattach", async () => {
   const running = runOverview({
     bridge,
     workspace,
-    settingsStore: { load: () => ({ codexExecutionMode: "yolo" }) },
     defaultCwd: "/work/api",
-    commandFor: async (_session, options) => {
-      commandOptions = options;
-      return { command: "codex", args: ["resume", "codex:1"], cwd: "/work/api" };
-    },
+    commandFor: async () => ({ command: "codex", args: ["resume", "codex:1"], cwd: "/work/api" }),
     inputStream: input,
     outputStream: output,
     refreshMs: 60_000,
@@ -741,7 +736,6 @@ test("F4 forces an exact native session reattach", async () => {
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(calls[0][2], { force: true, knownNativeIds: [sessions[0].nativeId] });
-  assert.deepEqual(commandOptions, { codexExecutionMode: "yolo" });
   pressAlt(input, "q");
   assert.equal(await running, 0);
 });
