@@ -1112,7 +1112,7 @@ export async function runOverview({
     notice = force ? `${target.name} 세션에 다시 연결하는 중입니다.` : `${target.name} 세션을 여는 중입니다.`;
     render();
     nativeOpen = true;
-    void Promise.resolve().then(() => commandFor(target, { executionSettings: providerSettings?.[target.provider] ?? null }))
+    void Promise.resolve().then(() => commandFor(target))
       .then((command) => {
         if (!closed) return workspace.focusOrOpen(target, command, {
           force, knownNativeIds: allSessions.filter((session) => session.provider === "codex").map((session) => session.nativeId),

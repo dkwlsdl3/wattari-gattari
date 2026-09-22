@@ -24,7 +24,7 @@ export function nativeAgentsCommand(provider, { cwd = process.cwd() } = {}) {
   return { command, args, cwd: workspace };
 }
 
-export async function nativeSessionCommand(session, { codexProvider = new CodexProvider(), executionSettings = null } = {}) {
+export async function nativeSessionCommand(session, { codexProvider = new CodexProvider() } = {}) {
   if (!session || !["claude", "codex"].includes(session.provider)) {
     throw Object.assign(new Error("Native session requires a known provider"), { code: "PROVIDER_NOT_FOUND" });
   }
@@ -47,21 +47,7 @@ export async function nativeSessionCommand(session, { codexProvider = new CodexP
   return {
     command: "codex",
     args: ["resume", session.nativeId, "--remote", `unix://${daemon.socketPath}`, "-C", cwd,
-      "-c", 'tui.terminal_title=["thread-id"]', ...codexResumeConfigOverrides(executionSettings)],
+      "-c", 'tui.terminal_title=["thread-id"]'],
     cwd,
   };
-}
-
-// A resumed thread keeps the policy it was created with, and the frontend is spawned
-// without a shell, so an interactive-shell alias never reaches it. `-c` carries the same
-// TOML values as config.toml; `granular` has no scalar form, so it is left to the thread.
-export function codexResumeConfigOverrides(settings) {
-  const overrides = [];
-  if (["untrusted", "on-request", "never"].includes(settings?.approvalPolicy)) {
-    overrides.push("-c", `approval_policy="${settings.approvalPolicy}"`);
-  }
-  if (["read-only", "workspace-write", "danger-full-access"].includes(settings?.sandbox)) {
-    overrides.push("-c", `sandbox_mode="${settings.sandbox}"`);
-  }
-  return overrides;
 }

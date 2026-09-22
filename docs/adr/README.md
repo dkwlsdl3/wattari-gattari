@@ -67,10 +67,11 @@ assistant text 또는 원래 socket으로 보내는 SendMessage 본문에 있는
 - Codex: 기존 native App Server daemon의 Agents 소유 최상위 세션만 사용하며,
   세션 생성·resume·archive와 메시지 전달도 그 daemon에 위임합니다. 일반 CLI나
   VSCode 대화 기록은 dock에 섞지 않습니다.
-- Codex 승인 정책·샌드박스는 세션 생성과 화면 연결 양쪽에 전달합니다. 생성은 thread·turn
-  인자로, 연결은 `codex resume`의 `-c` 덮어쓰기로 보냅니다. 대화형 셸 alias는 spawn 경로에
-  닿지 않으므로 전달 수단으로 쓰지 않습니다. 이미 만들어진 스레드의 생성 시점 정책은
-  소급해서 바꾸지 않습니다.
+- Codex 승인 정책·샌드박스는 세션을 만들 때만 전달합니다. 화면 연결은 `--remote`로 daemon의
+  스레드에 붙는 것이므로 권한 덮어쓰기를 실을 수 없습니다. 실으면 codex가
+  `Permission overrides are not supported when resuming a remote task.`로 거부해 연결 자체가
+  깨집니다(2026-09-22 codex 0.155.1 실측). 이미 만들어진 스레드의 정책은 daemon이 소유하며
+  waga가 소급해서 바꾸지 않습니다. 연결 시점 정책을 바꾸려면 codex 전역 설정을 씁니다.
 - Dock 목록은 provider별로 독립 갱신합니다. 한쪽 조회가 대기 중이어도 다른 쪽은 계속
   갱신하며, 같은 provider의 조회는 중복 실행하지 않습니다. 미조회·오류 provider의 기존
   세션과 경고는 유지하고, 해당 provider의 성공한 조회에서 두 번 누락된 세션만 제거합니다.
