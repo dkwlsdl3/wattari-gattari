@@ -9,8 +9,8 @@ export function isCodexExecutionMode(value) {
 
 export function codexExecutionLabel(mode) {
   return mode === CODEX_EXECUTION_MODES.YOLO
-    ? "Codex 새 세션: YOLO (승인·샌드박스 해제)"
-    : "Codex 새 세션: 기본값";
+    ? "Codex 선택 실행: YOLO (새 세션·F4)"
+    : "Codex 선택 실행: 기본값 (새 세션·F4)";
 }
 
 export function applyCodexExecutionMode(target, mode, phase) {

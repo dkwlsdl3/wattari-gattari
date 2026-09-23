@@ -1,11 +1,11 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
-import { promisify } from "node:util";
+import { isDeepStrictEqual, promisify } from "node:util";
 
 import { buildPeerEnvelope } from "../bridge/envelope.mjs";
 import { readBeforeDeadline } from "../bridge/deadline.mjs";
 import { CodexAppServerClient } from "../codex-app-server.mjs";
-import { applyCodexExecutionMode } from "../codex-execution.mjs";
+import { applyCodexExecutionMode, CODEX_EXECUTION_MODES, isCodexExecutionMode } from "../codex-execution.mjs";
 import { applyCodexExecutionSettings } from "../provider-execution.mjs";
 import { EventLog } from "../event-log.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
@@ -278,6 +278,50 @@ export class CodexProvider {
     });
   }
 
+  async prepareNativeSession(session, executionMode) {
+    if (!isCodexExecutionMode(executionMode)) {
+      throw Object.assign(new TypeError("Unknown Codex execution mode"), { code: "CODEX_EXECUTION_MODE_INVALID" });
+    }
+    return this.#withClient(async (client, daemon) => {
+      const threadId = session.nativeId;
+      let approvalPolicy;
+      let sandboxPolicy;
+      if (executionMode === CODEX_EXECUTION_MODES.YOLO) {
+        approvalPolicy = "never";
+        sandboxPolicy = { type: "dangerFullAccess" };
+      } else {
+        const config = (await client.request("config/read", {}))?.config;
+        if (!config || typeof config !== "object") {
+          throw Object.assign(new Error("Codex config/read did not return configuration"), { code: "CODEX_CONFIG_INVALID" });
+        }
+        approvalPolicy = config.approval_policy ?? "on-request";
+        const sandbox = config.sandbox_mode ?? "workspace-write";
+        if (sandbox === "danger-full-access") sandboxPolicy = { type: "dangerFullAccess" };
+        else if (sandbox === "read-only") sandboxPolicy = { type: "readOnly", networkAccess: false };
+        else if (sandbox === "workspace-write") {
+          const settings = config.sandbox_workspace_write ?? {};
+          sandboxPolicy = {
+            type: "workspaceWrite",
+            writableRoots: settings.writable_roots ?? [],
+            networkAccess: settings.network_access ?? false,
+            excludeTmpdirEnvVar: settings.exclude_tmpdir_env_var ?? false,
+            excludeSlashTmp: settings.exclude_slash_tmp ?? false,
+          };
+        } else {
+          throw Object.assign(new Error(`Unsupported Codex sandbox mode: ${sandbox}`), { code: "CODEX_CONFIG_INVALID" });
+        }
+      }
+      await client.request("thread/settings/update", { threadId, approvalPolicy, sandboxPolicy });
+      const resumed = await client.request("thread/resume", { threadId, excludeTurns: true });
+      if (resumed?.thread?.id !== threadId || !isDeepStrictEqual(resumed.approvalPolicy, approvalPolicy)
+          || resumed.sandbox?.type !== sandboxPolicy.type
+          || ("networkAccess" in sandboxPolicy && resumed.sandbox?.networkAccess !== sandboxPolicy.networkAccess)) {
+        throw Object.assign(new Error("Codex thread permissions did not match the selected execution mode"), { code: "CODEX_PERMISSION_MISMATCH" });
+      }
+      return { socketPath: daemon.socketPath };
+    });
+  }
+
   async archive(session) {
     return this.#withClient(async (client) => {
       await client.request("thread/archive", { threadId: session.nativeId });
@@ -465,7 +509,7 @@ export class CodexProvider {
     }
     try {
       await client.initialize();
-      return await operation(client);
+      return await operation(client, daemon);
     } finally {
       await client.close();
     }

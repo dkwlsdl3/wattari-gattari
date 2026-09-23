@@ -1,7 +1,7 @@
 # Architecture decision
 
 - 상태: 채택
-- 갱신일: 2026-09-10
+- 갱신일: 2026-09-23
 
 ## 제품 경계
 
@@ -27,12 +27,15 @@ provider 세션을 소유하지 않습니다. 새 세션을 시작하기 전 선
   기존 세션을 감시하거나 턴마다 모델을 교체하지 않습니다. `Alt+S` 실행 설정 화면은
   Claude의 permission mode·실행 플래그와 Codex의 approval policy·sandbox·reviewer·
   summary·세부 승인 항목을 provider별로 라디오/체크박스로 편집합니다. 저장된 값은 새
-  세션 생성 시에만 각 provider 공개 경계로 전달합니다. Codex `Alt+Y`는 이 설정의
+  세션 생성 시 각 provider 공개 경계로 전달합니다. Codex `Alt+Y`는 이 설정의
   approval policy와 sandbox를 기본값↔YOLO로 빠르게 바꾸는 호환 단축키입니다. YOLO를
   선택하면 App Server `thread/start`와 첫 `turn/start`에 각각
   `approvalPolicy=never`, `sandbox=danger-full-access`와
-  `sandboxPolicy={type:dangerFullAccess}`를 전달합니다. 기존 세션·`send`·`ask`에는
-  적용하지 않습니다.
+  `sandboxPolicy={type:dangerFullAccess}`를 전달합니다. 기존 Codex 세션은 F4 재접속 시
+  같은 owning daemon의 같은 스레드에 `thread/settings/update`로 다음 턴 설정을 적용하고
+  `thread/resume`의 유효 승인·샌드박스 응답을 확인한 뒤 화면을 엽니다. 기본 모드는
+  `config/read`의 현재 기본 정책을 명시적으로 적용합니다. peer `send`·`ask`에는
+  Dock의 실행 모드를 적용하지 않습니다.
 
 ## 요청 상태와 복구
 
@@ -67,11 +70,13 @@ assistant text 또는 원래 socket으로 보내는 SendMessage 본문에 있는
 - Codex: 기존 native App Server daemon의 Agents 소유 최상위 세션만 사용하며,
   세션 생성·resume·archive와 메시지 전달도 그 daemon에 위임합니다. 일반 CLI나
   VSCode 대화 기록은 dock에 섞지 않습니다.
-- Codex 승인 정책·샌드박스는 세션을 만들 때만 전달합니다. 화면 연결은 `--remote`로 daemon의
-  스레드에 붙는 것이므로 권한 덮어쓰기를 실을 수 없습니다. 실으면 codex가
-  `Permission overrides are not supported when resuming a remote task.`로 거부해 연결 자체가
-  깨집니다(2026-09-22 codex 0.155.1 실측). 이미 만들어진 스레드의 정책은 daemon이 소유하며
-  waga가 소급해서 바꾸지 않습니다. 연결 시점 정책을 바꾸려면 codex 전역 설정을 씁니다.
+- Codex 화면은 `--remote`로 owning daemon의 원래 스레드에 붙습니다. remote CLI argv의
+  권한 플래그는 0.155.1에서 `Permission overrides are not supported when resuming a remote task.`로
+  거부됐습니다(2026-09-22 실측). 0.156.0 생성 App Server 스키마에는
+  `thread/settings/update`의 `approvalPolicy`·`sandboxPolicy`와 `thread/resume`의 유효
+  `approvalPolicy`·`sandbox`가 있습니다(2026-09-23 실측). F4는 이 공식 경계로 권한을
+  적용·검증하고, RPC 미지원·값 불일치·스레드 누락이면 화면 접속 전에 오류를 표시합니다.
+  `null` 설정은 기존 YOLO를 되돌리지 않았으므로 기본 모드도 명시적인 설정 변경입니다.
 - Dock 목록은 provider별로 독립 갱신합니다. 한쪽 조회가 대기 중이어도 다른 쪽은 계속
   갱신하며, 같은 provider의 조회는 중복 실행하지 않습니다. 미조회·오류 provider의 기존
   세션과 경고는 유지하고, 해당 provider의 성공한 조회에서 두 번 누락된 세션만 제거합니다.

@@ -27,9 +27,10 @@ test("native session commands attach exact provider sessions", async () => {
   assert.deepEqual(claude, { command: "claude", args: ["attach", "abc12345"], cwd: path.resolve("/tmp") });
 
   const codexProvider = {
-    async daemonInfo(options) {
-      assert.deepEqual(options, { start: true });
-      return { status: "running", socketPath: "/tmp/codex.sock" };
+    async prepareNativeSession(session, mode) {
+      assert.equal(session.nativeId, "thread-1");
+      assert.equal(mode, "default");
+      return { socketPath: "/tmp/codex.sock" };
     },
   };
   const codex = await nativeSessionCommand({ provider: "codex", nativeId: "thread-1", cwd: "/work" }, { codexProvider });
@@ -41,22 +42,29 @@ test("native session commands attach exact provider sessions", async () => {
   });
 });
 
-test("a resumed Codex view carries no permission overrides", async () => {
+test("a resumed Codex view carries no CLI permission overrides", async () => {
   // 2026-09-22, codex 0.155.1: `codex resume --remote` exits 1 with
   // "Permission overrides are not supported when resuming a remote task."
   // as soon as -c approval_policy or -c sandbox_mode is present, so passing the
   // dock's execution settings here breaks attaching outright.
-  const codexProvider = { async daemonInfo() { return { status: "running", socketPath: "/tmp/codex.sock" }; } };
+  const codexProvider = { async prepareNativeSession() { return { socketPath: "/tmp/codex.sock" }; } };
   const spec = await nativeSessionCommand({ provider: "codex", nativeId: "thread-1", cwd: "/work" }, { codexProvider });
   assert.deepEqual(spec.args.filter((arg) => /^(approval_policy|sandbox_mode)=/.test(String(arg))), []);
 });
 
-test("YOLO selection still resumes an existing Codex thread through its owning daemon", async () => {
-  const codexProvider = { async daemonInfo() { return { status: "running", socketPath: "/tmp/codex.sock" }; } };
+test("YOLO selection prepares the owning thread before remote resume", async () => {
+  const modes = [];
+  const codexProvider = { async prepareNativeSession(session, mode) { modes.push([session.nativeId, mode]); return { socketPath: "/tmp/codex.sock" }; } };
   const spec = await nativeSessionCommand(
     { provider: "codex", nativeId: "thread-1", cwd: "/work" },
     { codexProvider, codexExecutionMode: "yolo" },
   );
   assert.deepEqual(spec.args.slice(0, 4), ["resume", "thread-1", "--remote", "unix:///tmp/codex.sock"]);
+  assert.deepEqual(modes, [["thread-1", "yolo"]]);
   assert.equal(spec.args.includes("--dangerously-bypass-approvals-and-sandbox"), false);
+});
+
+test("failed permission preparation blocks F4 command creation", async () => {
+  const codexProvider = { async prepareNativeSession() { throw new Error("thread/settings/update unsupported"); } };
+  await assert.rejects(nativeSessionCommand({ provider: "codex", nativeId: "thread-1", cwd: "/work" }, { codexProvider, codexExecutionMode: "yolo" }), /unsupported/);
 });

@@ -527,6 +527,37 @@ test("Codex create rejects an unknown execution mode before submitting", async (
   assert.equal(calls.some(([method]) => method === "thread/start"), false);
 });
 
+test("existing Codex thread applies YOLO through settings update and verifies resume", async () => {
+  const { provider, calls } = harness((method, params) => {
+    if (method === "thread/settings/update") return {};
+    if (method === "thread/resume") return { thread: { id: params.threadId }, approvalPolicy: "never", sandbox: { type: "dangerFullAccess" } };
+    throw new Error(method);
+  });
+  assert.deepEqual(await provider.prepareNativeSession({ nativeId: "existing" }, "yolo"), { socketPath: "/tmp/codex.sock" });
+  assert.deepEqual(calls.find(([method]) => method === "thread/settings/update"), ["thread/settings/update", {
+    threadId: "existing", approvalPolicy: "never", sandboxPolicy: { type: "dangerFullAccess" },
+  }]);
+  assert.deepEqual(calls.find(([method]) => method === "thread/resume"), ["thread/resume", { threadId: "existing", excludeTurns: true }]);
+});
+
+test("existing Codex thread restores daemon defaults and rejects a silent permission mismatch", async () => {
+  const { provider, calls } = harness((method, params) => {
+    if (method === "config/read") return { config: { approval_policy: "on-request", sandbox_mode: "read-only" } };
+    if (method === "thread/settings/update") return {};
+    if (method === "thread/resume") return { thread: { id: params.threadId }, approvalPolicy: "never", sandbox: { type: "dangerFullAccess" } };
+    throw new Error(method);
+  });
+  await assert.rejects(provider.prepareNativeSession({ nativeId: "existing" }, "default"), { code: "CODEX_PERMISSION_MISMATCH" });
+  assert.deepEqual(calls.find(([method]) => method === "thread/settings/update"), ["thread/settings/update", {
+    threadId: "existing", approvalPolicy: "on-request", sandboxPolicy: { type: "readOnly", networkAccess: false },
+  }]);
+});
+
+test("unsupported settings update fails before native Codex reconnect", async () => {
+  const { provider } = harness((method) => { throw new Error(`${method} unsupported`); });
+  await assert.rejects(provider.prepareNativeSession({ nativeId: "existing" }, "yolo"), /thread\/settings\/update unsupported/);
+});
+
 test("Codex archive uses the App Server archive boundary and keeps delete separate", async () => {
   const { provider, calls } = harness((method) => {
     if (method === "thread/archive") return {};

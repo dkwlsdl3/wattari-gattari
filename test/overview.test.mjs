@@ -249,11 +249,11 @@ test("Alt+Y toggles and persists the Codex execution mode for new sessions", asy
   const running = runOverview({ bridge, settingsStore, workspace, defaultCwd: "/work/new", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.match(plain(output.writes.at(-1)), /Codex 새 세션: 기본값/);
+  assert.match(plain(output.writes.at(-1)), /Codex 선택 실행: 기본값/);
   pressAlt(input, "y");
   assert.equal(mode, "yolo");
-  assert.match(plain(output.writes.at(-1)), /Codex 새 세션: YOLO/);
-  assert.match(plain(output.writes.at(-1)), /승인과 샌드박스 제한이 해제됩니다/);
+  assert.match(plain(output.writes.at(-1)), /Codex 선택 실행: YOLO/);
+  assert.match(plain(output.writes.at(-1)), /F4에서 권한 적용을 확인합니다/);
 
   pressAlt(input, "n");
   input.emit("keypress", "", { name: "tab" });
@@ -343,7 +343,7 @@ test("unreadable execution settings fail closed and remain visible as a warning"
   });
   await new Promise((resolve) => setImmediate(resolve));
   const frame = plain(output.writes.at(-1));
-  assert.match(frame, /Codex 새 세션: 기본값/);
+  assert.match(frame, /Codex 선택 실행: 기본값/);
   assert.match(frame, /실행 설정을 읽지 못했습니다: settings unavailable/);
   input.emit("end");
   assert.equal(await running, 0);
@@ -714,6 +714,12 @@ test("F4 forces an exact native session reattach", async () => {
   const input = ttyInput();
   const output = capturedOutput();
   const calls = [];
+  const commands = [];
+  let mode = "default";
+  const settingsStore = {
+    load: () => ({ codexExecutionMode: mode }),
+    toggleCodexExecutionMode: () => { mode = "yolo"; return mode; },
+  };
   const bridge = { async discover() { return { sessions: [sessions[0]], warnings: [] }; } };
   const workspace = {
     async focusOrOpen(...args) { calls.push(args); },
@@ -722,8 +728,9 @@ test("F4 forces an exact native session reattach", async () => {
   const running = runOverview({
     bridge,
     workspace,
+    settingsStore,
     defaultCwd: "/work/api",
-    commandFor: async () => ({ command: "codex", args: ["resume", "codex:1"], cwd: "/work/api" }),
+    commandFor: async (...args) => { commands.push(args); return { command: "codex", args: ["resume", "codex:1"], cwd: "/work/api" }; },
     inputStream: input,
     outputStream: output,
     refreshMs: 60_000,
@@ -731,11 +738,40 @@ test("F4 forces an exact native session reattach", async () => {
   });
   await new Promise((resolve) => setImmediate(resolve));
   input.emit("keypress", "", { name: "down" });
+  pressAlt(input, "y");
 
   input.emit("keypress", "", { name: "f4" });
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(calls[0][2], { force: true, knownNativeIds: [sessions[0].nativeId] });
+  assert.deepEqual(commands[0][1], { codexExecutionMode: "yolo" });
+  pressAlt(input, "q");
+  assert.equal(await running, 0);
+});
+
+test("F4 reports a permission failure before opening the native view", async () => {
+  const input = ttyInput();
+  const output = capturedOutput();
+  let opens = 0;
+  const running = runOverview({
+    bridge: { async discover() { return { sessions: [sessions[0]], warnings: [] }; } },
+    workspace: {
+      async focusOrOpen() { opens += 1; },
+      async leave() { return { closeOverview: true }; },
+    },
+    commandFor: async () => { throw new Error("Codex thread/settings/update unsupported"); },
+    defaultCwd: "/work/api",
+    inputStream: input,
+    outputStream: output,
+    refreshMs: 60_000,
+    listenForSignals: false,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", "", { name: "f4" });
+  await waitFor(() => /F4 접속 실패/.test(plain(output.writes.at(-1))));
+  assert.match(plain(output.writes.at(-1)), /thread\/settings\/update unsupported/);
+  assert.equal(opens, 0);
   pressAlt(input, "q");
   assert.equal(await running, 0);
 });

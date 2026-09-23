@@ -932,8 +932,8 @@ export async function runOverview({
       }
       settingsWarning = null;
       notice = next === CODEX_EXECUTION_MODES.YOLO
-        ? "Codex 새 세션을 YOLO로 켰습니다. 승인과 샌드박스 제한이 해제됩니다. Alt+Y로 끌 수 있습니다."
-        : "Codex 새 세션을 기본 실행 모드로 되돌렸습니다.";
+        ? "Codex 새 세션과 F4 재접속에 YOLO를 선택했습니다. 기존 세션은 F4에서 권한 적용을 확인합니다."
+        : "Codex 새 세션과 F4 재접속에 기본 실행 모드를 선택했습니다.";
     } catch (error) {
       settingsWarning = { provider: "waga", message: `실행 설정을 저장하지 못했습니다: ${error.message}` };
       notice = "실행 설정을 바꾸지 못했습니다.";
@@ -1119,13 +1119,16 @@ export async function runOverview({
     notice = force ? `${target.name} 세션에 다시 연결하는 중입니다.` : `${target.name} 세션을 여는 중입니다.`;
     render();
     nativeOpen = true;
-    void Promise.resolve().then(() => commandFor(target))
+    void Promise.resolve().then(() => commandFor(target, { codexExecutionMode }))
       .then((command) => {
         if (!closed) return workspace.focusOrOpen(target, command, {
           force, knownNativeIds: allSessions.filter((session) => session.provider === "codex").map((session) => session.nativeId),
         });
       })
-      .catch((error) => { warnings = [{ provider: target.provider, message: error.message }]; })
+      .catch((error) => {
+        notice = `${target.name} F4 접속 실패: ${error.message}`;
+        warnings = [{ provider: target.provider, message: `F4 접속 실패: ${error.message}` }];
+      })
       .finally(() => { busy = false; nativeOpen = false; render(); });
   };
 
