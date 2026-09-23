@@ -278,11 +278,14 @@ export class CodexProvider {
     });
   }
 
-  async prepareNativeSession(session, executionMode) {
+  async prepareNativeSession(session, executionMode, { socketPath } = {}) {
     if (!isCodexExecutionMode(executionMode)) {
       throw Object.assign(new TypeError("Unknown Codex execution mode"), { code: "CODEX_EXECUTION_MODE_INVALID" });
     }
     return this.#withClient(async (client, daemon) => {
+      if (socketPath && daemon.socketPath !== socketPath) {
+        throw Object.assign(new Error("Codex owning daemon changed before permission synchronization"), { code: "CODEX_DAEMON_CHANGED" });
+      }
       const threadId = session.nativeId;
       let approvalPolicy;
       let sandboxPolicy;

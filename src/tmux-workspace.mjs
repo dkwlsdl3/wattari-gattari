@@ -20,6 +20,7 @@ const EXIT_COMMAND = "printf '%s\\n' 'Waga frontend를 종료했습니다. Claud
 const VIEW_SETTLE_POLL_MS = 40;
 const VIEW_SETTLE_MAX_POLLS = 50;
 const VIEW_SETTLE_STABLE_POLLS = 6;
+const CODEX_ATTACH_TIMEOUT_MS = 30_000;
 export const GLOBAL_DOCK_SESSION = "waga-global";
 
 function sourceFiles(directory, root = directory) {
@@ -192,6 +193,15 @@ export class TmuxWorkspace {
       ? parseWindows(listed.code === 0 ? listed.stdout : "")[0]
       : parseWindows(listed.stdout).find((entry) => entry.sessionId === session.id);
     const select = (windowId) => this.#selectView(sessionName, windowId, shared);
+    const stagedCodex = (session.provider ?? session.id.split(":", 1)[0]) === "codex"
+      && typeof commandSpec.afterAttach === "function";
+    const finish = async (windowId, launched) => {
+      if (stagedCodex) {
+        if (launched) await this.#waitForCodexAttach(windowId, session.nativeId);
+        await commandSpec.afterAttach();
+      }
+      await select(windowId);
+    };
     // Do not respawn a frontend being used by another terminal during navigation.
     const visible = shared && existing && !existing.paneDead
       ? await this.#call(["display-message", "-p", "-t", existing.windowId, "#{window_active_clients}"], { check: false }) : null;
@@ -200,7 +210,7 @@ export class TmuxWorkspace {
     if (inUse && force) throw viewInUse();
     if (shared && existing && !existing.paneDead && !force && existing.sessionId !== session.id) {
       // The winning creator may still be starting the frontend. Never spawn it twice.
-      await select(existing.windowId);
+      await finish(existing.windowId, true);
       return { reused: true, windowId: existing.windowId };
     }
     let changedView = false;
@@ -222,7 +232,7 @@ export class TmuxWorkspace {
     if (inUse && changedView) throw viewInUse();
     if (existing && !existing.paneDead && !force && !changedView) {
       await this.#setSessionWindowMetadata(existing.windowId, session, commandSpec);
-      await select(existing.windowId);
+      await finish(existing.windowId, false);
       return { reused: true, windowId: existing.windowId };
     }
     if (existing) {
@@ -236,15 +246,15 @@ export class TmuxWorkspace {
         // Without -k, tmux atomically refuses a second opener once the pane is live.
         const current = await this.#call(["display-message", "-p", "-t", existing.windowId, "#{pane_dead}"]);
         if (current.stdout.trim() !== "0") throw Object.assign(new Error(revived.stderr || "Cannot revive frontend"), { code: "TMUX_WINDOW_FAILED" });
-        await select(existing.windowId);
+        await finish(existing.windowId, false);
         return { reused: true, windowId: existing.windowId };
       }
       await this.#setSessionWindowMetadata(existing.windowId, session, commandSpec);
       this.#eventLog.record("session_view_respawned", { sessionId: session.id, windowId: existing.windowId, reason });
-      if (shared && (session.provider ?? session.id.split(":", 1)[0]) === "codex") await select(existing.windowId);
+      if (shared && (session.provider ?? session.id.split(":", 1)[0]) === "codex" && !stagedCodex) await select(existing.windowId);
       await this.#waitForSettledFrame(existing.windowId);
       await this.#call(["set-window-option", "-t", existing.windowId, "@waga_session_id", session.id]);
-      await select(existing.windowId);
+      await finish(existing.windowId, true);
       return { reused: true, windowId: existing.windowId };
     }
 
@@ -259,7 +269,7 @@ export class TmuxWorkspace {
       const winner = await this.#call(["list-windows", "-t", storageName, "-F", "#{window_id}"]);
       const windowId = winner.stdout.trim();
       if (!/^@[0-9]+$/.test(windowId)) throw Object.assign(new Error(created.stderr || "Cannot open retained frontend"), { code: "TMUX_WINDOW_FAILED" });
-      await select(windowId);
+      await finish(windowId, true);
       return { reused: true, windowId };
     }
     const windowId = created.stdout.trim();
@@ -267,11 +277,11 @@ export class TmuxWorkspace {
     try {
       await this.#setSessionWindowMetadata(windowId, session, commandSpec);
       await this.#styleWindow([], windowId);
-      if (shared && (session.provider ?? session.id.split(":", 1)[0]) === "codex") await select(windowId);
+      if (shared && (session.provider ?? session.id.split(":", 1)[0]) === "codex" && !stagedCodex) await select(windowId);
       if (shared) await this.#waitForSettledFrame(windowId);
       await this.#call(["set-window-option", "-t", windowId, "@waga_session_id", session.id]);
       this.#eventLog.record("session_view_opened", { sessionId: session.id, windowId, reason: "dock_open" });
-      await select(windowId);
+      await finish(windowId, true);
     } catch (error) {
       // A shared frontend may already be linked by another opener; retain it on failure.
       if (!shared) { try { await this.#call(["kill-window", "-t", windowId]); } catch {} }
@@ -430,7 +440,7 @@ export class TmuxWorkspace {
       ...commandSpec.args,
     ];
     if (provider === "codex" && this.#env.WAGA_TMUX_INDEPENDENT === "1") {
-      return shellCommand("env", ["WAGA_WAIT_FOR_VISIBLE=1", this.#nodePath, ...args]);
+      return shellCommand("env", [`WAGA_WAIT_FOR_VISIBLE=${commandSpec.afterAttach ? "0" : "1"}`, this.#nodePath, ...args]);
     }
     return this.#colorCommand(provider, this.#nodePath, args);
   }
@@ -468,6 +478,22 @@ export class TmuxWorkspace {
       await this.#wait(VIEW_SETTLE_POLL_MS);
     }
     return false;
+  }
+
+  async #waitForCodexAttach(windowId, nativeId) {
+    const deadline = Date.now() + CODEX_ATTACH_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const state = await this.#call(["display-message", "-p", "-t", windowId, "#{pane_dead}\t#{pane_title}"], { check: false });
+      if (state.code !== 0) throw Object.assign(new Error("Codex frontend disappeared during attach"), { code: "CODEX_ATTACH_FAILED" });
+      const [dead, title] = state.stdout.trim().split("\t", 2);
+      if (dead === "1") throw Object.assign(new Error("Codex frontend exited before attach completed"), { code: "CODEX_ATTACH_FAILED" });
+      const captured = await this.#call(["capture-pane", "-p", "-t", windowId], { check: false });
+      const frame = captured.code === 0 ? captured.stdout : "";
+      if (retainedCodexViewState(nativeId, title, frame) === "same"
+          && frame.includes("›") && !/Resuming session|Trust this folder\?/.test(frame)) return;
+      await this.#wait(VIEW_SETTLE_POLL_MS);
+    }
+    throw Object.assign(new Error("Codex frontend did not finish attaching before permission synchronization"), { code: "CODEX_ATTACH_TIMEOUT" });
   }
 
   async #configure(prefix, sessionName, mode) {

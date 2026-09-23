@@ -262,3 +262,40 @@ test("real tmux independent docks share frontends while selection, resize and ex
   await right.leave();
   assert.equal(await checked(["display-message", "-p", "-t", windowId, "#{pane_pid}"]), panePid);
 });
+
+test("Codex selection waits for post-attach permission checks on new, forced, dead, and reused views", { skip: !hasTmux, timeout: 30_000 }, async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-attach-gate-"));
+  const prefix = ["-S", path.join(root, "tmux.sock"), "-f", "/dev/null"];
+  const env = { ...process.env, XDG_STATE_HOME: path.join(root, "state"), WAGA_TMUX_SESSION: "waga-proof-gate", WAGA_TMUX_INDEPENDENT: "1" };
+  const call = async args => {
+    try { return { ...await execFileAsync("tmux", [...prefix, ...args], { env, timeout: commandTimeoutMs }), code: 0 }; }
+    catch (error) { return { stdout: String(error.stdout ?? ""), stderr: String(error.stderr ?? error.message), code: Number.isInteger(error.code) ? error.code : 1 }; }
+  };
+  t.after(() => {
+    spawnSync("tmux", [...prefix, "kill-server"], { stdio: "ignore", env, timeout: commandTimeoutMs });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  await call(["new-session", "-d", "-s", env.WAGA_TMUX_SESSION, "-n", "overview", "-x", "100", "-y", "30", "sleep 60"]);
+  const workspace = new TmuxWorkspace({ run: call, env, eventLog: { record() {} } });
+  const session = { id: "codex:waga-proof-gate", nativeId: "01a07a2e-c4ce-75c1-9fb4-02192b587721", provider: "codex", name: "waga-proof-gate", cwd: root };
+  const code = `process.stdout.write('\\x1b]0;${session.nativeId.slice(0, 29)}...\\x07'); console.log('ready\\n›'); setInterval(() => {}, 1000)`;
+  const selected = async () => (await call(["display-message", "-p", "-t", env.WAGA_TMUX_SESSION, "#{window_name}"])).stdout.trim();
+  let checks = 0;
+  const command = () => ({ command: process.execPath, args: ["-e", code], cwd: root, async afterAttach() { checks += 1; assert.equal(await selected(), "overview"); } });
+  const opened = await workspace.focusOrOpen(session, command());
+  assert.equal(opened.reused, false);
+  await call(["select-window", "-t", `${env.WAGA_TMUX_SESSION}:overview`]);
+  const reused = await workspace.focusOrOpen(session, command());
+  assert.equal(reused.windowId, opened.windowId);
+  await call(["select-window", "-t", `${env.WAGA_TMUX_SESSION}:overview`]);
+  await workspace.focusOrOpen(session, command(), { force: true });
+  await call(["set-window-option", "-t", opened.windowId, "remain-on-exit", "on"]);
+  await call(["select-window", "-t", `${env.WAGA_TMUX_SESSION}:overview`]);
+  await call(["send-keys", "-t", opened.windowId, "C-c"]);
+  await waitFor(async () => (await call(["display-message", "-p", "-t", opened.windowId, "#{pane_dead}"])).stdout.trim() === "1");
+  await workspace.focusOrOpen(session, command());
+  assert.equal(checks, 4);
+  await call(["select-window", "-t", `${env.WAGA_TMUX_SESSION}:overview`]);
+  await assert.rejects(workspace.focusOrOpen(session, { ...command(), async afterAttach() { throw new Error("permission mismatch"); } }), /permission mismatch/);
+  assert.equal(await selected(), "overview");
+});

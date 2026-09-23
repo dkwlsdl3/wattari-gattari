@@ -40,8 +40,8 @@ export async function nativeSessionCommand(session, { codexProvider = new CodexP
     return { command: "claude", args: ["attach", session.nativeId], cwd };
   }
 
-  const daemon = await codexProvider.prepareNativeSession(session, codexExecutionMode);
-  if (typeof daemon?.socketPath !== "string" || !path.isAbsolute(daemon.socketPath)) {
+  const daemon = await codexProvider.daemonInfo({ start: true });
+  if (daemon.status !== "running" || typeof daemon.socketPath !== "string" || !path.isAbsolute(daemon.socketPath)) {
     throw Object.assign(new Error("Codex native app-server daemon is unavailable"), { code: "CODEX_DAEMON_UNAVAILABLE" });
   }
   return {
@@ -49,5 +49,6 @@ export async function nativeSessionCommand(session, { codexProvider = new CodexP
     args: ["resume", session.nativeId, "--remote", `unix://${daemon.socketPath}`, "-C", cwd,
       "-c", 'tui.terminal_title=["thread-id"]'],
     cwd,
+    afterAttach: () => codexProvider.prepareNativeSession(session, codexExecutionMode, { socketPath: daemon.socketPath }),
   };
 }

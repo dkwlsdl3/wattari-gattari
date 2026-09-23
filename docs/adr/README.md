@@ -32,8 +32,10 @@ provider 세션을 소유하지 않습니다. 새 세션을 시작하기 전 선
   선택하면 App Server `thread/start`와 첫 `turn/start`에 각각
   `approvalPolicy=never`, `sandbox=danger-full-access`와
   `sandboxPolicy={type:dangerFullAccess}`를 전달합니다. 기존 Codex 세션은 F4 재접속 시
-  같은 owning daemon의 같은 스레드에 `thread/settings/update`로 다음 턴 설정을 적용하고
-  `thread/resume`의 유효 승인·샌드박스 응답을 확인한 뒤 화면을 엽니다. 기본 모드는
+  같은 owning daemon의 같은 스레드에 remote TUI가 먼저 resume되도록 하고, 해당 창의
+  스레드 제목과 입력 화면으로 attach 완료를 확인합니다. 이어서 `thread/settings/update`로
+  다음 턴 설정을 적용하고 `thread/resume`의 유효 승인·샌드박스 응답을 검증한 뒤 창을
+  선택합니다. attach나 설정 검증이 실패하면 F4는 실패하고 Dock에 오류를 표시합니다. 기본 모드는
   `config/read`의 현재 기본 정책을 명시적으로 적용합니다. peer `send`·`ask`에는
   Dock의 실행 모드를 적용하지 않습니다.
 
@@ -75,7 +77,7 @@ assistant text 또는 원래 socket으로 보내는 SendMessage 본문에 있는
   거부됐습니다(2026-09-22 실측). 0.156.0 생성 App Server 스키마에는
   `thread/settings/update`의 `approvalPolicy`·`sandboxPolicy`와 `thread/resume`의 유효
   `approvalPolicy`·`sandbox`가 있습니다(2026-09-23 실측). F4는 이 공식 경계로 권한을
-  적용·검증하고, RPC 미지원·값 불일치·스레드 누락이면 화면 접속 전에 오류를 표시합니다.
+  새 TUI의 resume 이후 적용·검증하고, RPC 미지원·값 불일치·스레드 누락이면 화면 전환 전에 오류를 표시합니다.
   `null` 설정은 기존 YOLO를 되돌리지 않았으므로 기본 모드도 명시적인 설정 변경입니다.
 - Dock 목록은 provider별로 독립 갱신합니다. 한쪽 조회가 대기 중이어도 다른 쪽은 계속
   갱신하며, 같은 provider의 조회는 중복 실행하지 않습니다. 미조회·오류 provider의 기존
