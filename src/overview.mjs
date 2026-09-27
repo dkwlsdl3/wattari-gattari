@@ -159,6 +159,45 @@ function creationModal(lines, task, width, height) {
   return lines;
 }
 
+function folderPickerModal(lines, picker, width, height) {
+  const inner = Math.max(1, Math.min(68, width - 6));
+  const visibleRows = Math.max(1, height - 7);
+  const offset = Math.max(0, Math.min(picker.selected - Math.floor(visibleRows / 2), picker.entries.length - visibleRows));
+  const entries = picker.entries.slice(offset, offset + visibleRows).map((entry, index) => {
+    const label = entry.type === "select" ? "[현재 폴더 선택]" : entry.type === "parent" ? "../" : `${entry.name}/`;
+    return `${offset + index === picker.selected ? "›" : " "} ${label}`;
+  });
+  const content = [
+    `작업 폴더 · ${path.basename(picker.cwd) || picker.cwd}`,
+    picker.cwd,
+    picker.error ? `오류: ${picker.error}` : "↑↓ 이동  Enter 열기/선택  Backspace 상위",
+    "e 경로 입력  Esc 취소",
+    ...entries,
+  ];
+  const box = [`┌${"─".repeat(inner + 2)}┐`, ...content.map(value => `│ ${fit(value, inner)} │`), `└${"─".repeat(inner + 2)}┘`];
+  const top = Math.max(0, Math.floor((height - box.length) / 2));
+  const left = " ".repeat(Math.max(0, Math.floor((width - inner - 4) / 2)));
+  while (lines.length < height) lines.push("");
+  box.slice(0, height).forEach((line, index) => { lines[top + index] = `${left}${color(THEME.title, line)}`; });
+}
+
+function isFolderEntry(cwd, entry) {
+  if (entry.isDirectory()) return true;
+  if (!entry.isSymbolicLink()) return false;
+  try { return fs.statSync(path.join(cwd, entry.name)).isDirectory(); }
+  catch { return false; }
+}
+
+function folderPicker(cwd) {
+  const entries = [{ type: "select" }];
+  if (path.dirname(cwd) !== cwd) entries.push({ type: "parent" });
+  const directories = fs.readdirSync(cwd, { withFileTypes: true })
+    .filter(entry => isFolderEntry(cwd, entry))
+    .map(entry => ({ type: "directory", name: entry.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return { cwd, entries: [...entries, ...directories], selected: 0, error: "" };
+}
+
 function cleanPastedPrompt(value) {
   return String(value ?? "")
     .replace(/\r\n?/g, "\n")
@@ -589,6 +628,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     else lines.push("");
   }
   if (newTask?.submitting) creationModal(lines, newTask, width, height);
+  else if (newTask?.cwdPicker) folderPickerModal(lines, newTask.cwdPicker, width, height);
   return lines.slice(0, height).join("\n");
 }
 
@@ -1202,6 +1242,35 @@ export async function runOverview({
       return;
     }
     if (newTask) {
+      if (newTask.cwdPicker) {
+        const picker = newTask.cwdPicker;
+        const selected = picker.entries[picker.selected];
+        if (key.name === "escape") newTask.cwdPicker = null;
+        else if (key.name === "up") picker.selected = Math.max(0, picker.selected - 1);
+        else if (key.name === "down") picker.selected = Math.min(picker.entries.length - 1, picker.selected + 1);
+        else if (key.name === "home") picker.selected = 0;
+        else if (key.name === "end") picker.selected = picker.entries.length - 1;
+        else if (key.name === "backspace" || key.name === "left") {
+          try { newTask.cwdPicker = folderPicker(path.dirname(picker.cwd)); }
+          catch (error) { picker.error = error.message; }
+        } else if (key.name === "return") {
+          if (selected.type === "select") {
+            try {
+              if (!fs.statSync(picker.cwd).isDirectory()) throw new Error("존재하는 폴더를 선택하세요.");
+              newTask = { ...newTask, cwd: picker.cwd, cwdPicker: null, error: "" };
+              refreshNewTaskRouting();
+            } catch (error) { picker.error = error.message; }
+          } else {
+            const next = selected.type === "parent" ? path.dirname(picker.cwd) : path.join(picker.cwd, selected.name);
+            try { newTask.cwdPicker = folderPicker(next); }
+            catch (error) { picker.error = error.message; }
+          }
+        } else if (!key.ctrl && !key.meta && String(key.sequence ?? text ?? "") === "e") {
+          newTask = { ...newTask, cwdPicker: null, cwdEdit: { value: picker.cwd, cursor: graphemes(picker.cwd).length, error: "" } };
+        }
+        render();
+        return;
+      }
       if (newTask.cwdEdit) {
         const edit = newTask.cwdEdit;
         const cells = graphemes(edit.value);
@@ -1241,7 +1310,10 @@ export async function runOverview({
       }
       const cells = graphemes(newTask.prompt);
       if (key.name === "escape") newTask = null;
-      else if (key.meta && key.name === "p") newTask = { ...newTask, cwdEdit: { value: newTask.cwd, cursor: graphemes(newTask.cwd).length, error: "" } };
+      else if (key.meta && key.name === "p") {
+        try { newTask = { ...newTask, cwdPicker: folderPicker(newTask.cwd) }; }
+        catch (error) { newTask.error = error.message; }
+      }
       else if (key.name === "tab") newTask = { ...newTask, provider: newTask.provider === "claude" ? "codex" : "claude", error: "" };
       else if (key.meta && key.name === "d") newTask = { ...newTask, skipRouting: !newTask.skipRouting, error: "" };
       else if ((key.shift && key.name === "return") || key.name === "enter" || (key.ctrl && key.name === "j") || key.sequence === "\x1b[13;2u") {
@@ -1267,7 +1339,7 @@ export async function runOverview({
           newTask = { ...newTask, prompt: cells.join(""), cursor: newTask.cursor + added.length, error: "" };
         }
       }
-      if (!newTask?.cwdEdit) refreshNewTaskRouting();
+      if (!newTask?.cwdEdit && !newTask?.cwdPicker) refreshNewTaskRouting();
       render();
       return;
     }

@@ -1243,10 +1243,13 @@ test("new-session composer accepts an existing folder outside the session list",
   pressAlt(input, "n");
   input.emit("keypress", "할 일", { sequence: "할 일" });
   pressAlt(input, "p");
+  assert.match(plain(output.writes.at(-1)), /현재 폴더 선택/);
+  input.emit("keypress", "e", { name: "e", sequence: "e" });
   assert.match(plain(output.writes.at(-1)), /작업 폴더 경로/);
   input.emit("keypress", "", { name: "escape" });
   assert.match(plain(output.writes.at(-1)), /할 일/);
   pressAlt(input, "p");
+  input.emit("keypress", "e", { name: "e", sequence: "e" });
   input.emit("keypress", "", { ctrl: true, name: "u" });
   input.emit("keypress", "없는 폴더", { sequence: "없는 폴더" });
   input.emit("keypress", "", { name: "return" });
@@ -1261,6 +1264,40 @@ test("new-session composer accepts an existing folder outside the session list",
   assert.equal(created.prompt, "할 일");
   assert.equal(created.options.cwd, target);
   assert.equal(routedCwd, target);
+  input.emit("end");
+  assert.equal(await running, 0);
+});
+
+test("new-session folder modal navigates into an unlisted folder and selects it", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-picker-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const target = path.join(root, "unlisted");
+  fs.mkdirSync(target);
+  const input = ttyInput();
+  t.after(() => input.emit("end"));
+  const output = capturedOutput();
+  let created;
+  const bridge = {
+    async discover() { return { sessions: [], warnings: [] }; },
+    async create(provider, prompt, options) { created = { provider, prompt, options }; return { provider, nativeId: "proof" }; },
+  };
+  const running = runOverview({ bridge, workspace: { async leave() { return { closeOverview: true }; } },
+    defaultCwd: root, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise(setImmediate);
+
+  pressAlt(input, "n");
+  input.emit("keypress", "폴더 선택", { sequence: "폴더 선택" });
+  pressAlt(input, "p");
+  assert.match(plain(output.writes.at(-1)), /unlisted\//);
+  input.emit("keypress", "", { name: "end" });
+  input.emit("keypress", "", { name: "return" });
+  assert.match(plain(output.writes.at(-1)), /현재 폴더 선택/);
+  assert.match(plain(output.writes.at(-1)), /unlisted/);
+  input.emit("keypress", "", { name: "return" });
+  assert.match(plain(output.writes.at(-1)), /폴더 선택/);
+  input.emit("keypress", "", { name: "return" });
+  await new Promise(setImmediate);
+  assert.equal(created.options.cwd, target);
   input.emit("end");
   assert.equal(await running, 0);
 });
