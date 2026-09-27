@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { stripVTControlCharacters } from "node:util";
@@ -558,11 +559,15 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     const executionSummary = providerSettings?.[newTask.provider]
       ? providerExecutionSummary(newTask.provider, providerSettings[newTask.provider])
       : newTask.provider === "codex" ? codexExecutionLabel(codexExecutionMode) : "Claude 실행 설정";
-    const composerHint = newTask.error
-      ? `오류: ${safeText(newTask.error)}`
-      : `Shift+Enter 개행 · Enter 생성 · Esc 취소   Tab → ${alternateProvider} 전환   Alt+D ${newTask.skipRouting ? "라우팅 사용" : "라우팅 생략"}   Alt+S 설정   ${executionSummary}`;
-    lines.push(`  ${color(newTask.error ? THEME.error : providerColor, fit(composerHint, usableWidth))}`);
-    lines.push(...promptRows(newTask.prompt, newTask.cursor, usableWidth).map(row => `  ${row}`));
+    const composerError = newTask.cwdEdit ? newTask.cwdEdit.error : newTask.error;
+    const composerHint = composerError
+      ? `오류: ${safeText(composerError)}`
+      : newTask.cwdEdit
+        ? "작업 폴더 경로 · Enter 적용 · Esc 취소 · Ctrl+U 지우기"
+        : `Shift+Enter 개행 · Enter 생성 · Esc 취소   Tab → ${alternateProvider} 전환   Alt+P 폴더   Alt+D ${newTask.skipRouting ? "라우팅 사용" : "라우팅 생략"}   Alt+S 설정   ${executionSummary}`;
+    lines.push(`  ${color(composerError ? THEME.error : providerColor, fit(composerHint, usableWidth))}`);
+    if (newTask.cwdEdit) lines.push(`  ${editorLine(newTask.cwdEdit.value, newTask.cwdEdit.cursor, usableWidth)}`);
+    else lines.push(...promptRows(newTask.prompt, newTask.cursor, usableWidth).map(row => `  ${row}`));
     lines.push("");
   } else if (renameTask) {
     const providerName = renameTask.session.provider === "claude" ? "CLAUDE" : "CODEX";
@@ -1075,7 +1080,7 @@ export async function runOverview({
     })();
   };
 
-  const pasteTarget = () => newTask ? "newTask" : renameTask ? "renameTask" : searching ? "search" : null;
+  const pasteTarget = () => newTask?.cwdEdit ? "cwdEdit" : newTask ? "newTask" : renameTask ? "renameTask" : searching ? "search" : null;
 
   const insertAtCursor = (value, cursor, inserted) => {
     if (!inserted) return { value, cursor };
@@ -1097,7 +1102,10 @@ export async function runOverview({
     const { target, chunks } = pasteBuffer;
     pasteBuffer = null;
     const raw = chunks.join("");
-    if (target === "newTask" && newTask) {
+    if (target === "cwdEdit" && newTask?.cwdEdit) {
+      const next = insertAtCursor(newTask.cwdEdit.value, newTask.cwdEdit.cursor, cleanPastedSingleLine(raw));
+      newTask.cwdEdit = { ...next, error: "" };
+    } else if (target === "newTask" && newTask) {
       const next = insertAtCursor(newTask.prompt, newTask.cursor, cleanPastedPrompt(raw));
       newTask = { ...newTask, prompt: next.value, cursor: next.cursor, error: "" };
       refreshNewTaskRouting();
@@ -1194,8 +1202,46 @@ export async function runOverview({
       return;
     }
     if (newTask) {
+      if (newTask.cwdEdit) {
+        const edit = newTask.cwdEdit;
+        const cells = graphemes(edit.value);
+        if (key.name === "escape") newTask.cwdEdit = null;
+        else if (key.name === "return") {
+          const entered = edit.value.trim();
+          const cwd = entered ? path.resolve(newTask.cwd, entered) : "";
+          try {
+            if (!cwd || !fs.statSync(cwd).isDirectory()) throw new Error("존재하는 폴더를 입력하세요.");
+            newTask = { ...newTask, cwd, cwdEdit: null, error: "" };
+            refreshNewTaskRouting();
+          } catch (error) {
+            newTask.cwdEdit = { ...edit, error: error.code === "ENOENT" || error.code === "ENOTDIR" ? "존재하는 폴더를 입력하세요." : error.message };
+          }
+        }
+        else if (key.name === "left") edit.cursor = Math.max(0, edit.cursor - 1);
+        else if (key.name === "right") edit.cursor = Math.min(cells.length, edit.cursor + 1);
+        else if (key.name === "home") edit.cursor = 0;
+        else if (key.name === "end") edit.cursor = cells.length;
+        else if (key.name === "backspace" && edit.cursor > 0) {
+          cells.splice(edit.cursor - 1, 1);
+          newTask.cwdEdit = { value: cells.join(""), cursor: edit.cursor - 1, error: "" };
+        } else if (key.name === "delete" && edit.cursor < cells.length) {
+          cells.splice(edit.cursor, 1);
+          newTask.cwdEdit = { value: cells.join(""), cursor: edit.cursor, error: "" };
+        } else if (key.ctrl && key.name === "u") newTask.cwdEdit = { value: "", cursor: 0, error: "" };
+        else if (!key.ctrl && !key.meta) {
+          const inserted = String(key.sequence ?? text ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
+          if (inserted) {
+            const added = graphemes(inserted);
+            cells.splice(edit.cursor, 0, ...added);
+            newTask.cwdEdit = { value: cells.join(""), cursor: edit.cursor + added.length, error: "" };
+          }
+        }
+        render();
+        return;
+      }
       const cells = graphemes(newTask.prompt);
       if (key.name === "escape") newTask = null;
+      else if (key.meta && key.name === "p") newTask = { ...newTask, cwdEdit: { value: newTask.cwd, cursor: graphemes(newTask.cwd).length, error: "" } };
       else if (key.name === "tab") newTask = { ...newTask, provider: newTask.provider === "claude" ? "codex" : "claude", error: "" };
       else if (key.meta && key.name === "d") newTask = { ...newTask, skipRouting: !newTask.skipRouting, error: "" };
       else if ((key.shift && key.name === "return") || key.name === "enter" || (key.ctrl && key.name === "j") || key.sequence === "\x1b[13;2u") {
@@ -1221,7 +1267,7 @@ export async function runOverview({
           newTask = { ...newTask, prompt: cells.join(""), cursor: newTask.cursor + added.length, error: "" };
         }
       }
-      refreshNewTaskRouting();
+      if (!newTask?.cwdEdit) refreshNewTaskRouting();
       render();
       return;
     }

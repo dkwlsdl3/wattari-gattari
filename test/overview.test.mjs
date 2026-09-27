@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 import test, { afterEach } from "node:test";
 
@@ -1212,6 +1215,53 @@ test("overview creates a provider-owned session from its prompt composer", async
   assert.deepEqual({ ...created.options, onProgress: undefined }, { onProgress: undefined, cwd: "/work/new", executionMode: "default" });
   assert.equal(selectedSessionName(output), "작새업");
   pressAlt(input, "q");
+  assert.equal(await running, 0);
+});
+
+test("new-session composer accepts an existing folder outside the session list", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-folder-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const target = path.join(root, "새 프로젝트");
+  fs.mkdirSync(target);
+  const input = ttyInput();
+  t.after(() => input.emit("end"));
+  const output = capturedOutput();
+  let created;
+  let routedCwd;
+  const bridge = {
+    async discover() { return { sessions: [], warnings: [] }; },
+    route(provider, prompt, { cwd }) {
+      routedCwd = cwd;
+      return { provider, prompt, cwd, model: null, effort: null, label: "test", tier: "default", reasons: [], source: "test" };
+    },
+    async create(provider, prompt, options) { created = { provider, prompt, options }; return { provider, nativeId: "proof" }; },
+  };
+  const running = runOverview({ bridge, workspace: { async leave() { return { closeOverview: true }; } },
+    defaultCwd: root, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await new Promise(setImmediate);
+
+  pressAlt(input, "n");
+  input.emit("keypress", "할 일", { sequence: "할 일" });
+  pressAlt(input, "p");
+  assert.match(plain(output.writes.at(-1)), /작업 폴더 경로/);
+  input.emit("keypress", "", { name: "escape" });
+  assert.match(plain(output.writes.at(-1)), /할 일/);
+  pressAlt(input, "p");
+  input.emit("keypress", "", { ctrl: true, name: "u" });
+  input.emit("keypress", "없는 폴더", { sequence: "없는 폴더" });
+  input.emit("keypress", "", { name: "return" });
+  assert.match(plain(output.writes.at(-1)), /존재하는 폴더를 입력하세요/);
+  assert.equal(created, undefined);
+  input.emit("keypress", "", { ctrl: true, name: "u" });
+  input.emit("keypress", target, { sequence: target });
+  input.emit("keypress", "", { name: "return" });
+  assert.match(plain(output.writes.at(-1)), /할 일/);
+  input.emit("keypress", "", { name: "return" });
+  await new Promise(setImmediate);
+  assert.equal(created.prompt, "할 일");
+  assert.equal(created.options.cwd, target);
+  assert.equal(routedCwd, target);
+  input.emit("end");
   assert.equal(await running, 0);
 });
 
