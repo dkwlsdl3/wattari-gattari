@@ -360,7 +360,7 @@ export class CodexProvider {
     });
   }
 
-  async ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, timeoutMs, untilIdle = false, onProgress = () => {} }) {
+  async ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, timeoutMs, untilIdle = false, onProgress = () => {}, onReply = async () => {} }) {
     return this.#withClient(async (client) => {
       const fallbackTimeout = timeoutMs ?? 180_000;
       const busyTimeout = waitTimeoutMs ?? fallbackTimeout;
@@ -403,12 +403,14 @@ export class CodexProvider {
             const reply = await findReply();
             if (!reply) throw Object.assign(new Error(`Codex turn completed without a reply: ${turnId}`), { code: "REPLY_MISSING" });
             onProgress({ state: "replied", target: session.id, delivery: "accepted" });
+            await onReply(reply, { requestId, target: session.id });
             return { target: session.id, requestId, turnId, reply, exchangeCount: 1, autoForwarded: false };
           }
         } else {
           const reply = await findReply();
           if (reply) {
             onProgress({ state: "replied", target: session.id, delivery: "accepted" });
+            await onReply(reply, { requestId, target: session.id });
             return { target: session.id, requestId, turnId, reply, exchangeCount: 1, autoForwarded: false };
           }
         }

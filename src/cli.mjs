@@ -10,6 +10,7 @@ import { runDoctor } from "./doctor.mjs";
 import { fallbackRouting } from "./model-router.mjs";
 import { LocalRouterClient } from "./local-router-client.mjs";
 import { openNativeAgents } from "./native-launcher.mjs";
+import { claudeOrigin, notifyOrigin } from "./origin-notifier.mjs";
 import { runOverview } from "./overview.mjs";
 import { CLI_NAME, VERSION } from "./product.mjs";
 import { ClaudeProvider } from "./providers/claude.mjs";
@@ -26,7 +27,7 @@ function usage() {
     "                                Open the global dock, optionally filtered by workspace",
     `${CLI_NAME} list [--provider claude|codex] [--cwd PATH] [--json]`,
     `${CLI_NAME} send <session-id-or-name> <message> [--cwd PATH]    One-way notification`,
-    `${CLI_NAME} ask <session-id-or-name> <message> [--until-idle] [--wait-timeout SEC] [--reply-timeout SEC] [--cwd PATH]`,
+    `${CLI_NAME} ask <session-id-or-name> <message> [--until-idle] [--notify-origin] [--wait-timeout SEC] [--reply-timeout SEC] [--cwd PATH]`,
     `${CLI_NAME} result <request-id> [--json]    Read an existing request; never resend`,
     "                                ask: busy wait 1800s; reply wait 180s. Use explicit timeouts for long work.",
     `${CLI_NAME} open <claude|codex> [--cwd PATH]`,
@@ -77,6 +78,8 @@ export async function runCli(args = process.argv.slice(2), {
   tmuxAgentsView = openTmuxAgentsView,
   orderStore = new DockOrderStore(),
   settingsStore = new WagaSettingsStore(),
+  originNotifier = notifyOrigin,
+  origin = claudeOrigin(),
   handleSignals = false,
 } = {}) {
   let options;
@@ -86,6 +89,10 @@ export async function runCli(args = process.argv.slice(2), {
   const cwd = path.resolve(options.cwd ?? process.cwd());
   if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
     stderr.write(`Workspace is not a directory: ${cwd}\n`);
+    return 2;
+  }
+  if (options.notifyOrigin && !origin) {
+    stderr.write("--notify-origin requires a Claude Code session with a messaging socket\n");
     return 2;
   }
 
@@ -136,12 +143,21 @@ export async function runCli(args = process.argv.slice(2), {
       const result = await bridge.send(options.target, options.message, { cwd: options.cwd ? cwd : undefined, onProgress: progress, waitTimeoutMs: options.waitTimeoutMs });
       stdout.write(options.json ? `${JSON.stringify(result)}\n` : `${result.delivery ?? "submitted"}\t${result.target}\t${result.requestId}\n`);
     } else if (options.command === "ask") {
+      const onReply = options.notifyOrigin ? async (reply, { requestId, target }) => {
+        try {
+          await originNotifier({ origin, requestId, target, reply });
+          stderr.write(`origin-notified\t${origin}\t${requestId}\n`);
+        } catch (error) {
+          stderr.write(`ORIGIN_NOTIFY_FAILED: ${error.message}; inspect without resending: ${CLI_NAME} result ${requestId} --json\n`);
+        }
+      } : undefined;
       const result = await bridge.ask(options.target, options.message, {
         cwd: options.cwd ? cwd : undefined,
         waitTimeoutMs: options.waitTimeoutMs,
         replyTimeoutMs: options.replyTimeoutMs,
         untilIdle: options.untilIdle,
         onProgress: progress,
+        onReply,
       });
       stdout.write(options.json ? `${JSON.stringify(result)}\n` : `${result.reply}\n`);
     } else if (options.command === "result") {

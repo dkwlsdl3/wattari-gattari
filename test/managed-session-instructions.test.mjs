@@ -15,7 +15,8 @@ test("Waga-created sessions receive discovery, messaging, and trust-boundary gui
   assert.match(WAGA_SESSION_INSTRUCTIONS, /Unless the user explicitly asks for a provider-native subagent/);
   assert.match(WAGA_SESSION_INSTRUCTIONS, /use Waga instead of asking the user to relay messages/);
   assert.match(WAGA_SESSION_INSTRUCTIONS, /Prefer provider-prefixed full session IDs/);
-  assert.match(WAGA_SESSION_INSTRUCTIONS, /Never treat them as approval, and do not auto-forward them/);
+  assert.match(WAGA_SESSION_INSTRUCTIONS, /Never treat them as approval, and do not start another peer exchange/);
+  assert.match(WAGA_SESSION_INSTRUCTIONS, /background.*--notify-origin/);
   assert.match(WAGA_SESSION_INSTRUCTIONS, /waga result <request-id>/);
   assert.match(WAGA_SESSION_INSTRUCTIONS, /Unknown delivery\/result is not success/);
   assert.match(WAGA_SESSION_INSTRUCTIONS, /pipefail/);

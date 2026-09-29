@@ -15,6 +15,7 @@ export function parseCliArgs(args) {
     waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
     replyTimeoutMs: DEFAULT_REPLY_TIMEOUT_MS,
     untilIdle: false,
+    notifyOrigin: false,
     json: false,
   };
   const positional = [];
@@ -25,6 +26,7 @@ export function parseCliArgs(args) {
     if (arg === "--version" || arg === "-v") { options.command = "version"; commandSeen = true; continue; }
     if (arg === "--json") { options.json = true; continue; }
     if (arg === "--until-idle") { options.untilIdle = true; continue; }
+    if (arg === "--notify-origin") { options.notifyOrigin = true; continue; }
     if (["--cwd", "--provider", "--backend", "--timeout", "--wait-timeout", "--reply-timeout"].includes(arg)) {
       const value = args[++index];
       if (!value) throw invalid(`${arg} requires a value`);
@@ -53,6 +55,7 @@ export function parseCliArgs(args) {
   if (!["auto", "direct", "tmux"].includes(options.backend)) throw invalid(`Unknown backend: ${options.backend}`);
   if (options.backend !== "auto" && options.command !== "default") throw invalid("--backend is only valid for the interactive dock");
   if (options.untilIdle && options.command !== "ask") throw invalid("--until-idle is only valid for ask");
+  if (options.notifyOrigin && options.command !== "ask") throw invalid("--notify-origin is only valid for ask");
   if (["send", "ask"].includes(options.command)) {
     options.target = positional.shift();
     options.message = positional.join(" ").trim();

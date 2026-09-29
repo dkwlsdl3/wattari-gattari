@@ -91,6 +91,20 @@ test("Claude completion waits through needs-input and uses the remaining reply d
   assert.deepEqual(progress, ["submitting", "submitted", "accepted", "reply-received", "working"]);
 });
 
+test("Claude exposes the reply to its caller before waiting for target idle", async () => {
+  let now = 0;
+  const events = [];
+  const { provider } = claude(async () => [{ ...session, status: "working" }], {
+    now: () => now,
+    wait: async (ms) => { now += ms; },
+  });
+  await assert.rejects(provider.ask(session, "hello", {
+    ...options, untilIdle: true,
+    onReply: async (reply) => { events.push(reply); },
+  }), { code: "REPLY_TIMEOUT" });
+  assert.deepEqual(events, ["ANSWER"]);
+});
+
 test("Claude unavailable state is not idle and cannot receive a new request", async () => {
   const { provider, calls } = claude(async () => [{ ...session, status: "unavailable" }]);
   await assert.rejects(provider.ask(session, "hello", options), { code: "TARGET_UNAVAILABLE" });

@@ -22,7 +22,7 @@ test("interactive dock backend is explicit and validated", () => {
 
 test("ask parses target, message, timeout, and cwd", () => {
   assert.deepEqual(parseCliArgs(["ask", "codex:x", "hello", "there", "--timeout", "1.5", "--cwd", "/tmp"]), {
-    command: "ask", cwd: "/tmp", provider: null, backend: "auto", waitTimeoutMs: 1500, replyTimeoutMs: 1500, untilIdle: false, json: false, target: "codex:x", message: "hello there",
+    command: "ask", cwd: "/tmp", provider: null, backend: "auto", waitTimeoutMs: 1500, replyTimeoutMs: 1500, untilIdle: false, notifyOrigin: false, json: false, target: "codex:x", message: "hello there",
   });
 });
 
@@ -36,6 +36,11 @@ test("ask keeps busy-wait and reply timeouts independent", () => {
 test("ask accepts completion waiting only when explicitly requested", () => {
   assert.equal(parseCliArgs(["ask", "codex:x", "review", "--until-idle"]).untilIdle, true);
   assert.throws(() => parseCliArgs(["list", "--until-idle"]), { code: "INVALID_ARGUMENT" });
+});
+
+test("origin notification is explicit and ask-only", () => {
+  assert.equal(parseCliArgs(["ask", "claude:x", "review", "--notify-origin"]).notifyOrigin, true);
+  assert.throws(() => parseCliArgs(["send", "claude:x", "hello", "--notify-origin"]), { code: "INVALID_ARGUMENT" });
 });
 
 test("open accepts only native providers", () => {
@@ -55,7 +60,7 @@ test("CLI refuses overflowed deadlines, unknown flags and surplus open arguments
 
 test("internal tmux Agents view accepts only a tmux window id", () => {
   assert.deepEqual(parseCliArgs(["tmux-agents-view", "@7"]), {
-    command: "tmux-agents-view", cwd: null, provider: null, backend: "auto", waitTimeoutMs: 1_800_000, replyTimeoutMs: 180_000, untilIdle: false, json: false, windowId: "@7",
+    command: "tmux-agents-view", cwd: null, provider: null, backend: "auto", waitTimeoutMs: 1_800_000, replyTimeoutMs: 180_000, untilIdle: false, notifyOrigin: false, json: false, windowId: "@7",
   });
   assert.throws(() => parseCliArgs(["tmux-agents-view", "not-a-window"]), { code: "INVALID_ARGUMENT" });
 });

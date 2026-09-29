@@ -122,11 +122,11 @@ export class SessionBridge {
     return provider.send(session, message, { requestId, expectsReply: false });
   }
 
-  async ask(target, message, { cwd, waitTimeoutMs = 30 * 60 * 1_000, replyTimeoutMs = 3 * 60 * 1_000, untilIdle = false, onProgress } = {}) {
+  async ask(target, message, { cwd, waitTimeoutMs = 30 * 60 * 1_000, replyTimeoutMs = 3 * 60 * 1_000, untilIdle = false, onProgress, onReply } = {}) {
     const { provider, session } = await this.#resolve(target, cwd);
-    if (this.#requests) return this.#exchange(provider, session, message, { kind: "ask", waitTimeoutMs, replyTimeoutMs, untilIdle, onProgress });
+    if (this.#requests) return this.#exchange(provider, session, message, { kind: "ask", waitTimeoutMs, replyTimeoutMs, untilIdle, onProgress, ...(onReply ? { onReply } : {}) });
     const requestId = crypto.randomUUID();
-    return provider.ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, untilIdle, onProgress, expectsReply: true });
+    return provider.ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, untilIdle, onProgress, ...(onReply ? { onReply } : {}), expectsReply: true });
   }
 
   async #exchange(provider, session, message, options) {

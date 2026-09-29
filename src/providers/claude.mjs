@@ -198,7 +198,7 @@ export class ClaudeProvider {
     }
   }
 
-  async ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, timeoutMs, untilIdle = false, onProgress = () => {} }) {
+  async ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, timeoutMs, untilIdle = false, onProgress = () => {}, onReply = async () => {} }) {
     const envelope = buildPeerEnvelope({ message, requestId, expectsReply: true });
     const fallbackTimeout = timeoutMs ?? 180_000;
     // Peer priority "next" queues natively even while Claude is working.
@@ -224,6 +224,7 @@ export class ClaudeProvider {
         deadline: replyDeadline, now: this.#now, error: completionError,
       });
       onProgress({ state: "reply-received", target: session.id, delivery: "accepted", reply: reply.text });
+      await onReply(reply.text, { requestId, target: session.id });
       if (untilIdle) {
         const remaining = replyDeadline - this.#now();
         await this.#waitUntilIdle(current, { timeoutMs: remaining, onProgress, waitingState: "working", timeoutError: completionError });

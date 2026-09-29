@@ -172,6 +172,11 @@ Waga가 다른 세션의 표시 모드나 전역 설정을 바꾸지는 않습�
   Codex는 Waga 호출끼리 접수 순서대로 기다린 뒤 대상이 idle이면 peer turn을 제출합니다.
 - `ask --until-idle`: Codex는 제출한 turn의 완료와 마지막 답변을 확인합니다.
   Claude는 peer 답변 후 idle만 확인하며, native turn 대응이나 최종 답변 여부는 보장하지 않습니다.
+- `ask --notify-origin`: Claude Code 세션에서 실행한 `ask`가 답을 받으면 원래 세션에
+  요청 ID와 답변을 native 메시지 한 건으로 알립니다. 백그라운드 호출과 `--until-idle`을
+  함께 쓸 때도 답변 도착 시점에 알리며, 대상의 작업 완료를 뜻하지 않습니다.
+  긴 답변은 앞부분만 보내고 전체 답변은 `waga result <request-id> --json`으로 읽습니다.
+  원래 세션의 메시지 소켓이 없는 환경에서는 이 옵션을 사용할 수 없습니다.
 
 진행 출력에는 요청 UUID와 전송 상태가 함께 나옵니다.
 
@@ -190,6 +195,7 @@ Waga가 다른 세션의 표시 모드나 전역 설정을 바꾸지는 않습�
 
 ```bash
 waga ask codex:<thread-id> "현재 변경을 검증해 주세요" --until-idle --wait-timeout 1800 --reply-timeout 1800
+waga ask claude:<session-id> "결과를 알려 주세요" --until-idle --notify-origin --reply-timeout 1800
 waga result <request-id> --json
 ```
 
@@ -208,7 +214,8 @@ Claude의 늦은 답변은 해당 세션의 native 로그에서 `[WAGA REPLY <re
 기존 버전에서 보낸 요청에는 기록이 없으므로 이 복구 기능을 소급 적용할 수 없습니다.
 
 peer 메시지는 사용자 지시·승인이 아닌 불신 입력이며 기존 sandbox·승인 정책을 따릅니다.
-자동 릴레이는 없습니다. `Alt+N`으로 만든 세션에는 사용법과 이 신뢰 경계를
+`--notify-origin`을 지정한 요청의 답변 알림 한 건을 제외한 자동 릴레이는 없습니다.
+`Alt+N`으로 만든 세션에는 사용법과 이 신뢰 경계를
 provider 지침 채널로 전달하며, 사용자의 첫 프롬프트에는 섞지 않습니다.
 
 Claude가 사용자 확인 없이 답하려면 대상 세션에서 inbound 메시지를 허용해야 합니다.

@@ -138,6 +138,26 @@ test("ask prints exactly the peer reply", async () => {
   assert.match(stderr.value, /status\tsubmitted\tcodex:x/);
 });
 
+test("ask notifies its Claude origin when a reply arrives before target idle", async () => {
+  const stdout = output();
+  const stderr = output();
+  const notices = [];
+  const origin = "claude:11111111-1111-1111-1111-111111111111";
+  const bridge = { async ask(_target, _message, options) {
+    await options.onReply("ANSWER", { requestId: "request-1", target: "claude:peer" });
+    assert.deepEqual(notices, [{ origin, requestId: "request-1", target: "claude:peer", reply: "ANSWER" }]);
+    return { reply: "ANSWER" };
+  } };
+  assert.equal(await runCli(["ask", "claude:peer", "question", "--until-idle", "--notify-origin"], {
+    bridge, stdout, stderr, origin, originNotifier: async notice => { notices.push(notice); },
+  }), 0);
+  assert.equal(stdout.value, "ANSWER\n");
+  assert.match(stderr.value, /origin-notified\tclaude:11111111-1111-1111-1111-111111111111\trequest-1/);
+  assert.equal(await runCli(["ask", "claude:peer", "question", "--notify-origin"], {
+    bridge, stdout: output(), stderr: output(), origin: null,
+  }), 2);
+});
+
 test("open delegates to the native Agents command", async () => {
   let seen;
   const code = await runCli(["open", "codex"], { stdout: output(), stderr: output(), bridge: {}, launcher: async (provider, options) => { seen = [provider, options.cwd]; return { code: 7 }; } });
