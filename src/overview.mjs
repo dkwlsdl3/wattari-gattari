@@ -21,6 +21,10 @@ import { TmuxWorkspace } from "./tmux-workspace.mjs";
 import { previewText, SessionPreview } from "./session-preview.mjs";
 
 const ESC = "\x1b[";
+const KOREAN_META_KEYS = new Map([
+  ["ㅁ", "a"], ["ㅇ", "d"], ["ㅎ", "g"], ["ㅜ", "n"], ["ㅔ", "p"],
+  ["ㅂ", "q"], ["ㄱ", "r"], ["ㄴ", "s"], ["ㅌ", "x"], ["ㅛ", "y"],
+]);
 const RESET = `${ESC}0m`;
 const BRACKETED_PASTE_ON = `${ESC}?2004h`;
 const BRACKETED_PASTE_OFF = `${ESC}?2004l`;
@@ -1182,6 +1186,8 @@ export async function runOverview({
 
   const onKeypress = (text, key = {}) => {
     if (busy || closed) return;
+    const koreanMetaKey = key.meta && key.sequence?.startsWith("\x1b") && KOREAN_META_KEYS.get(key.sequence.slice(1));
+    if (koreanMetaKey) key = { ...key, name: koreanMetaKey };
     pendingCreated = null; // A later discovery must not steal selection after the user navigates.
     if (key.name === "paste-start") {
       if (startPaste()) return;

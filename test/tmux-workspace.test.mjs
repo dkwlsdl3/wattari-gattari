@@ -96,10 +96,10 @@ test("enter attaches an isolated server when outside tmux", async () => {
   assert.deepEqual(await workspace.enter({ cwd: "/tmp/project" }), { code: 3, mode: "isolated" });
   assert.ok(calls.some((args) => args.includes("new-session")));
   assert.ok(calls.some((args) => args.includes("status-right") && args.some((value) => value.includes("Alt+A agents · Alt+G dock"))));
-  for (const key of ["M-g", "M-G"]) {
+  for (const key of ["M-g", "M-G", "M-ㅎ"]) {
     assert.ok(calls.some((args) => args.includes("bind-key") && args.includes(key) && args.at(-1) === "select-window -t :overview ; send-keys -t :overview M-r"), `${key} must return to dock and refresh, including Caps Lock input`);
   }
-  for (const key of ["M-a", "M-A"]) {
+  for (const key of ["M-a", "M-A", "M-ㅁ"]) {
     assert.ok(calls.some((args) => args.includes("bind-key") && args.includes(key) && args.some((value) => value.includes("tmux-agents-view") && value.includes("#{window_id}"))), `${key} must open Agents, including Caps Lock input`);
   }
   assert.ok(launched[0].includes("attach-session"));

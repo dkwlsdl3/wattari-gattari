@@ -522,11 +522,11 @@ export class TmuxWorkspace {
       await this.#call([...prefix, "set-option", "-as", "terminal-features", ",*:RGB:extkeys"]);
       await this.#call([...prefix, "set-option", "-s", "extended-keys", "on"]);
       await this.#call([...prefix, "set-option", "-s", "escape-time", "0"]);
-      for (const key of ["M-g", "M-G"]) {
+      for (const key of ["M-g", "M-G", "M-ㅎ"]) {
         await this.#call([...prefix, "bind-key", "-n", key, "select-window -t :overview ; send-keys -t :overview M-r"]);
       }
       const agentsViewCommand = shellCommand("env", ["WAGA_TMUX_TARGET_SESSION=#{session_id}", "WAGA_TMUX_MODE=isolated", this.#nodePath, this.#cliPath, "tmux-agents-view", "#{window_id}"]);
-      for (const key of ["M-a", "M-A"]) {
+      for (const key of ["M-a", "M-A", "M-ㅁ"]) {
         await this.#call([...prefix, "bind-key", "-n", key, "run-shell", "-b", agentsViewCommand]);
       }
       await this.#call([...prefix, "bind-key", "-n", "S-Enter", "send-keys", "C-j"]);

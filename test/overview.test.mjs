@@ -490,6 +490,41 @@ test("Alt+Q leaves the dock", async () => {
   }
 });
 
+test("Korean Alt input opens and controls the composer when ESC plus jamo reaches the dock", async () => {
+  const input = rawTtyInput();
+  const output = capturedOutput();
+  const bridge = { async discover() { return { sessions: [], warnings: [] }; } };
+  const running = runOverview({ bridge, workspace: {}, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    input.write("\x1bㅜ"); // Alt+N in a Korean two-set layout.
+    await waitFor(() => /새 세션 생성/.test(plain(output.writes.at(-1))));
+    input.write("\x1bㅇ"); // Alt+D toggles provider defaults in the composer.
+    await waitFor(() => /라우팅 사용/.test(plain(output.writes.at(-1))));
+  } finally {
+    input.end();
+    await running;
+  }
+});
+
+test("Korean Alt+Q leaves the dock when the terminal sends ESC plus jamo", async () => {
+  const input = rawTtyInput();
+  const output = capturedOutput();
+  let leaves = 0;
+  const bridge = { async discover() { return { sessions: [], warnings: [] }; } };
+  const workspace = { async leave() { leaves += 1; return { closeOverview: true }; } };
+  const running = runOverview({ bridge, workspace, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  try {
+    await new Promise((resolve) => setImmediate(resolve));
+    input.write("\x1bㅂ");
+    await waitFor(() => leaves === 1);
+    assert.equal(await running, 0);
+  } finally {
+    input.end();
+    await running;
+  }
+});
+
 test("Alt+X twice archives the selected session and closes its retained view", async (t) => {
   const input = ttyInput();
   t.after(() => input.emit("end"));
