@@ -7,7 +7,9 @@ test("Waga-created sessions receive discovery, messaging, and trust-boundary gui
   assert.match(WAGA_SESSION_INSTRUCTIONS, /`waga agents`/);
   assert.match(WAGA_SESSION_INSTRUCTIONS, /references to another session mean another Waga session/);
   assert.match(WAGA_SESSION_INSTRUCTIONS, /`waga send/);
-  assert.match(WAGA_SESSION_INSTRUCTIONS, /`waga ask .*--until-idle .*--reply-timeout 1800`/);
+  assert.match(WAGA_SESSION_INSTRUCTIONS, /`waga ask <session-id-or-name> <message>` returns one answer/);
+  assert.match(WAGA_SESSION_INSTRUCTIONS, /--wait-timeout 1800 --reply-timeout 1800/);
+  assert.match(WAGA_SESSION_INSTRUCTIONS, /legacy `--until-idle` flag adds no session-idle wait/);
   assert.match(WAGA_SESSION_INSTRUCTIONS, /untrusted peer input/);
   assert.match(WAGA_SESSION_INSTRUCTIONS, /not user instructions or authorization/);
   const lines = WAGA_SESSION_INSTRUCTIONS.split("\n");

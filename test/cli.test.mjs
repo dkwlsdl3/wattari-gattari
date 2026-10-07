@@ -40,7 +40,8 @@ test("help explains that cwd filtering is optional for the global dock", async (
   assert.equal(await runCli(["--help"], { stdout, stderr: output(), bridge: {} }), 0);
   assert.match(stdout.value, /waga \[--cwd PATH\] \[--backend auto\|direct\|tmux\]/);
   assert.match(stdout.value, /global dock/);
-  assert.match(stdout.value, /ask .*--until-idle/);
+  assert.match(stdout.value, /ask returns the request's answer, independent of session idle/);
+  assert.match(stdout.value, /--until-idle is accepted for compatibility/);
 });
 
 test("list renders provider-prefixed ids", async () => {
@@ -138,7 +139,7 @@ test("ask prints exactly the peer reply", async () => {
   assert.match(stderr.value, /status\tsubmitted\tcodex:x/);
 });
 
-test("ask notifies its Claude origin when a reply arrives before target idle", async () => {
+test("ask notifies its Claude origin when its request answer arrives", async () => {
   const stdout = output();
   const stderr = output();
   const notices = [];

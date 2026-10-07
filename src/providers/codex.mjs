@@ -360,7 +360,7 @@ export class CodexProvider {
     });
   }
 
-  async ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, timeoutMs, untilIdle = false, onProgress = () => {}, onReply = async () => {} }) {
+  async ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, timeoutMs, onProgress = () => {}, onReply = async () => {} }) {
     return this.#withClient(async (client) => {
       const fallbackTimeout = timeoutMs ?? 180_000;
       const busyTimeout = waitTimeoutMs ?? fallbackTimeout;
@@ -385,34 +385,25 @@ export class CodexProvider {
       const turnId = started.turn.id;
       onProgress({ state: "submitted", target: session.id, delivery: "accepted", turnId });
       const replyDeadline = this.#now() + answerTimeout;
-      const replyError = Object.assign(new Error(`Codex session did not ${untilIdle ? "complete" : "reply"} within ${answerTimeout}ms`), { code: "REPLY_TIMEOUT" });
+      const replyError = Object.assign(new Error(`Codex request turn did not complete within ${answerTimeout}ms`), { code: "REPLY_TIMEOUT" });
       const replyRead = (method, params) => read(method, params, replyDeadline, replyError);
       const findReply = () => findInPages(replyRead, "thread/items/list", { threadId: session.nativeId, turnId, limit: 100, sortDirection: "desc" }, (data) => answerIn(data, turnId));
       while (this.#now() < replyDeadline) {
-        if (untilIdle) {
-          const turn = await findInPages(replyRead, "thread/turns/list", {
-            threadId: session.nativeId,
-            limit: 100,
-            sortDirection: "desc",
-            itemsView: "summary",
-          }, (data) => data.find((candidate) => candidate.id === turnId));
-          if (turn?.status === "failed" || turn?.status === "interrupted") {
-            throw Object.assign(new Error(`Codex turn ${turn.status}: ${turnId}`), { code: "TARGET_ERROR" });
-          }
-          if (turn?.status === "completed") {
-            const reply = await findReply();
-            if (!reply) throw Object.assign(new Error(`Codex turn completed without a reply: ${turnId}`), { code: "REPLY_MISSING" });
-            onProgress({ state: "replied", target: session.id, delivery: "accepted" });
-            await onReply(reply, { requestId, target: session.id });
-            return { target: session.id, requestId, turnId, reply, exchangeCount: 1, autoForwarded: false };
-          }
-        } else {
+        const turn = await findInPages(replyRead, "thread/turns/list", {
+          threadId: session.nativeId,
+          limit: 100,
+          sortDirection: "desc",
+          itemsView: "summary",
+        }, (data) => data.find((candidate) => candidate.id === turnId));
+        if (turn?.status === "failed" || turn?.status === "interrupted") {
+          throw Object.assign(new Error(`Codex turn ${turn.status}: ${turnId}`), { code: "TARGET_ERROR" });
+        }
+        if (turn?.status === "completed") {
           const reply = await findReply();
-          if (reply) {
-            onProgress({ state: "replied", target: session.id, delivery: "accepted" });
-            await onReply(reply, { requestId, target: session.id });
-            return { target: session.id, requestId, turnId, reply, exchangeCount: 1, autoForwarded: false };
-          }
+          if (!reply) throw Object.assign(new Error(`Codex turn completed without a reply: ${turnId}`), { code: "REPLY_MISSING" });
+          onProgress({ state: "replied", target: session.id, delivery: "accepted", reply });
+          await onReply(reply, { requestId, target: session.id });
+          return { target: session.id, requestId, turnId, reply, exchangeCount: 1, autoForwarded: false };
         }
         const { thread } = await read("thread/read", { threadId: session.nativeId, includeTurns: false }, replyDeadline, replyError);
         if (thread.status?.type === "systemError") throw Object.assign(new Error(`Codex turn failed: ${turnId}`), { code: "TARGET_ERROR" });
@@ -464,7 +455,7 @@ export class CodexProvider {
       }, data => data.find(candidate => candidate.id === record.turnId));
       if (!turn) return { state: "result-unknown" };
       if (["failed", "interrupted"].includes(turn.status)) return { state: turn.status };
-      if (record.untilIdle && turn.status !== "completed") return { state: "working" };
+      if (turn.status !== "completed") return { state: "working" };
       const reply = await findInPages(read, "thread/items/list", {
         threadId: record.session.nativeId, turnId: record.turnId, limit: 100, sortDirection: "desc",
       }, data => answerIn(data, record.turnId));

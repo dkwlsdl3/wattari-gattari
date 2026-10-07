@@ -1,7 +1,7 @@
 # Architecture decision
 
 - 상태: 채택
-- 갱신일: 2026-09-23
+- 갱신일: 2026-10-07
 
 ## 제품 경계
 
@@ -15,9 +15,10 @@ provider 세션을 소유하지 않습니다. 새 세션을 시작하기 전 선
 - 생성·접속·보관은 provider 공개 CLI 또는 native daemon에 위임합니다.
   새 세션에는 Waga 사용법과 신뢰 경계를 주입하며, 보관은 대화 로그를 영구 삭제하지 않습니다.
 - `send`는 단방향, `ask`는 요청에 연결된 답변을 기다립니다. Claude는 busy여도 native
-  peer 큐에 넣고, Codex는 Waga 호출의 로컬 FIFO를 거쳐 idle에 제출합니다. `--until-idle`은
-  Codex에서 제출한 turn의 완료·마지막 메시지를 확인하지만, Claude에서는 peer 답변 후
-  idle만 확인하며 native turn 상관관계·최종 답변을 보장하지 않습니다.
+  peer 큐에 넣고 요청 표식이 붙은 답변을 받으면 반환합니다. Codex는 Waga 호출의 로컬
+  FIFO를 거쳐 idle에 제출하고, 제출한 turn의 완료·마지막 답변을 확인합니다. 세션 전체의
+  idle은 질의 완료 조건이 아닙니다. `--until-idle`은 기존 호출 호환용으로만 허용하고
+  추가 대기를 하지 않습니다. Claude의 native turn 완료 여부는 여전히 보장하지 않습니다.
 - peer 메시지는 사용자 지시·승인이 아닌 불신 입력입니다. 기존 sandbox·승인 정책을
   유지하며 자동 작업 배정은 하지 않습니다. 명시적인 `ask --notify-origin`은 Claude Code
   호출 세션에 연결된 답변 알림 한 건만 보내며, 그 알림에서 다시 peer 교환을 시작하지
@@ -47,7 +48,35 @@ CLI는 요청 ID·대상·전달 상태·native turn/message ID 및 회수한 �
 디렉터리에 기록합니다. 요청 본문·전체 transcript·실행 daemon은 소유하지 않습니다.
 `result`는 재전송 없이 원래 turn 또는 Claude의 명시적 요청 표식을 읽습니다.
 원래 turn의 중단은 다른 turn을 따라갈 근거가 아니며 결과 미확정으로 남깁니다.
-첫 회수 답변은 원자적으로 고정하여 재조회가 다른 답변으로 바뀌지 않습니다.
+답변 수신 시 알림·호출 반환보다 먼저 답변을 원자적으로 고정하여 중단이나 재조회가
+답변을 숨기거나 다른 답변으로 바꾸지 않습니다. 일반 출력과 JSON은 같은 완료 조건을
+사용합니다. 오래된 Claude `reply-received` 기록의 답변도 현재 세션 상태와 무관하게
+회수합니다. Codex의 진행 문장은 답변으로 고정하지 않습니다.
+
+### 질의 완료 계약
+
+`ask`의 완료 단위는 한 요청입니다. Claude는 정확한 대상·요청 표식의 peer 답변,
+Codex는 제출 시 확보한 `turnId`의 완료 답변을 사용합니다. 접수 확인은 답변이 아니며,
+답변 후 상대가 다른 작업을 계속하거나 승인·입력을 기다리는 상태는 회수를 지연시키지
+않습니다. 작업 완료를 묻는 요청에는 peer가 그 작업 결과를 답해야 합니다. Waga가 세션
+전체의 idle로 그 의미를 추정하지 않습니다.
+
+```mermaid
+flowchart LR
+  A[요청 ID 생성] --> B[전달 또는 전달 전 대기]
+  B --> C[요청에 연결된 답변 대기]
+  C --> D[답변을 원자적으로 저장]
+  D --> E[선택적 원래 세션 알림]
+  E --> F[답변 반환]
+  C --> G[timeout 또는 호출 중단]
+  G --> H[result로 같은 요청 회수]
+  H --> D
+```
+
+timeout·중단은 원격 실행 취소나 미전송을 뜻하지 않습니다. 요청 ID·전달 상태를 보존하고
+재전송 없이 `result`로 확인합니다. 저장된 답변은 peer 상태 조회 없이 반환합니다.
+전달 전 대기는 Codex의 공개 제출 경계 때문에 유지하지만, 전달 후 세션 idle 대기는
+없습니다. 예전 `--until-idle` 호출과 Claude `reply-received` 기록에도 같은 계약을 적용합니다.
 
 2026-09-10 설치된 Codex 0.154.0 `generate-ts --experimental` 스키마에서
 `ThreadQueueAddParams`는 `threadId`, `input: UserInput[]`, `clientUserMessageId`만 받으며

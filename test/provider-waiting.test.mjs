@@ -78,54 +78,10 @@ test("Codex does not accept an answer received at the reply deadline", async () 
   assert.equal(calls.filter((method) => method === "turn/start").length, 1);
 });
 
-test("Claude completion waits through needs-input and uses the remaining reply deadline", async () => {
-  let now = 0;
-  let reads = 0;
-  const progress = [];
-  const { provider, calls } = claude(async () => [{ ...session, status: reads++ === 0 ? "idle" : "needs-input" }], {
-    now: () => now,
-    wait: async (ms) => { now += ms; },
-  });
-  await assert.rejects(provider.ask(session, "hello", { ...options, untilIdle: true, onProgress: ({ state }) => progress.push(state) }), { code: "REPLY_TIMEOUT" });
-  assert.deepEqual(calls, ["start", "send", "stop"]);
-  assert.deepEqual(progress, ["submitting", "submitted", "accepted", "reply-received", "working"]);
-});
-
-test("Claude exposes the reply to its caller before waiting for target idle", async () => {
-  let now = 0;
-  const events = [];
-  const { provider } = claude(async () => [{ ...session, status: "working" }], {
-    now: () => now,
-    wait: async (ms) => { now += ms; },
-  });
-  await assert.rejects(provider.ask(session, "hello", {
-    ...options, untilIdle: true,
-    onReply: async (reply) => { events.push(reply); },
-  }), { code: "REPLY_TIMEOUT" });
-  assert.deepEqual(events, ["ANSWER"]);
-});
-
 test("Claude unavailable state is not idle and cannot receive a new request", async () => {
   const { provider, calls } = claude(async () => [{ ...session, status: "unavailable" }]);
   await assert.rejects(provider.ask(session, "hello", options), { code: "TARGET_UNAVAILABLE" });
   assert.deepEqual(calls, []);
-});
-
-test("Claude approval and work transitions complete only at idle without sending twice", async () => {
-  let now = 0;
-  const states = ["needs-input", "working", "needs-input", "idle"];
-  const waits = [];
-  const progress = [];
-  const { provider, calls } = claude(async () => [{ ...session, status: states.shift() }], {
-    now: () => now,
-    wait: async (ms) => { waits.push(ms); now += ms; },
-  });
-  const result = await provider.ask(session, "hello", { ...options, waitTimeoutMs: 1000, replyTimeoutMs: 2000, untilIdle: true, onProgress: ({ state }) => progress.push(state) });
-  assert.equal(result.reply, "ANSWER");
-  assert.deepEqual(calls, ["start", "send", "stop"]);
-  assert.deepEqual(waits, [500, 1000]);
-  assert.deepEqual(states, []);
-  assert.deepEqual(progress, ["submitting", "submitted", "accepted", "reply-received", "working", "replied"]);
 });
 
 test("Claude revalidates the exact target among decoys and never substitutes a missing target", async () => {
@@ -164,9 +120,10 @@ for (const stalledMethod of ["thread/items/list", "thread/turns/list", "thread/r
       if (method === "thread/read" && reads++ === 0) return { thread: { status: { type: "idle" } } };
       if (method === "turn/start") return { turn: { id: "wanted" } };
       if (method === stalledMethod) { signal = settings.signal; return new Promise(() => {}); }
+      if (method === "thread/turns/list") return { data: [{ id: "wanted", status: stalledMethod === "thread/items/list" ? "completed" : "inProgress" }] };
       return { data: [] };
     }, { now: () => 0 });
-    const pending = provider.ask(target, "hello", { ...options, untilIdle: stalledMethod === "thread/turns/list" })
+    const pending = provider.ask(target, "hello", options)
       .then(() => "success", (error) => error.code);
     await flush();
     t.mock.timers.tick(200);

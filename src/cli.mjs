@@ -27,7 +27,9 @@ function usage() {
     "                                Open the global dock, optionally filtered by workspace",
     `${CLI_NAME} list [--provider claude|codex] [--cwd PATH] [--json]`,
     `${CLI_NAME} send <session-id-or-name> <message> [--cwd PATH]    One-way notification`,
-    `${CLI_NAME} ask <session-id-or-name> <message> [--until-idle] [--notify-origin] [--wait-timeout SEC] [--reply-timeout SEC] [--cwd PATH]`,
+    `${CLI_NAME} ask <session-id-or-name> <message> [--notify-origin] [--wait-timeout SEC] [--reply-timeout SEC] [--cwd PATH]`,
+    "                                ask returns the request's answer, independent of session idle.",
+    "                                --until-idle is accepted for compatibility; it adds no session-idle wait.",
     `${CLI_NAME} result <request-id> [--json]    Read an existing request; never resend`,
     "                                ask: busy wait 1800s; reply wait 180s. Use explicit timeouts for long work.",
     `${CLI_NAME} open <claude|codex> [--cwd PATH]`,
@@ -103,7 +105,7 @@ export async function runCli(args = process.argv.slice(2), {
       "not-sent": "not sent", "waiting-local": "not sent; waiting behind another Waga request",
       waiting: "not sent; target busy", submitting: "submission in progress; delivery unknown",
       submitted: delivery === "accepted" ? "native submission acknowledged" : "written; receiver acceptance unconfirmed",
-      accepted: "receiver acknowledged", "reply-received": "reply received; waiting for idle", working: "reply received; target still busy",
+      accepted: "receiver acknowledged", "reply-received": "request answer received", working: "request turn still running",
       replied: "reply ready",
     }[state] ?? state;
     stderr.write(`status\t${state}\t${target}\t${requestId ?? "-"}\t${explanation}\n`);

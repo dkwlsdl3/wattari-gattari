@@ -134,7 +134,10 @@ export class SessionBridge {
     const progress = (event) => {
       const fields = { ...event };
       delete fields.target;
-      if (fields.state === "replied") fields.state = "reply-received";
+      if (fields.reply !== undefined) {
+        const answer = this.#requests.reply(record.requestId, { state: "replied", delivery: "accepted", reply: fields.reply });
+        Object.assign(fields, answer);
+      }
       this.#requests.update(record, fields);
       options.onProgress?.({ ...event, target: session.id, requestId: record.requestId, delivery: record.delivery });
     };

@@ -48,7 +48,7 @@ waga list --json
 
 waga send codex:<thread-id> "Inspect the ADR"
 waga ask claude:<session-id> "Review the current API contract"
-waga ask codex:<thread-id> "Run the full verification" --until-idle
+waga ask codex:<thread-id> "Run the full verification"
 waga open codex --cwd ~/work/my-app
 ```
 
@@ -168,22 +168,27 @@ Waga does not change other sessions' display modes or global settings.
 
 - `send`: one-way notification; confirms submission only.
 - `ask`: Claude queues a native peer message even while busy and waits for a request-tagged reply.
-  Codex serializes Waga callers in admission order, waits for idle, then submits a peer turn.
-- `ask --until-idle`: Codex confirms the submitted turn's completion and returns its
-  last answer. Claude checks idle after the peer reply, without native-turn correlation
-  or a guarantee that this is the final answer.
+  Codex serializes Waga callers in admission order, waits for idle before submitting a peer turn,
+  and returns that turn's completed answer. Both providers complete the exchange when
+  the request has an answer, independently of the peer's other work or session idle state.
+- `--until-idle` is accepted for compatibility with older sessions and scripts.
+  It adds no session-idle wait; omit it in new calls.
+- `ask --notify-origin` sends one native answer notification to the originating Claude
+  session, useful for background calls. Read the full answer with `waga result <request-id>`.
 
 Progress includes a request UUID. `not-sent`, `waiting-local`, and `waiting` mean no
 submission yet. `submitting` means delivery is unknown if interrupted. `submitted`
 means written (Claude acceptance unconfirmed) or acknowledged by Codex. `accepted`
 is a Claude receipt, and `replied` means the correlated answer is ready.
 
-For long reviews, specify `--until-idle --wait-timeout 1800 --reply-timeout 1800`.
+For long reviews, specify `--wait-timeout 1800 --reply-timeout 1800`.
 The default pre-submission wait is 1800 seconds and reply wait is 180 seconds.
 Claude only uses the first deadline for identity lookup; its native queue wait
 counts against the reply deadline.
 
-Use `waga result <request-id> [--json]` after a timeout, without resending. Exit 0
+Use `waga result <request-id> [--json]` after a timeout or interruption, without resending.
+Interruption does not imply non-delivery. Stored Claude answers, including legacy
+`reply-received` records, are returned without a live peer lookup in plain text and JSON. Exit 0
 means a reply, 3 means pending/unknown/not-sent/interrupted, and 1 means lookup
 failure. Send/ask failures exit 1 and report the request ID and delivery state.
 Enable `set -o pipefail` when piping output to preserve failures.

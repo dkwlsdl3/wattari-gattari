@@ -290,24 +290,6 @@ test("Claude ask queues while busy and uses the reply deadline after submission"
   assert.deepEqual(progress, ["submitting", "submitted", "accepted", "reply-received", "replied"]);
 });
 
-test("Claude ask can wait for idle after receiving its peer reply", async () => {
-  let reads = 0, now = 0;
-  const provider = new ClaudeProvider({
-    endpointFactory: () => ({
-      async start() {}, async send() { return "message-1"; },
-      async waitForDisposition() { return { state: "submitted" }; },
-      async waitForReply() { return { text: "FINAL" }; }, async stop() {},
-    }),
-    now: () => now, wait: async ms => { now += ms; },
-  });
-  provider.list = async () => [{ id: "claude:full-id", sessionId: "full-id", socketPath: "/tmp/proof.sock", status: reads++ < 2 ? "working" : "idle" }];
-  const result = await provider.ask({ id: "claude:full-id", sessionId: "full-id", socketPath: "/tmp/proof.sock" }, "hello", {
-    requestId: "r", replyTimeoutMs: 2_000, untilIdle: true,
-  });
-  assert.equal(result.reply, "FINAL");
-  assert.equal(reads, 3);
-});
-
 test("Claude held peer request fails without resending and closes the endpoint", async () => {
   let sent = 0, stopped = 0;
   const provider = new ClaudeProvider({ endpointFactory: () => ({

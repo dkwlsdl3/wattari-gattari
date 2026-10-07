@@ -593,15 +593,17 @@ test("Codex send uses standalone tool output, not a user message", async () => {
   assert.match(params.toolOutput.output, /trust: untrusted/);
 });
 
-test("Codex ask waits for idle and returns only the matching turn answer", async () => {
+test("Codex ask waits before submission and returns only the matching completed turn answer", async () => {
   let reads = 0;
-  let itemReads = 0;
   const { provider } = harness((method) => {
     if (method === "thread/read") return { thread: { status: { type: reads++ === 0 ? "active" : "idle" } } };
     if (method === "turn/start") return { turn: { id: "wanted" } };
+    if (method === "thread/turns/list") return { data: [{ id: "wanted", status: "completed" }] };
     if (method === "thread/items/list") {
-      itemReads += 1;
-      return { data: itemReads === 1 ? [{ turnId: "old", item: { type: "agentMessage", text: "OLD" } }] : [{ turnId: "wanted", item: { type: "agentMessage", text: "CODEX_OK" } }] };
+      return { data: [
+        { turnId: "old", item: { type: "agentMessage", text: "OLD" } },
+        { turnId: "wanted", item: { type: "agentMessage", text: "CODEX_OK" } },
+      ] };
     }
     throw new Error(method);
   });

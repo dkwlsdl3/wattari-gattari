@@ -73,7 +73,6 @@ export class ClaudeProvider {
   #endpointFactory;
   #aliases;
   #titleSync;
-  #wait;
   #now;
   #usageReader;
   #usageCacheMs;
@@ -81,13 +80,12 @@ export class ClaudeProvider {
   #usageRefresh = null;
   #previewReader = new ClaudePreviewReader();
 
-  constructor({ homeDirectory = os.homedir(), run = defaultRun, endpointFactory, aliasCatalog = null, titleSync = null, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now, usageReader = null, usageCacheMs = USAGE_CACHE_MS } = {}) {
+  constructor({ homeDirectory = os.homedir(), run = defaultRun, endpointFactory, aliasCatalog = null, titleSync = null, now = Date.now, usageReader = null, usageCacheMs = USAGE_CACHE_MS } = {}) {
     this.#home = homeDirectory;
     this.#run = run;
     this.#endpointFactory = endpointFactory ?? ((options) => new ClaudePeerEndpoint(options));
     this.#aliases = aliasCatalog ?? new SessionAliasCatalog(defaultClaudeAliasPath(process.env, homeDirectory));
     this.#titleSync = titleSync ?? new ClaudeTitleSync(path.join(path.dirname(defaultClaudeAliasPath(process.env, homeDirectory)), "claude-title-sync"));
-    this.#wait = wait;
     this.#now = now;
     this.#usageReader = usageReader ?? (() => readClaudeUsage({ homeDirectory: this.#home, now: this.#now }));
     this.#usageCacheMs = usageCacheMs;
@@ -198,7 +196,7 @@ export class ClaudeProvider {
     }
   }
 
-  async ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, timeoutMs, untilIdle = false, onProgress = () => {}, onReply = async () => {} }) {
+  async ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, timeoutMs, onProgress = () => {}, onReply = async () => {} }) {
     const envelope = buildPeerEnvelope({ message, requestId, expectsReply: true });
     const fallbackTimeout = timeoutMs ?? 180_000;
     // Peer priority "next" queues natively even while Claude is working.
@@ -217,7 +215,7 @@ export class ClaudeProvider {
       onProgress({ state: "submitted", target: session.id, delivery: "submitted", messageId });
       const answerTimeout = replyTimeoutMs ?? fallbackTimeout;
       const replyDeadline = this.#now() + answerTimeout;
-      const completionError = Object.assign(new Error(`Claude session did not ${untilIdle ? "complete" : "reply"} within ${answerTimeout}ms`), { code: "REPLY_TIMEOUT" });
+      const completionError = Object.assign(new Error(`Claude request did not receive a reply within ${answerTimeout}ms`), { code: "REPLY_TIMEOUT" });
       const disposition = await endpoint.waitForDisposition(messageId, { timeoutMs: Math.min(150, answerTimeout) });
       if (disposition.state === "accepted") onProgress({ state: "accepted", target: session.id, delivery: "accepted", messageId });
       const reply = await readBeforeDeadline(() => endpoint.waitForReply(current.socketPath, messageId, { timeoutMs: Math.max(1, replyDeadline - this.#now()), requestId }), {
@@ -225,10 +223,6 @@ export class ClaudeProvider {
       });
       onProgress({ state: "reply-received", target: session.id, delivery: "accepted", reply: reply.text });
       await onReply(reply.text, { requestId, target: session.id });
-      if (untilIdle) {
-        const remaining = replyDeadline - this.#now();
-        await this.#waitUntilIdle(current, { timeoutMs: remaining, onProgress, waitingState: "working", timeoutError: completionError });
-      }
       onProgress({ state: "replied", target: session.id, delivery: "accepted" });
       return { target: session.id, requestId, messageId, reply: reply.text, exchangeCount: 1, autoForwarded: false };
     } finally {
@@ -243,27 +237,6 @@ export class ClaudeProvider {
       homeDirectory: this.#home, since: record.createdAt, fromSocket: record.fromSocket,
     });
     if (!reply) return { state: "result-unknown" };
-    if (record.untilIdle) {
-      const sessions = await this.list({ cwd: record.session.projectCwd });
-      const target = sessions.find(session => session.id === record.target);
-      if (target?.status !== "idle") return { state: "reply-received", reply };
-    }
     return { state: "replied", reply };
-  }
-
-  async #waitUntilIdle(session, { timeoutMs, onProgress, waitingState = "waiting", timeoutError }) {
-    const deadline = this.#now() + timeoutMs;
-    const error = timeoutError ?? Object.assign(new Error(`Claude target stayed busy for ${timeoutMs}ms`), { code: "TARGET_BUSY_TIMEOUT" });
-    let waiting = false;
-    let pollIntervalMs = 500;
-    while (true) {
-      const sessions = await readBeforeDeadline((signal) => this.list({ cwd: session.projectCwd, signal }), { deadline, now: this.#now, error });
-      const current = sessions.find((candidate) => candidate.id === session.id || candidate.sessionId === session.sessionId);
-      if (!current || !["idle", "working", "needs-input"].includes(current.status)) throw Object.assign(new Error(`Claude target is unavailable: ${session.id}`), { code: "TARGET_UNAVAILABLE" });
-      if (current.status === "idle") return current;
-      if (!waiting) { onProgress({ state: waitingState, target: session.id }); waiting = true; }
-      await this.#wait(Math.min(pollIntervalMs, Math.max(1, deadline - this.#now())));
-      pollIntervalMs = Math.min(5_000, pollIntervalMs * 2);
-    }
   }
 }

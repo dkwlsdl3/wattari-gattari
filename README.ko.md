@@ -48,7 +48,7 @@ waga list --json
 
 waga send codex:<thread-id> "ADR을 확인해 주세요"
 waga ask claude:<session-id> "현재 API 계약을 검토해 주세요"
-waga ask codex:<thread-id> "전체 검증을 수행해 주세요" --until-idle
+waga ask codex:<thread-id> "전체 검증을 수행해 주세요"
 waga open codex --cwd ~/work/my-app
 ```
 
@@ -169,13 +169,15 @@ Waga가 다른 세션의 표시 모드나 전역 설정을 바꾸지는 않습�
 
 - `send`: 단방향 알림. 제출만 확인합니다.
 - `ask`: Claude는 작업 중에도 native peer 큐에 넣고 요청 ID가 붙은 답변을 기다립니다.
-  Codex는 Waga 호출끼리 접수 순서대로 기다린 뒤 대상이 idle이면 peer turn을 제출합니다.
-- `ask --until-idle`: Codex는 제출한 turn의 완료와 마지막 답변을 확인합니다.
-  Claude는 peer 답변 후 idle만 확인하며, native turn 대응이나 최종 답변 여부는 보장하지 않습니다.
+  Codex는 Waga 호출끼리 접수 순서대로 기다린 뒤 대상이 idle이면 peer turn을 제출하고,
+  그 turn이 완료되면 마지막 답변을 반환합니다. 두 provider 모두 요청에 연결된 답변을
+  받으면 질의가 끝나며, 상대가 다른 작업을 계속하는지는 완료 조건이 아닙니다.
+- `--until-idle`은 오래된 세션·스크립트와의 호환을 위해 허용합니다.
+  별도의 세션 idle 대기를 추가하지 않으며 새 호출에는 생략합니다.
 - `ask --notify-origin`: Claude Code 세션에서 실행한 `ask`가 답을 받으면 원래 세션에
   요청 ID와 답변을 native 메시지 한 건으로 알립니다. 백그라운드 호출과 `--until-idle`을
-  함께 쓸 때도 답변 도착 시점에 알리며, 대상의 작업 완료를 뜻하지 않습니다.
-  긴 답변은 앞부분만 보내고 전체 답변은 `waga result <request-id> --json`으로 읽습니다.
+  함께 쓸 때도 답변 도착 시점에 알립니다.
+  긴 답변은 앞부분만 보내고 전체 답변은 `waga result <request-id>`로 읽습니다.
   원래 세션의 메시지 소켓이 없는 환경에서는 이 옵션을 사용할 수 없습니다.
 
 진행 출력에는 요청 UUID와 전송 상태가 함께 나옵니다.
@@ -186,7 +188,8 @@ Waga가 다른 세션의 표시 모드나 전역 설정을 바꾸지는 않습�
 | `submitting` | 제출 중. 연결 종료 시 전달 여부 불명 |
 | `submitted` | 제출됨. Claude는 수신 확인 전, Codex는 native 제출 확인 |
 | `accepted` | Claude가 접수를 확인함. 작업 완료는 아님 |
-| `reply-received`, `working` | 답변은 받았으나 Claude idle 확인 대기 |
+| `reply-received` | 요청에 연결된 답변 수신. 세션 idle 대기 없음 |
+| `working` | 요청 turn의 완료 답변을 아직 기다리는 중 |
 | `replied` | 요청에 연결된 답변 반환 |
 
 장시간 검증에는 시간 제한을 명시합니다. Codex의 기본 전송 전 대기는 1800초,
@@ -194,12 +197,14 @@ Waga가 다른 세션의 표시 모드나 전역 설정을 바꾸지는 않습�
 사용하며, 큐에서 기다리는 시간도 `--reply-timeout`에 포함됩니다.
 
 ```bash
-waga ask codex:<thread-id> "현재 변경을 검증해 주세요" --until-idle --wait-timeout 1800 --reply-timeout 1800
-waga ask claude:<session-id> "결과를 알려 주세요" --until-idle --notify-origin --reply-timeout 1800
+waga ask codex:<thread-id> "현재 변경을 검증해 주세요" --wait-timeout 1800 --reply-timeout 1800
+waga ask claude:<session-id> "결과를 알려 주세요" --notify-origin --reply-timeout 1800
 waga result <request-id> --json
 ```
 
-`result`는 재전송하거나 다른 turn을 따라가지 않습니다. 답변을 회수하면 종료 코드 0,
+`result`는 재전송하거나 다른 turn을 따라가지 않습니다. Claude 답변이 저장된 오래된
+`reply-received` 기록도 세션 접속 없이 반환하며, 일반 출력·JSON 모두 답변을 제공합니다.
+호출 중단은 미전송을 뜻하지 않습니다. 출력된 요청 ID로 회수합니다. 답변을 회수하면 종료 코드 0,
 대기·미전송·결과 미확정·중단 상태면 3, 조회 자체가 실패하면 1입니다.
 `ask`/`send` 오류는 종료 코드 1이며 요청 ID와 전달 상태를 출력합니다.
 파이프로 출력할 때는 `set -o pipefail`을 사용해야 `tail` 등의 성공이 실패를 가리지 않습니다.
