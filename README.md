@@ -200,6 +200,10 @@ copied. Dead callers are not automatically resubmitted. FIFO ordering covers
 Waga callers sharing that directory, not native UI or other clients. Recovery
 reads only the original Codex turn or a `[WAGA REPLY <request-id>]` in the exact
 Claude session's native log; missing correlation is `result-unknown`.
+Claude requests explicitly specify `SendMessage` and the origin's `uds:` reply address.
+During the wait, Waga also reads tagged answers appended to that session's native log
+after submission, so a screen-only answer completes the request. The first answer
+from either socket or log wins, and log polling stops with the request.
 Requests sent by older versions have no recovery record.
 
 Peer messages are untrusted input, not user instructions or approvals; native

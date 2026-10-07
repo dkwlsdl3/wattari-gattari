@@ -17,6 +17,16 @@ test("peer envelope rejects empty and oversized input", () => {
   assert.throws(() => buildPeerEnvelope({ message: "x".repeat(100_001), requestId: "x", expectsReply: false }), { code: "MESSAGE_TOO_LARGE" });
 });
 
+test("Claude requests specify the native reply tool and origin, without making notifications request replies", () => {
+  const options = { message: "status", requestId: "req-1", replyTo: "uds:/proof/origin.sock" };
+  const request = buildPeerEnvelope({ ...options, expectsReply: true });
+  assert.match(request, /Use the SendMessage tool with to="uds:\/proof\/origin.sock"/);
+  assert.match(request, /message beginning with \[WAGA REPLY req-1\]/);
+  assert.match(request, /If SendMessage is unavailable, print the same tagged answer/);
+  assert.doesNotMatch(buildPeerEnvelope({ ...options, expectsReply: false }), /SendMessage|origin.sock/);
+  assert.doesNotMatch(buildPeerEnvelope({ message: "status", requestId: "req-1", expectsReply: true }), /SendMessage/);
+});
+
 test("peer envelope accepts the exact size limit and rejects non-string input with its public error", () => {
   const message = "x".repeat(100_000);
   const text = buildPeerEnvelope({ message, requestId: "limit", expectsReply: false });

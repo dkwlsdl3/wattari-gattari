@@ -17,6 +17,56 @@ function storeFor(t) {
 }
 function output() { return { value: "", write(text) { this.value += text; } }; }
 
+test("Claude ask recovers the measured screen-only answer without waiting for SendMessage or idle", async t => {
+  const store = storeFor(t), home = store.directory;
+  // Keeper #259, 2026-10-07: assistant printed this answer four minutes before SendMessage.
+  const row = JSON.parse(fs.readFileSync(new URL("./fixtures/claude-screen-reply.jsonl", import.meta.url), "utf8"));
+  const requestId = "fd6cbf57-f39c-482d-a025-40555a93a9f3";
+  const session = { id: `claude:${row.sessionId}`, sessionId: row.sessionId, provider: "claude", cwd: "/tmp/waga-proof-screen-reply", socketPath: "/proof/peer.sock", status: "working" };
+  const directory = path.join(home, ".claude", "projects", "-tmp-waga-proof-screen-reply");
+  fs.mkdirSync(directory, { recursive: true });
+  const file = path.join(directory, `${row.sessionId}.jsonl`);
+  // A prior answer with the same tag must not satisfy this new invocation.
+  fs.writeFileSync(file, JSON.stringify({ ...row, timestamp: new Date().toISOString() }) + "\n");
+  let sent = 0, stopped = 0, envelope, appended = false;
+  let rejectSocket;
+  const provider = new ClaudeProvider({ homeDirectory: home, endpointFactory: () => ({
+    socketPath: "/proof/origin.sock",
+    async start() {},
+    async send(_socket, text) {
+      sent++; envelope = text;
+      // A proposed tool call is not delivery. The live fallback must leave the
+      // socket open until the tool actually sends, or assistant text appears.
+      fs.appendFileSync(file, JSON.stringify({ ...row, timestamp: new Date().toISOString(), message: {
+        role: "assistant", content: [{ type: "tool_use", name: "SendMessage", input: {
+          to: "uds:/proof/origin.sock", message: `[WAGA REPLY ${requestId}] UNSENT_TOOL_CALL`,
+        } }],
+      } }) + "\n");
+      // The actual answer is assistant text. No socket response is ever sent.
+      setTimeout(() => {
+        fs.appendFileSync(file, JSON.stringify({ ...row, timestamp: new Date().toISOString() }) + "\n");
+        appended = true;
+      }, 10);
+      return "message";
+    },
+    async waitForDisposition() { return { state: "accepted" }; },
+    waitForReply() { return new Promise((_, reject) => { rejectSocket = reject; }); },
+    async stop() { stopped++; rejectSocket?.(new Error("closed")); },
+  }) });
+  provider.list = async () => [session];
+  const progress = [];
+  const answer = await provider.ask(session, "사용 중입니까?", {
+    requestId, replyTimeoutMs: 800, untilIdle: true, onProgress: event => progress.push(event.state),
+  });
+  assert.equal(answer.reply, row.message.content[0].text);
+  assert.equal(appended, true, "the old tagged answer must not satisfy this request");
+  assert.equal(sent, 1);
+  assert.equal(stopped, 1);
+  assert.deepEqual(progress, ["submitting", "submitted", "accepted", "reply-received", "replied"]);
+  assert.match(envelope, /SendMessage/);
+  assert.match(envelope, /uds:\/proof\/origin\.sock/);
+});
+
 for (const status of ["working", "needs-input"]) {
   test(`Claude CLI returns its answer while the peer remains ${status}, including legacy --until-idle`, async t => {
     const store = storeFor(t);
