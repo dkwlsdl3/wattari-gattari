@@ -8,9 +8,56 @@ import test from "node:test";
 import { ClaudeProvider, parseClaudeAgents, parseClaudeBackgroundId } from "../src/providers/claude.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../src/managed-session-instructions.mjs";
 import { ClaudeTitleSync } from "../src/claude-title-sync.mjs";
+import { buildOverviewFrame } from "../src/overview.mjs";
 
 // Anonymized from `claude agents --json` on 2026-09-08: interactive rows have no attach id.
 const mixedAgents = JSON.parse(fs.readFileSync(new URL("./fixtures/claude-agents-mixed.json", import.meta.url), "utf8"));
+
+// Anonymized from Claude Code 2.1.294 `agents --json` on 2026-10-08.
+const nativeStatuses = JSON.parse(fs.readFileSync(new URL("./fixtures/claude-agents-status.json", import.meta.url), "utf8"));
+
+test("Claude discovery and dock distinguish inactive tasks, input waits, completion and live work", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-status-"));
+  const registryDirectory = path.join(root, ".claude", "sessions");
+  fs.mkdirSync(registryDirectory, { recursive: true });
+  const socketPath = path.join(root, "peer.sock");
+  const server = net.createServer();
+  await new Promise(resolve => server.listen(socketPath, resolve));
+  t.after(() => { server.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  const expected = ["idle", "needs-input", "done", "working"];
+  const listed = [];
+  for (const [index, measured] of nativeStatuses.entries()) {
+    const row = { ...measured, pid: process.pid, cwd: root };
+    fs.writeFileSync(path.join(registryDirectory, `${process.pid}.json`), JSON.stringify({
+      ...row, peerProtocol: 1, messagingSocketPath: socketPath,
+    }));
+    const provider = new ClaudeProvider({ homeDirectory: root, run: async () => ({ stdout: JSON.stringify([row]) }) });
+    const sessions = await provider.list();
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0].status, expected[index], row.name);
+    listed.push(sessions[0]);
+  }
+  const frame = buildOverviewFrame({ sessions: listed, width: 140, height: 24 }).replace(/\x1b\[[0-9;]*m/g, "");
+  assert.match(frame, /idle task[^\n]*idle/);
+  assert.match(frame, /input required[^\n]*needs input/);
+  assert.match(frame, /finished task[^\n]*done/);
+  assert.match(frame, /active task[^\n]*working/);
+  assert.match(frame, /1 need input\s+1 working\s+1 idle\s+1 done/);
+});
+
+test("Claude completed sessions remain eligible for a new peer query", async () => {
+  let sent = 0;
+  const provider = new ClaudeProvider({ endpointFactory: () => ({
+    async start() {}, async send() { sent++; return "message-1"; },
+    async waitForDisposition() { return { state: "accepted" }; },
+    async waitForReply() { return { text: "OK" }; }, async stop() {},
+  }) });
+  const session = { id: "claude:full-id", sessionId: "full-id", socketPath: "/tmp/proof.sock", status: "done" };
+  provider.list = async () => [session];
+  const result = await provider.ask(session, "hello", { requestId: "r" });
+  assert.equal(sent, 1);
+  assert.equal(result.reply, "OK");
+});
 
 test("mixed native agents output preserves background sessions when an interactive row has no id", () => {
   assert.deepEqual(parseClaudeAgents(JSON.stringify(mixedAgents)), mixedAgents.slice(0, 2));

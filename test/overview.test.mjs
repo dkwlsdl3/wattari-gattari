@@ -379,7 +379,7 @@ test("overview uses native provider colors and colors usage independently", () =
   assert.match(frame, /\x1b\[1;38;2;217;119;87mClaude 5시간 90% 남음 · 주간 6% 남음\x1b\[0m/);
   assert.match(frame, /\x1b\[1;36mCodex 주간 2% 남음\x1b\[0m/);
   assert.match(frame, /\x1b\[1;32m●\x1b\[0m.*\x1b\[1;32mworking/);
-  assert.match(frame, /\x1b\[1;34m○\x1b\[0m.*\x1b\[1;34mready/);
+  assert.match(frame, /\x1b\[1;34m○\x1b\[0m.*\x1b\[1;34midle/);
   assert.match(frame, /\x1b\[1;31m!\x1b\[0m.*\x1b\[1;31mneeds input/);
   assert.doesNotMatch(frame, /38;2;(56;189;248|250;204;21|192;132;252|34;211;238|45;212;191)m/);
 });
@@ -554,7 +554,7 @@ test("Alt+X twice archives the selected session and closes its retained view", a
   await waitFor(() => archiveCalls.length === 1 && closedViews.length === 1);
   assert.deepEqual(archiveCalls, [["codex:archive-me", {}]]);
   assert.deepEqual(closedViews, ["codex:archive-me"]);
-  await waitFor(() => /0 need input\s+0 working\s+0 ready/.test(plain(output.writes.at(-1))));
+  await waitFor(() => /0 need input\s+0 working\s+0 idle\s+0 done/.test(plain(output.writes.at(-1))));
 
   pressAlt(input, "q");
   assert.equal(await running, 0);

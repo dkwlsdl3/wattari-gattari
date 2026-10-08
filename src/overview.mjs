@@ -328,13 +328,14 @@ function statusView(status) {
   if (status === "needs-input") return ["!", "needs input", THEME.needsInput];
   if (status === "working") return ["●", "working", THEME.working];
   if (status === "error") return ["!", "error", THEME.error];
-  if (status === "idle") return ["○", "ready", THEME.idle];
+  if (status === "idle") return ["○", "idle", THEME.idle];
+  if (status === "done") return ["✓", "done", THEME.idle];
   return ["·", safeText(status || "unknown"), THEME.muted];
 }
 
 function counts(sessions) {
   const count = (status) => sessions.filter((session) => session.status === status).length;
-  return `${count("needs-input")} need input   ${count("working")} working   ${count("idle")} ready`;
+  return `${count("needs-input")} need input   ${count("working")} working   ${count("idle")} idle   ${count("done")} done`;
 }
 
 function resetText(resetsAt) {

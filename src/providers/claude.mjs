@@ -60,9 +60,14 @@ export function parseClaudeBackgroundId(stdout) {
 }
 
 function statusOf(row) {
-  if (row.status === "busy" || row.state === "working") return "working";
+  // status is live execution; state persists after the native turn becomes idle.
+  if (row.status === "busy") return "working";
   if (row.status === "waiting") return "needs-input";
-  if (row.status === "idle") return "idle";
+  if (row.status === "idle") {
+    if (row.state === "blocked") return "needs-input";
+    if (row.state === "done") return "done";
+    return "idle";
+  }
   return "unavailable";
 }
 
@@ -205,7 +210,7 @@ export class ClaudeProvider {
       deadline: this.#now() + identityTimeout, now: this.#now, error: identityError,
     });
     const current = sessions.find(candidate => candidate.id === session.id && candidate.sessionId === session.sessionId);
-    if (!current || !["idle", "working", "needs-input"].includes(current.status)) throw Object.assign(new Error(`Claude target is unavailable: ${session.id}`), { code: "TARGET_UNAVAILABLE" });
+    if (!current || !["idle", "working", "needs-input", "done"].includes(current.status)) throw Object.assign(new Error(`Claude target is unavailable: ${session.id}`), { code: "TARGET_UNAVAILABLE" });
     const endpoint = this.#endpointFactory({ homeDirectory: this.#home, cwd: process.cwd() });
     try {
       await endpoint.start({ socketDirectory: path.dirname(current.socketPath) });
