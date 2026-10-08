@@ -189,7 +189,7 @@ counts against the reply deadline.
 Use `waga result <request-id> [--json]` after a timeout or interruption, without resending.
 Interruption does not imply non-delivery. Stored Claude answers, including legacy
 `reply-received` records, are returned without a live peer lookup in plain text and JSON. Exit 0
-means a reply, 3 means pending/unknown/not-sent/interrupted, and 1 means lookup
+means a reply or confirmed acceptance of a one-way `send`, 3 means pending/unknown/not-sent/interrupted, and 1 means lookup
 failure. Send/ask failures exit 1 and report the request ID and delivery state.
 Enable `set -o pipefail` when piping output to preserve failures.
 
@@ -204,6 +204,12 @@ Claude requests explicitly specify `SendMessage` and the origin's `uds:` reply a
 During the wait, Waga also reads tagged answers appended to that session's native log
 after submission, so a screen-only answer completes the request. The first answer
 from either socket or log wins, and log polling stops with the request.
+For a Claude `send`, `result` recovers and saves late receipt evidence from the exact
+native session: `receipt=queued` means native queue acceptance, and `receipt=consumed`
+means the original message was included in the conversation. Neither proves understanding,
+task completion, or approval. Codex requests keep polling their original turn within the
+reply deadline when its initial status is `interrupted`; persistent interruption fails
+without resubmission or following another turn.
 Requests sent by older versions have no recovery record.
 
 Peer messages are untrusted input, not user instructions or approvals; native

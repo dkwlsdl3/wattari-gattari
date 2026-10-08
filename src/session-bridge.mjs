@@ -166,14 +166,21 @@ export class SessionBridge {
   async result(requestId) {
     if (!this.#requests) throw new BridgeError("REQUEST_STORE_UNAVAILABLE", "Request storage is unavailable");
     const record = this.#requests.read(requestId);
-    const base = { requestId, target: record.target, delivery: record.delivery, state: record.state, lastError: record.error, turnId: record.turnId, messageId: record.messageId };
+    const base = { requestId, target: record.target, delivery: record.delivery, state: record.state, lastError: record.error, turnId: record.turnId, messageId: record.messageId, ...(record.kind === "send" ? { kind: "send" } : {}), ...(record.receipt ? { receipt: record.receipt } : {}) };
     const cached = this.#requests.reply(requestId);
     if (cached) return { ...base, ...cached };
     if (record.state === "replied" && record.reply !== undefined) return { ...base, reply: record.reply };
     if (record.delivery === "not-sent") return { ...base, state: this.#requests.active(record) ? record.state : "not-sent" };
     if (["held", "refused"].includes(record.delivery)) return { ...base, state: record.delivery };
-    if (record.kind === "send") return base;
     const provider = this.#provider(record.session.provider);
+    if (record.kind === "send") {
+      if (provider.name !== "claude" || record.receipt === "consumed") return base;
+      const result = await provider.result(record);
+      const current = this.#requests.read(requestId);
+      if (current.receipt === "consumed") return { ...base, state: current.state, delivery: current.delivery, receipt: current.receipt };
+      if (result.receipt) this.#requests.update(record, result);
+      return { ...base, ...result };
+    }
     const result = await provider.result(record);
     return { ...base, ...(result.state === "replied" ? this.#requests.reply(requestId, { ...result, delivery: "accepted" }) : result) };
   }

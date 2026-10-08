@@ -1,7 +1,7 @@
 # Architecture decision
 
 - 상태: 채택
-- 갱신일: 2026-10-07
+- 갱신일: 2026-10-08
 
 ## 제품 경계
 
@@ -52,6 +52,14 @@ CLI는 요청 ID·대상·전달 상태·native turn/message ID 및 회수한 �
 답변을 숨기거나 다른 답변으로 바꾸지 않습니다. 일반 출력과 JSON은 같은 완료 조건을
 사용합니다. 오래된 Claude `reply-received` 기록의 답변도 현재 세션 상태와 무관하게
 회수합니다. Codex의 진행 문장은 답변으로 고정하지 않습니다.
+Codex가 제출 직후 같은 turn을 일시적으로 `interrupted`로 표시해도 답변 제한 시간까지
+그 turn만 재조회합니다. 정상 완료로 바뀌면 최종 답변을 회수하고, 중단이 지속되면 실패로
+반환합니다. 재전송이나 다른 turn의 답변 회수는 하지 않습니다.
+
+Claude의 단방향 `send`는 짧은 native 접수 확인 이후 반환합니다. `result`는 정확한 세션·
+요청 ID의 native 큐 접수를 `receipt=queued`, 원래 message ID의 `queued_command` 대화
+첨부를 `receipt=consumed`로 회수·저장합니다. 큐 제거만으로 대화 편입을 추정하지 않으며,
+접수·대화 편입은 이해·작업 완료·승인을 뜻하지 않습니다. 별도 ACK 요청이나 릴레이는 없습니다.
 
 ### 질의 완료 계약
 

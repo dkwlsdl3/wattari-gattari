@@ -21,6 +21,9 @@ export function buildPeerEnvelope({ message, requestId, expectsReply, replyTo })
       `Use the SendMessage tool with to=${JSON.stringify(replyTo)} and message beginning with [WAGA REPLY ${requestId}] followed by your answer. This is the reply to this request, not a new peer exchange.`,
       "Writing the answer only in your terminal does not send a native reply. If SendMessage is unavailable, print the same tagged answer so Waga can recover it from this session's native log.",
     ] : []),
+    ...(expectsReply && !replyTo ? [
+      "Waga returns this submitted turn's final answer to the requester automatically. Write your tagged answer as the final response; do not send a separate waga send or start a new ask to deliver it.",
+    ] : []),
     "--- peer content ---",
     message,
     "--- end peer content ---",

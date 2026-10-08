@@ -164,8 +164,8 @@ export async function runCli(args = process.argv.slice(2), {
       stdout.write(options.json ? `${JSON.stringify(result)}\n` : `${result.reply}\n`);
     } else if (options.command === "result") {
       const result = await bridge.result(options.requestId);
-      stdout.write(options.json ? `${JSON.stringify(result)}\n` : result.state === "replied" ? `${result.reply}\n` : `${result.state}\t${result.target}\t${result.requestId}\tdelivery=${result.delivery}\n`);
-      return result.state === "replied" ? 0 : 3;
+      stdout.write(options.json ? `${JSON.stringify(result)}\n` : result.state === "replied" ? `${result.reply}\n` : `${result.state}\t${result.target}\t${result.requestId}\tdelivery=${result.delivery}${result.receipt ? `\treceipt=${result.receipt}` : ""}\n`);
+      return result.state === "replied" || (result.kind === "send" && result.state === "accepted") ? 0 : 3;
     } else if (options.command === "open") {
       const result = await launcher(options.provider, { cwd });
       return result.code;

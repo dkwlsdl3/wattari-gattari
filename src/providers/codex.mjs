@@ -388,6 +388,7 @@ export class CodexProvider {
       const replyError = Object.assign(new Error(`Codex request turn did not complete within ${answerTimeout}ms`), { code: "REPLY_TIMEOUT" });
       const replyRead = (method, params) => read(method, params, replyDeadline, replyError);
       const findReply = () => findInPages(replyRead, "thread/items/list", { threadId: session.nativeId, turnId, limit: 100, sortDirection: "desc" }, (data) => answerIn(data, turnId));
+      let lastStatus;
       while (this.#now() < replyDeadline) {
         const turn = await findInPages(replyRead, "thread/turns/list", {
           threadId: session.nativeId,
@@ -395,7 +396,8 @@ export class CodexProvider {
           sortDirection: "desc",
           itemsView: "summary",
         }, (data) => data.find((candidate) => candidate.id === turnId));
-        if (turn?.status === "failed" || turn?.status === "interrupted") {
+        lastStatus = turn?.status;
+        if (turn?.status === "failed") {
           throw Object.assign(new Error(`Codex turn ${turn.status}: ${turnId}`), { code: "TARGET_ERROR" });
         }
         if (turn?.status === "completed") {
@@ -409,6 +411,10 @@ export class CodexProvider {
         if (thread.status?.type === "systemError") throw Object.assign(new Error(`Codex turn failed: ${turnId}`), { code: "TARGET_ERROR" });
         await this.#wait(Math.min(250, Math.max(1, replyDeadline - this.#now())));
       }
+      // Native turn/start can briefly expose interrupted before the same turn
+      // starts and completes (Keeper #265, 2026-10-08). Never resubmit or follow
+      // another turn; give this acknowledged request its original reply deadline.
+      if (lastStatus === "interrupted") throw Object.assign(new Error(`Codex turn interrupted: ${turnId}`), { code: "TARGET_ERROR" });
       throw replyError;
     });
   }

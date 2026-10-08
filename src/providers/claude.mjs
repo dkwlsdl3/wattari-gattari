@@ -11,7 +11,7 @@ import { ClaudeTitleSync } from "../claude-title-sync.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
 import { defaultClaudeAliasPath, SessionAliasCatalog } from "../session-alias-catalog.mjs";
 import { ClaudePeerEndpoint } from "./claude-peer.mjs";
-import { claudeReplyOffset, readClaudeReply, waitForClaudeReply } from "./claude-reply.mjs";
+import { claudeReplyOffset, readClaudeReply, readClaudeReceipt, waitForClaudeReply } from "./claude-reply.mjs";
 import { ClaudePreviewReader } from "../session-preview.mjs";
 import { applyClaudeExecutionSettings } from "../provider-execution.mjs";
 
@@ -236,6 +236,13 @@ export class ClaudeProvider {
   }
 
   async result(record) {
+    if (record.kind === "send") {
+      const receipt = await readBeforeDeadline(signal => readClaudeReceipt(record, { homeDirectory: this.#home, signal }), {
+        deadline: this.#now() + 10_000, now: this.#now,
+        error: Object.assign(new Error("Claude receipt lookup timed out"), { code: "RESULT_TIMEOUT" }),
+      });
+      return receipt ? { state: "accepted", delivery: "accepted", receipt } : {};
+    }
     // After the ephemeral reply socket closes, read only an explicitly tagged
     // answer in the target's native transcript; never guess from its last reply.
     const reply = record.reply ?? await readClaudeReply(record.session, record.requestId, {

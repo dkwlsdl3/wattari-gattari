@@ -120,7 +120,8 @@ test("legacy Claude reply-received records return their stored answer offline in
   }
 });
 
-test("default Codex ask and result require the original turn's final answer, independent of thread idle", async () => {
+for (const initialStatus of ["inProgress", "interrupted"]) {
+test(`default Codex ask recovers ${initialStatus} to the original turn's final answer, independent of thread idle`, async () => {
   let completed = false, submitted = 0, itemReads = 0;
   const provider = new CodexProvider({
     run: async () => ({ stdout: '{"status":"running","socketPath":"/proof/codex.sock"}' }),
@@ -132,7 +133,7 @@ test("default Codex ask and result require the original turn's final answer, ind
         if (method === "turn/start") { submitted++; return { turn: { id: "original" } }; }
         if (method === "thread/turns/list") return { data: [
           { id: "other", status: "completed" },
-          { id: "original", status: completed ? "completed" : "inProgress" },
+          { id: "original", status: completed ? "completed" : initialStatus },
         ] };
         if (method === "thread/items/list") {
           itemReads++;
@@ -144,10 +145,83 @@ test("default Codex ask and result require the original turn's final answer, ind
     wait: async () => { completed = true; },
   });
   const session = { id: "codex:proof", nativeId: "proof" };
-  assert.deepEqual(await provider.result({ session, turnId: "original" }), { state: "working" });
+  assert.deepEqual(await provider.result({ session, turnId: "original" }), { state: initialStatus === "interrupted" ? "interrupted" : "working" });
   assert.equal(itemReads, 0, "progress text must not become an immutable answer");
   const answer = await provider.ask(session, "question", { requestId: "proof", timeoutMs: 1000 });
   assert.equal(answer.reply, "FINAL");
   assert.equal(submitted, 1);
   assert.deepEqual(await provider.result({ session, turnId: "original" }), { state: "replied", reply: "FINAL" });
+});
+}
+
+test("Claude send result recovers measured queue receipt after the reply socket closes", async t => {
+  const store = storeFor(t), home = store.directory;
+  const rows = fs.readFileSync(new URL('./fixtures/claude-send-receipt.jsonl', import.meta.url), 'utf8').trim().split('\n').map(JSON.parse);
+  const session = { id: `claude:${rows[0].sessionId}`, provider: 'claude', sessionId: rows[0].sessionId, cwd: '/tmp/waga-proof-receipt' };
+  const record = store.create(session, { kind: 'send' });
+  // Preserve the measured native shape; substitute only correlation and timestamp.
+  const measuredId = '97b45169-cf5c-4a61-b197-7cd340cb13ed';
+  for (const row of rows) {
+    if (row.content) row.content = row.content.replace(measuredId, record.requestId);
+    if (row.attachment) row.attachment.origin.body = row.attachment.origin.body.replace(measuredId, record.requestId);
+    row.timestamp = new Date(record.createdAt + 1).toISOString();
+  }
+  store.update(record, { state: 'submitted', delivery: 'submitted', finished: true, messageId: '9669d5f1-a37f-409e-825b-4599e940481d' });
+  const directory = path.join(home, '.claude/projects', session.cwd.replace(/[^a-zA-Z0-9]/g, '-'));
+  fs.mkdirSync(directory, { recursive: true });
+  const file = path.join(directory, `${session.sessionId}.jsonl`);
+  const provider = new ClaudeProvider({ homeDirectory: home, run: async () => { throw new Error('no native process or message may be started'); } });
+  const bridge = new SessionBridge({ providers: [provider], requestStore: store });
+  assert.equal((await bridge.result(record.requestId)).state, 'submitted');
+  fs.writeFileSync(file, JSON.stringify({ ...rows[0], content: rows[0].content.replace(record.requestId, measuredId) }) + '\n');
+  assert.equal((await bridge.result(record.requestId)).state, 'submitted', 'another request is not a receipt');
+  fs.appendFileSync(file, JSON.stringify(rows[0]) + '\n');
+  let result = await bridge.result(record.requestId);
+  assert.equal(result.delivery, 'accepted');
+  assert.equal(result.receipt, 'queued');
+  assert.equal(result.reply, undefined);
+  const queuedOutput = output();
+  assert.equal(await runCli(['result', record.requestId], { bridge, stdout: queuedOutput, stderr: output() }), 0);
+  assert.match(queuedOutput.value, /receipt=queued/);
+  fs.appendFileSync(file, JSON.stringify(rows[1]) + '\n');
+  assert.equal((await bridge.result(record.requestId)).receipt, 'queued', 'removal alone does not prove conversation consumption');
+  fs.appendFileSync(file, JSON.stringify({ ...rows[2], attachment: { ...rows[2].attachment, origin: { ...rows[2].attachment.origin, msg_id: 'another-message' } } }) + '\n');
+  assert.equal((await bridge.result(record.requestId)).receipt, 'queued', 'native message identity must also match');
+  fs.appendFileSync(file, JSON.stringify(rows[2]) + '\n');
+  result = await bridge.result(record.requestId);
+  assert.equal(result.receipt, 'consumed');
+  assert.equal(store.read(record.requestId).receipt, 'consumed');
+  fs.unlinkSync(file);
+  const stdout = output();
+  assert.equal(await runCli(['result', record.requestId, '--json'], { bridge, stdout, stderr: output() }), 0);
+  assert.equal(JSON.parse(stdout.value).receipt, 'consumed', 'confirmed receipt survives native log disappearance');
+});
+
+test("an accepted ask still exits pending until its answer arrives", async () => {
+  const stdout = output();
+  assert.equal(await runCli(['result', 'proof', '--json'], {
+    bridge: { async result() { return { state: 'accepted', delivery: 'accepted' }; } }, stdout, stderr: output(),
+  }), 3);
+});
+
+test("a genuinely interrupted Codex request stays bounded and is never resubmitted", async () => {
+  let clock = 0, submissions = 0;
+  const provider = new CodexProvider({
+    now: () => clock, wait: async milliseconds => { clock += milliseconds; }, eventLog: { record() {} },
+    run: async () => ({ stdout: '{"status":"running","socketPath":"/proof/codex.sock"}' }),
+    clientFactory: async () => ({
+      async initialize() {}, async close() {},
+      async request(method) {
+        if (method === 'thread/read') return { thread: { status: { type: submissions ? 'active' : 'idle' } } };
+        if (method === 'turn/start') { submissions++; return { turn: { id: 'original' } }; }
+        if (method === 'thread/turns/list') return { data: [{ id: 'original', status: 'interrupted' }] };
+        throw new Error(`must not fetch progress or submit another turn: ${method}`);
+      },
+    }),
+  });
+  await assert.rejects(provider.ask({ id: 'codex:proof', nativeId: 'proof' }, 'question', {
+    requestId: 'proof', replyTimeoutMs: 750,
+  }), { code: 'TARGET_ERROR' });
+  assert.equal(clock, 750);
+  assert.equal(submissions, 1);
 });

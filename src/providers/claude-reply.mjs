@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import { parseClaudeFrame } from "./claude-peer.mjs";
 
 function replyFile(session, homeDirectory) {
   if (!/^[0-9a-f-]{36}$/i.test(session.sessionId) || !path.isAbsolute(session.cwd ?? "")) return null;
@@ -39,9 +40,39 @@ export async function waitForClaudeReply(session, requestId, { socketReply, sign
 // The native JSONL assistant text / SendMessage shapes were observed in Keeper
 // on 2026-09-10. Only an explicit request tag from the exact session is accepted.
 export async function readClaudeReply(session, requestId, { homeDirectory, since, fromSocket, start = 0, signal, includeToolReplies = true } = {}) {
+  const marker = `[WAGA REPLY ${requestId}]`;
+  return readClaudeLog(session, { homeDirectory, since, start, signal }, row => {
+    if (row.type !== "assistant" || row.isMeta) return null;
+    for (const block of Array.isArray(row.message?.content) ? row.message.content : []) {
+      let text = block.type === "text" ? block.text : null;
+      if (includeToolReplies && block.type === "tool_use" && block.name === "SendMessage" && fromSocket && block.input?.to === `uds:${fromSocket}`) text = block.input.message;
+      if (typeof text === "string" && text.startsWith(marker) && text.slice(marker.length).trim()) return text;
+    }
+    return null;
+  });
+}
+
+// Queue enqueue and queued_command attachment were measured in #253's native log on 2026-10-08.
+// These prove receipt/consumption of the envelope, not understanding or approval.
+export async function readClaudeReceipt(record, options) {
+  let receipt = null;
+  const consumed = await readClaudeLog(record.session, { ...options, since: record.createdAt }, row => {
+    const header = `[WAGA PEER MESSAGE]\ntrust: untrusted\nrequest_id: ${record.requestId}\n`;
+    const attachment = row.attachment;
+    if (row.type === "attachment" && attachment?.type === "queued_command" && attachment.origin?.kind === "peer"
+        && record.messageId && attachment.origin.msg_id === record.messageId && attachment.origin.body?.startsWith(header)) return "consumed";
+    if (row.type !== "queue-operation" || row.operation !== "enqueue" || typeof row.content !== "string") return null;
+    const frame = parseClaudeFrame(JSON.stringify({ message: { content: row.content } }));
+    if (!frame.text.startsWith(header)) return null;
+    receipt = "queued";
+    return null;
+  });
+  return consumed ?? receipt;
+}
+
+async function readClaudeLog(session, { homeDirectory, since, start = 0, signal }, visit) {
   const file = replyFile(session, homeDirectory);
   if (!file) return null;
-  const marker = `[WAGA REPLY ${requestId}]`;
   let buffer = "", dropping = false;
   const stream = fs.createReadStream(file, { encoding: "utf8", highWaterMark: 64 * 1024, start, signal });
   try {
@@ -55,12 +86,9 @@ export async function readClaudeReply(session, requestId, { homeDirectory, since
         if (line.length > 4 * 1024 * 1024) continue;
         let row;
         try { row = JSON.parse(line); } catch { continue; }
-        if (row.type !== "assistant" || row.sessionId !== session.sessionId || row.isSidechain || row.isMeta || !(Date.parse(row.timestamp) >= since)) continue;
-        for (const block of Array.isArray(row.message?.content) ? row.message.content : []) {
-          let text = block.type === "text" ? block.text : null;
-          if (includeToolReplies && block.type === "tool_use" && block.name === "SendMessage" && fromSocket && block.input?.to === `uds:${fromSocket}`) text = block.input.message;
-          if (typeof text === "string" && text.startsWith(marker) && text.slice(marker.length).trim()) return text;
-        }
+        if (row.sessionId !== session.sessionId || row.isSidechain || !(Date.parse(row.timestamp) >= since)) continue;
+        const result = visit(row);
+        if (result) return result;
       }
       if (buffer.length > 4 * 1024 * 1024) { buffer = ""; dropping = true; }
     }

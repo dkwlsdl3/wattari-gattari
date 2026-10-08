@@ -25,6 +25,9 @@ test("Claude requests specify the native reply tool and origin, without making n
   assert.match(request, /If SendMessage is unavailable, print the same tagged answer/);
   assert.doesNotMatch(buildPeerEnvelope({ ...options, expectsReply: false }), /SendMessage|origin.sock/);
   assert.doesNotMatch(buildPeerEnvelope({ message: "status", requestId: "req-1", expectsReply: true }), /SendMessage/);
+  assert.match(buildPeerEnvelope({ message: "status", requestId: "req-1", expectsReply: true }), /returns this submitted turn's final answer to the requester automatically/);
+  assert.doesNotMatch(request, /returns this submitted turn/);
+  assert.doesNotMatch(buildPeerEnvelope({ ...options, expectsReply: false }), /returns this submitted turn/);
 });
 
 test("peer envelope accepts the exact size limit and rejects non-string input with its public error", () => {
