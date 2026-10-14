@@ -20,12 +20,14 @@ import { SessionBridge } from "./session-bridge.mjs";
 import { enterSessionDock } from "./session-dock.mjs";
 import { TmuxWorkspace } from "./tmux-workspace.mjs";
 import { WagaSettingsStore } from "./waga-settings.mjs";
+import { serveWeb } from "./web-server.mjs";
 
 function usage() {
   return [
     `${CLI_NAME} [--cwd PATH] [--backend auto|direct|tmux]`,
     "                                Open the global dock, optionally filtered by workspace",
     `${CLI_NAME} list [--provider claude|codex] [--cwd PATH] [--json]`,
+    `${CLI_NAME} serve [--port 4317] [--cwd PATH]    Open the local browser workspace`,
     `${CLI_NAME} send <session-id-or-name> <message> [--cwd PATH]    One-way notification`,
     `${CLI_NAME} ask <session-id-or-name> <message> [--notify-origin] [--wait-timeout SEC] [--reply-timeout SEC] [--cwd PATH]`,
     "                                ask returns the request's answer, independent of session idle.",
@@ -38,10 +40,10 @@ function usage() {
   ].join("\n");
 }
 
-function defaultBridge() {
+function defaultBridge({ autoStartDaemon = true } = {}) {
   const localRouter = new LocalRouterClient();
   return new SessionBridge({
-    providers: [new ClaudeProvider(), new CodexProvider()],
+    providers: [new ClaudeProvider(), new CodexProvider({ autoStartDaemon })],
     requestStore: new RequestStore(),
     router: fallbackRouting,
     createRouter: async (input) => {
@@ -72,7 +74,7 @@ export async function runCli(args = process.argv.slice(2), {
   stdin = process.stdin,
   stdout = process.stdout,
   stderr = process.stderr,
-  bridge = defaultBridge(),
+  bridge = null,
   doctor = runDoctor,
   launcher = openNativeAgents,
   dock = enterSessionDock,
@@ -82,11 +84,13 @@ export async function runCli(args = process.argv.slice(2), {
   settingsStore = new WagaSettingsStore(),
   originNotifier = notifyOrigin,
   origin = claudeOrigin(),
+  web = serveWeb,
   handleSignals = false,
 } = {}) {
   let options;
   try { options = parseCliArgs(args); }
   catch (error) { stderr.write(`${error.message}\n${usage()}\n`); return 2; }
+  bridge ??= defaultBridge({ autoStartDaemon: options.command !== "serve" });
 
   const cwd = path.resolve(options.cwd ?? process.cwd());
   if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
@@ -125,6 +129,7 @@ export async function runCli(args = process.argv.slice(2), {
   }
   try {
     if (options.command === "version") stdout.write(`${VERSION}\n`);
+    else if (options.command === "serve") return await web({ bridge, cwd, filterCwd: options.cwd ? cwd : undefined, port: options.port, output: stdout });
     else if (options.command === "help") stdout.write(`${usage()}\n`);
     else if (options.command === "doctor") return (await doctor({ output: stdout, cwd })).exitCode;
     else if (options.command === "default" && stdin.isTTY && stdout.isTTY) return (await dock({

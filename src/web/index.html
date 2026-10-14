@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Waga · 에이전트 작업실</title>
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.mjs"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Waga 작업실"><span class="mark">w</span> waga<span class="brand-sub">WORKSPACE</span></a>
+    <span class="live" id="connection">연결 확인 중</span>
+    <button class="primary" id="new-session">＋ 새 작업</button>
+  </header>
+  <p id="notice" role="status" hidden></p>
+  <main class="workspace">
+    <aside class="sidebar">
+      <div class="section-label">SESSIONS <span id="session-count">0</span></div>
+      <label class="search"><span>⌕</span><input id="search" type="search" placeholder="세션 검색" aria-label="세션 검색"></label>
+      <div class="filters" aria-label="제공자 필터">
+        <button class="active" data-provider="all" aria-pressed="true">전체</button>
+        <button data-provider="claude" aria-pressed="false">Claude</button>
+        <button data-provider="codex" aria-pressed="false">Codex</button>
+      </div>
+      <nav id="sessions" aria-label="세션 목록"><p class="empty">세션을 불러오는 중입니다.</p></nav>
+      <footer class="sidebar-footer">LOCAL WORKSPACE<br><span id="workspace-path"></span></footer>
+    </aside>
+    <section class="flow">
+      <div class="page-heading"><div><p class="eyebrow">AGENT WORKSPACE</p><h1>작업의 흐름을 한눈에.</h1><p class="subtitle">Claude와 Codex의 세션, 요청, 응답을 연결합니다.</p></div><button id="refresh" class="quiet">↻ 새로고침</button></div>
+      <div class="metrics" aria-label="세션 현황"><div><span>전체 세션</span><strong id="total">—</strong></div><div><span>작업 중</span><strong id="working">—</strong></div><div><span>입력 대기</span><strong id="waiting">—</strong></div></div>
+      <section class="panel graph-panel" aria-labelledby="graph-heading">
+        <div class="panel-heading"><h2 id="graph-heading">세션 맵</h2><span>실제 접속 세션</span></div>
+        <div id="graph" class="graph"><p class="empty">연결된 세션이 여기에 표시됩니다.</p></div>
+        <div id="relations" class="relations" aria-label="브라우저 질의 관계"></div>
+      </section>
+      <section class="panel timeline-panel" aria-labelledby="timeline-heading">
+        <div class="panel-heading"><h2 id="timeline-heading">요청 타임라인</h2><span id="request-count">최근 요청</span></div>
+        <div id="timeline"><p class="empty">아직 요청이 없습니다.</p></div>
+      </section>
+    </section>
+    <aside class="conversation panel" aria-labelledby="conversation-heading">
+      <div class="panel-heading"><h2 id="conversation-heading">세션 대화</h2><span id="selected-provider"></span></div>
+      <div class="conversation-title"><h3 id="selected-name">세션을 선택해 주세요</h3><p id="selected-path"></p><span id="selected-status"></span></div>
+      <div id="messages" class="messages"><p class="empty">목록이나 맵에서 세션을 선택하면<br>최근 입력과 응답을 확인할 수 있습니다.</p></div>
+      <form id="query-form" class="composer">
+        <label for="message">선택한 세션에 질의</label>
+        <textarea id="message" rows="3" maxlength="16000" placeholder="현재 작업에 대해 물어보세요" disabled></textarea>
+        <div class="composer-bottom"><small>세션 질의는 권한 승인으로 전달되지 않습니다.</small><button id="send" class="primary" disabled>질의 보내기 ↗</button></div>
+      </form>
+    </aside>
+  </main>
+  <dialog id="create-dialog">
+    <form id="create-form">
+      <div class="panel-heading"><h2>새 작업 시작</h2><button type="button" id="close-dialog" class="quiet" aria-label="닫기">✕</button></div>
+      <p class="subtitle">터미널과 독립적으로 실행되는 세션을 만듭니다.</p>
+      <label for="create-provider">제공자</label><select id="create-provider"><option value="claude">Claude</option><option value="codex">Codex</option></select>
+      <label for="create-message">작업 지시</label><textarea id="create-message" rows="6" maxlength="16000" required placeholder="수행할 작업과 완료 조건을 입력해 주세요"></textarea>
+      <p class="subtitle" id="create-cwd"></p><p class="subtitle">모델·승인 정책은 제공자 기본값을 사용합니다.</p>
+      <button id="create-submit" class="primary">세션 생성</button>
+    </form>
+  </dialog>
+</body>
+</html>

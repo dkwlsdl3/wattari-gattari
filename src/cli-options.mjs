@@ -1,4 +1,4 @@
-const COMMANDS = new Set(["list", "agents", "send", "ask", "result", "open", "overview", "tmux-agents-view", "doctor", "help"]);
+const COMMANDS = new Set(["serve", "list", "agents", "send", "ask", "result", "open", "overview", "tmux-agents-view", "doctor", "help"]);
 const DEFAULT_WAIT_TIMEOUT_MS = 30 * 60 * 1_000;
 const DEFAULT_REPLY_TIMEOUT_MS = 3 * 60 * 1_000;
 
@@ -27,12 +27,16 @@ export function parseCliArgs(args) {
     if (arg === "--json") { options.json = true; continue; }
     if (arg === "--until-idle") { options.untilIdle = true; continue; }
     if (arg === "--notify-origin") { options.notifyOrigin = true; continue; }
-    if (["--cwd", "--provider", "--backend", "--timeout", "--wait-timeout", "--reply-timeout"].includes(arg)) {
+    if (["--port", "--cwd", "--provider", "--backend", "--timeout", "--wait-timeout", "--reply-timeout"].includes(arg)) {
       const value = args[++index];
       if (!value) throw invalid(`${arg} requires a value`);
       if (arg === "--cwd") options.cwd = value;
       if (arg === "--provider") options.provider = value;
       if (arg === "--backend") options.backend = value;
+      if (arg === "--port") {
+        if (!/^\d+$/.test(value) || Number(value) > 65535) throw invalid("--port must be between 0 and 65535");
+        options.port = Number(value);
+      }
       if (["--timeout", "--wait-timeout", "--reply-timeout"].includes(arg)) {
         const seconds = Number(value);
         if (!Number.isFinite(seconds) || seconds <= 0) throw invalid(`${arg} must be a positive number of seconds`);
@@ -51,6 +55,8 @@ export function parseCliArgs(args) {
   }
 
   if (options.command === "default" && (options.json || options.provider)) options.command = "list";
+  if (options.command === "serve") options.port ??= 4317;
+  if (args.includes("--port") && options.command !== "serve") throw invalid("--port is only valid for serve");
   if (options.provider && !["claude", "codex"].includes(options.provider)) throw invalid(`Unknown provider: ${options.provider}`);
   if (!["auto", "direct", "tmux"].includes(options.backend)) throw invalid(`Unknown backend: ${options.backend}`);
   if (options.backend !== "auto" && options.command !== "default") throw invalid("--backend is only valid for the interactive dock");

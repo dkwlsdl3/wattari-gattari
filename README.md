@@ -6,7 +6,7 @@
 [한국어](README.ko.md) · [Architecture](docs/adr/README.md) · [License](LICENSE)
 
 Wattari Gattari (`waga`) opens and connects live Claude Code and Codex sessions
-from one local dock, without another daemon or replacement chat UI.
+from one local dock or browser workspace. Native providers own session execution and approval UI.
 
 ![Waga session dock demo](docs/assets/wattari-gattari-demo.gif)
 
@@ -45,6 +45,7 @@ waga --backend direct           # run without tmux
 waga --backend tmux             # require the tmux backend
 waga list --provider claude
 waga list --json
+waga serve                      # Local browser workspace
 
 waga send codex:<thread-id> "Inspect the ADR"
 waga ask claude:<session-id> "Review the current API contract"
@@ -54,6 +55,26 @@ waga open codex --cwd ~/work/my-app
 
 `waga agents` aliases `waga list`. Provider-prefixed targets such as
 `claude:<id>` and `codex:<id>` are recommended.
+
+### Browser workspace
+
+Run `waga serve [--port 4317] [--cwd PATH]` and open its printed login link.
+The server binds only to `127.0.0.1`, authenticates with a fresh secret link and an
+HttpOnly, SameSite cookie, and rejects cross-origin mutations. It shares native
+discovery, bounded latest-message previews, `ask`, and request recovery with the CLI.
+New work uses provider defaults in the configured directory without calling LLR.
+Existing-session queries remain untrusted peer messages, and approvals stay in the native UI.
+
+The browser shows real session groups, browser query relationships, and request events.
+It does not infer missing roles or origins. Closing the browser does not cancel work.
+After server restart, recent request records and immutable answers remain recoverable;
+in-memory web events do not. A failed network request is never automatically resent.
+Check the timeline or `waga result` before submitting again. Duplicate operation IDs
+are deduplicated while retained in the server's latest 100 jobs, not across restarts.
+
+See the [user service template](integrations/waga-web.service.example) for optional
+background operation. Replace its paths before manual installation. Waga does not
+install a service or start/restart a native provider daemon from the web command.
 
 ### Automatic model routing for new sessions
 

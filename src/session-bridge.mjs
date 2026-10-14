@@ -185,6 +185,11 @@ export class SessionBridge {
     return { ...base, ...(result.state === "replied" ? this.#requests.reply(requestId, { ...result, delivery: "accepted" }) : result) };
   }
 
+  async recentRequests() {
+    if (!this.#requests) return { records: [], limited: false };
+    return this.#requests.recent();
+  }
+
   async #resolve(target, cwd) {
     if (typeof target !== "string" || !target.trim()) throw new BridgeError("TARGET_REQUIRED", "Target is required");
     const hint = providerFromTarget(target);

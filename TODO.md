@@ -4,6 +4,11 @@
 
 검증 명령과 결과 재사용 기준: [테스트 검증 절차](docs/testing-plan.md).
 
+## 웹 작업실 Claude 응답 실측
+
+- 사용 한도가 남은 환경에서 `waga-proof-*` Claude 세션의 웹 질의·답변·결과 회수를
+  검증합니다. 2026-10-14에는 세션 생성·전달은 확인했지만 provider 사용 한도로 답변 검증이 막혔습니다.
+
 ## 메시지 접수·결과 회수 런타임 검증
 
 - Unix socket 및 native provider 접근이 허용된 환경에서 `waga-proof-*` 세션으로

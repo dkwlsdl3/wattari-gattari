@@ -6,7 +6,7 @@
 [English](README.md) · [아키텍처](docs/adr/README.md) · [라이선스](LICENSE)
 
 Wattari Gattari(`waga`)는 Claude Code와 Codex의 활성 세션을 한 dock에서 열고
-연결하는 로컬 CLI입니다. 별도 daemon이나 대체 채팅 UI는 두지 않습니다.
+연결하는 로컬 CLI와 웹 작업실입니다. 실제 세션 실행과 승인 화면은 provider가 소유합니다.
 
 ![Waga session dock 데모](docs/assets/wattari-gattari-demo.gif)
 
@@ -45,6 +45,7 @@ waga --backend direct           # tmux 없이 실행
 waga --backend tmux             # tmux backend 필수
 waga list --provider claude
 waga list --json
+waga serve                      # 로컬 브라우저 작업실
 
 waga send codex:<thread-id> "ADR을 확인해 주세요"
 waga ask claude:<session-id> "현재 API 계약을 검토해 주세요"
@@ -54,6 +55,33 @@ waga open codex --cwd ~/work/my-app
 
 `waga agents`는 `waga list`의 별칭입니다. 대상은 `claude:<id>` 또는
 `codex:<id>`처럼 provider 접두사가 붙은 ID를 권장합니다.
+
+### 웹 작업실
+
+`waga serve [--port 4317] [--cwd PATH]`를 실행하고 출력된 접속 링크를 여십시오.
+서버는 `127.0.0.1`에만 바인딩하며, 링크의 비밀값으로 인증한 뒤 HttpOnly 쿠키를 사용합니다.
+비밀값은 주소창에서 제거됩니다. 서버 재시작 후에는 새 접속 링크가 필요합니다.
+
+- 세션 목록·제공자 필터·최근 입력과 응답 미리보기
+- 실제 세션 맵, 브라우저 질의 관계와 요청 진행 타임라인
+- 새 작업 생성: 지정한 작업 폴더에서 provider 기본 모델·승인 정책 사용 (LLR 호출 없음)
+- 기존 세션 질의: 기존 `ask`의 불신 peer 메시지 계약 유지, 사용자 승인으로 승격하지 않음
+- 늦은 답변은 **결과 회수**로 같은 요청만 확인하며 재전송하지 않음
+
+브라우저를 닫아도 서버와 native 작업은 계속됩니다. 웹 서버는 전체 대화를 따로 저장하지
+않으며, 최근 입력·응답 각각 최대 4,000자와 조회 범위 제한을 표시합니다. 목록·미리보기는
+5초 캐시하고 숨긴 탭은 갱신하지 않습니다. 웹 진행 이력은 메모리에 최대 100건 유지하며,
+재시작 뒤에도 CLI와 공유하는 요청 저장소에서 최근 50건의 요청·저장 답변을 읽습니다.
+요청 출처가 저장되지 않은 기존 기록은 **출처 미기록**으로 표시합니다.
+
+네트워크 오류나 서버 종료 직후에는 전달 여부가 미확정일 수 있습니다. 자동 재전송은 하지
+않으므로 타임라인과 `waga result <request-id>`를 먼저 확인하십시오. 실행 중 같은 작업 식별자의
+중복 제출은 최근 100건의 보관 범위에서 한 번만 처리하지만, 서버 재시작을 넘는 중복 방지는 보장하지 않습니다.
+provider 승인 요청은 기존 native 화면에서 처리합니다.
+
+상시 실행용 예시는 [사용자 서비스 템플릿](integrations/waga-web.service.example)에 있습니다.
+설치 경로·Node 경로·작업 폴더를 실제 값으로 바꿔 수동 설치합니다. 웹 명령 자체는
+사용자 서비스나 provider daemon을 설치·재시작하지 않습니다.
 
 ### 새 세션 자동 모델 라우팅
 

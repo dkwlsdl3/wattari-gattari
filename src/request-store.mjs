@@ -56,6 +56,37 @@ export class RequestStore {
     } finally { fs.closeSync(fd); }
   }
 
+  // Bounded, read-only metadata for the web workspace. Payloads stay in native logs.
+  async recent({ limit = 50 } = {}) {
+    const io = fs.promises;
+    let directory;
+    try { directory = await io.opendir(this.directory); }
+    catch (error) { if (error.code === "ENOENT") return { records: [], limited: false }; throw error; }
+    const candidates = [];
+    let scanned = 0, limited = false;
+    for await (const entry of directory) {
+      if (++scanned > 10_000) { limited = true; break; }
+      if (!entry.isFile() || !entry.name.endsWith(".json") || !UUID.test(entry.name.slice(0, -5))) continue;
+      try {
+        const stat = await io.lstat(path.join(this.directory, entry.name));
+        if (stat.isFile()) candidates.push({ id: entry.name.slice(0, -5), modified: stat.mtimeMs });
+      } catch (error) { if (error.code !== "ENOENT") throw error; }
+    }
+    candidates.sort((a, b) => b.modified - a.modified);
+    limited ||= candidates.length > limit;
+    const records = [];
+    for (const { id } of candidates.slice(0, limit)) {
+      try {
+        const row = this.read(id);
+        const answer = this.reply(id);
+        records.push({ requestId: id, target: row.target, kind: row.kind, state: answer?.state ?? row.state,
+          delivery: answer?.delivery ?? row.delivery, receipt: row.receipt, createdAt: row.createdAt,
+          updatedAt: row.updatedAt ?? row.createdAt, reply: answer?.reply ?? row.reply, error: row.error });
+      } catch { /* A malformed or concurrently removed record must not hide other requests. */ }
+    }
+    return { records, limited };
+  }
+
   update(record, fields) {
     Object.assign(record, fields, { updatedAt: Date.now() });
     const file = this.file(record.requestId);

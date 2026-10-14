@@ -129,8 +129,9 @@ export class CodexProvider {
   #usageRefresh = null;
   #eventLog;
   #loadedIds = null;
+  #autoStartDaemon;
 
-  constructor({ run = defaultRun, clientFactory, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now, daemonCacheMs = 30_000, usageCacheMs = USAGE_CACHE_MS, usageTimeoutMs = 1_000, eventLog = new EventLog() } = {}) {
+  constructor({ run = defaultRun, clientFactory, wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)), now = Date.now, daemonCacheMs = 30_000, usageCacheMs = USAGE_CACHE_MS, usageTimeoutMs = 1_000, eventLog = new EventLog(), autoStartDaemon = true } = {}) {
     this.#run = run;
     this.#clientFactory = clientFactory ?? ((socketPath) => CodexAppServerClient.connectUnixWebSocket({ socketPath }));
     this.#wait = wait;
@@ -139,6 +140,7 @@ export class CodexProvider {
     this.#usageCacheMs = usageCacheMs;
     this.#usageTimeoutMs = usageTimeoutMs;
     this.#eventLog = eventLog;
+    this.#autoStartDaemon = autoStartDaemon;
   }
 
   async list({ cwd, includeUsage = false } = {}) {
@@ -498,14 +500,14 @@ export class CodexProvider {
   }
 
   async #withClient(operation) {
-    let daemon = await this.daemonInfo({ start: true });
+    let daemon = await this.daemonInfo({ start: this.#autoStartDaemon });
     this.#assertDaemonAvailable(daemon);
     let client;
     try {
       client = await this.#clientFactory(daemon.socketPath);
     } catch {
       this.#daemonCache = null;
-      daemon = await this.daemonInfo({ start: true, fresh: true });
+      daemon = await this.daemonInfo({ start: this.#autoStartDaemon, fresh: true });
       this.#assertDaemonAvailable(daemon);
       client = await this.#clientFactory(daemon.socketPath);
     }

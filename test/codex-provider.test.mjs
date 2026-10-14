@@ -97,6 +97,17 @@ test("Codex preview does not start a daemon and respects cancellation", async ()
   assert.equal(calls.length, 1);
 });
 
+test("web provider reports an unavailable daemon without starting it during discovery or creation", async () => {
+  let starts = 0;
+  const provider = new CodexProvider({ autoStartDaemon: false, run: async args => {
+    if (args.includes("start")) starts++;
+    throw stoppedDaemonFailure();
+  }, eventLog: { record() {} } });
+  await assert.rejects(provider.list(), { code: "CODEX_DAEMON_UNAVAILABLE" });
+  await assert.rejects(provider.create("task", { cwd: "/tmp" }), { code: "CODEX_DAEMON_UNAVAILABLE" });
+  assert.equal(starts, 0);
+});
+
 test("A stopped daemon is started instead of surfacing the raw command failure", async () => {
   const calls = [];
   const client = { async initialize() {}, async request() { return { data: [], nextCursor: null }; }, async close() {} };
