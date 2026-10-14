@@ -1,198 +1,173 @@
 const $ = selector => document.querySelector(selector);
-const stateNames = { idle: "대기 중", working: "작업 중", "needs-input": "입력 대기", done: "완료", error: "오류",
-  unavailable: "연결 불가", starting: "접수 중", "not-sent": "미전송", "waiting-local": "앞선 요청 대기", waiting: "전송 대기",
-  submitting: "전송 중", submitted: "전송됨", accepted: "접수됨", "reply-received": "답변 수신", replied: "답변 완료",
-  "result-unknown": "결과 미확정", created: "세션 생성됨", held: "보류", refused: "거부" };
-let sessions = [], selected = null, provider = "all", refreshing = false, sending = false, ready = false;
-let previewKey = "", refreshedAt = 0;
-const openAnswers = new Set();
-const label = value => stateNames[value] ?? value ?? "알 수 없음";
-const name = id => sessions.find(row => row.id === id)?.name ?? id ?? "—";
-function element(tag, text, className) {
-  const node = document.createElement(tag);
-  if (text !== undefined) node.textContent = text;
-  if (className) node.className = className;
-  return node;
+const phases = { pending: "대기", active: "진행", blocked: "막힘", passed: "통과" };
+const nativeStates = { idle: "대기 중", working: "작업 중", "needs-input": "입력 대기", done: "완료", error: "오류", unavailable: "연결 불가" };
+const transport = { starting: "접수 중", "waiting-local": "앞선 요청 대기", waiting: "전송 대기", submitting: "전송 중", submitted: "답변 대기", accepted: "답변 대기", "reply-received": "답변 수신", replied: "답변 수신", error: "질의 실패", created: "세션 생성됨", "not-sent": "미전송", "result-unknown": "결과 미확정" };
+let sessions = [], workflows = [], currentId = "", nodeId = "", refreshing = false, ready = false, saving = false;
+let draftKey = "", previewKey = "", previewIdentity = "", warning = "";
+const operations = new Map();
+const flow = () => workflows.find(row => row.id === currentId);
+const node = () => flow()?.nodes.find(row => row.id === nodeId);
+const session = () => sessions.find(row => row.id === node()?.sessionId);
+const activeKey = () => `${currentId}:${nodeId}`;
+function el(tag, text, className) {
+  const item = document.createElement(tag); if (text !== undefined) item.textContent = text; if (className) item.className = className; return item;
 }
 function notice(message = "") { $("#notice").textContent = message; $("#notice").hidden = !message; }
 async function api(route, value) {
-  const response = await fetch(`/api/${route}`, value === undefined ? {} : {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value),
-  });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error?.message ?? `요청 실패 (${response.status})`);
-  return result;
+  const response = await fetch(`/api/${route}`, value === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+  const result = await response.json(); if (!response.ok) throw Object.assign(new Error(result.error?.message ?? `요청 실패 (${response.status})`), { status: response.status }); return result;
 }
-function select(id) {
-  if (selected !== id) { previewKey = ""; $("#message").value = ""; $("#messages").replaceChildren(element("p", "대화를 불러오는 중입니다.", "empty")); }
-  selected = id; renderSessions(); renderSelection(); void loadPreview();
+function updateFlow(value) {
+  workflows = [value, ...workflows.filter(row => row.id !== value.id)]; render();
 }
-function renderSessions() {
-  const list = $("#sessions"), graph = $("#graph"); list.replaceChildren(); graph.replaceChildren();
-  const search = $("#search").value.toLowerCase();
-  const visible = sessions.filter(row => (provider === "all" || row.provider === provider)
-    && `${row.name} ${row.cwd} ${row.id}`.toLowerCase().includes(search));
-  for (const row of visible) {
-    const button = element("button", undefined, `session${row.id === selected ? " selected" : ""}`);
-    button.setAttribute("aria-pressed", String(row.id === selected));
-    button.append(element("strong", row.name), element("small", row.cwd));
-    const meta = element("div", undefined, "session-meta");
-    meta.append(element("span", row.provider === "claude" ? "Claude" : "Codex", `provider-${row.provider}`), element("span", label(row.status)));
-    button.append(meta); button.addEventListener("click", () => select(row.id)); list.append(button);
-  }
-  for (const groupProvider of ["claude", "codex"]) {
-    const rows = visible.filter(row => row.provider === groupProvider);
-    if (!rows.length) continue;
-    const group = element("div", undefined, "graph-group");
-    group.append(element("span", groupProvider === "claude" ? "Claude" : "Codex", `graph-provider provider-${groupProvider}`));
-    const nodes = element("div", undefined, "graph-nodes");
-    for (const row of rows) {
-      const node = element("button", undefined, `node${row.id === selected ? " selected" : ""}`);
-      node.setAttribute("aria-label", `${row.name} · ${label(row.status)}`); node.setAttribute("aria-pressed", String(row.id === selected));
-      node.append(element("strong", row.name), element("small", label(row.status)));
-      node.addEventListener("click", () => select(row.id)); nodes.append(node);
+function render() {
+  const picker = $("#workflow"); picker.replaceChildren(el("option", "작업 선택")); picker.firstChild.value = "";
+  for (const row of workflows) { const option = el("option", row.title); option.value = row.id; picker.append(option); }
+  picker.value = currentId;
+  const value = flow(), graph = $("#graph"); graph.replaceChildren(); graph.hidden = !value; $("#empty").hidden = Boolean(value);
+  if (value) {
+    graph.append(el("h2", value.title, "graph-heading"));
+    const stages = el("div", undefined, "stages");
+    for (const step of value.nodes) {
+      const holder = el("div", undefined, "stage"), button = el("button", undefined, `node ${step.state}`);
+      button.setAttribute("aria-pressed", String(step.id === nodeId)); button.setAttribute("aria-label", `${step.title} · ${phases[step.state]}`);
+      button.append(el("strong", step.title), el("span", phases[step.state], "phase"));
+      const assigned = sessions.find(row => row.id === step.sessionId);
+      button.append(el("small", assigned?.name ?? (step.sessionId ? "연결된 세션 조회 불가" : "담당 세션 미연결")));
+      if (assigned) button.append(el("span", `${assigned.provider === "claude" ? "Claude" : "Codex"} · ${nativeStates[assigned.status] ?? "상태 미확인"}`, "native"));
+      if (step.state === "blocked" && step.note) button.append(el("small", step.note));
+      button.addEventListener("click", () => { nodeId = step.id; draftKey = ""; $("#message").value = ""; render(); void loadPreview(); });
+      holder.append(button); stages.append(holder);
     }
-    group.append(nodes); graph.append(group);
+    graph.append(stages);
+    const returned = value.returns.at(-1);
+    if (returned) graph.append(el("p", `↶ ${value.nodes.find(row => row.id === returned.from).title} → ${value.nodes.find(row => row.id === returned.to).title} · ${returned.reason}`, "return-edge"));
+    if (value.commit) graph.append(el("p", `검증 대상 ${value.commit.slice(0, 12)}`, "commit-note"));
   }
-  if (!visible.length) {
-    list.append(element("p", "표시할 세션이 없습니다.", "empty")); graph.append(element("p", "연결된 세션이 없습니다.", "empty"));
-  } else graph.append(element("p", "제공자별 세션 묶음입니다. 실제 요청 관계는 아래 타임라인에 표시합니다.", "graph-note"));
-  $("#session-count").textContent = sessions.length; $("#total").textContent = sessions.length;
-  $("#working").textContent = sessions.filter(row => row.status === "working").length;
-  $("#waiting").textContent = sessions.filter(row => row.status === "needs-input").length;
+  renderDetail();
 }
-function renderSelection() {
-  const row = sessions.find(item => item.id === selected);
-  $("#selected-name").textContent = row?.name ?? "세션을 선택해 주세요";
-  $("#selected-provider").textContent = row?.provider === "claude" ? "Claude" : row ? "Codex" : "";
-  $("#selected-path").textContent = row?.cwd ?? ""; $("#selected-status").textContent = row ? label(row.status) : "";
-  $("#message").disabled = !row || sending; $("#send").disabled = !row || sending;
-  if (!row) { previewKey = ""; $("#messages").replaceChildren(element("p", "목록이나 맵에서 세션을 선택해 주세요.", "empty")); }
+function renderDetail() {
+  const value = flow(), step = node(); $("#detail").hidden = !step;
+  if (!step) return;
+  $("#flow-title").textContent = value.title; $("#node-title").textContent = step.title;
+  const picker = $("#session"); picker.replaceChildren(el("option", "세션 연결")); picker.firstChild.value = "";
+  for (const item of sessions) {
+    const option = el("option", `${item.provider === "claude" ? "Claude" : "Codex"} · ${item.name}`); option.value = item.id; picker.append(option);
+  }
+  if (step.sessionId && !session()) { const option = el("option", "연결된 세션 조회 불가"); option.value = step.sessionId; picker.append(option); }
+  picker.value = step.sessionId;
+  const selected = session(); $("#session-status").textContent = selected ? `${nativeStates[selected.status] ?? "상태 미확인"} · ${selected.cwd}` : "";
+  const pending = operations.get(activeKey());
+  $("#message").disabled = !selected || Boolean(pending); $("#send").disabled = !selected || Boolean(pending);
+  $("#session").disabled = Boolean(pending) || saving; $("#new-session").disabled = Boolean(pending);
+  if (draftKey !== activeKey()) {
+    draftKey = activeKey(); $("#phase-state").value = step.state; $("#phase-note").value = step.note;
+    $("#phase-evidence").value = step.evidence; $("#commit").value = value.commit;
+    const target = $("#return-to"); target.replaceChildren();
+    for (const previous of value.nodes.slice(0, value.nodes.indexOf(step))) { const option = el("option", previous.title); option.value = previous.id; target.append(option); }
+    $("#rework-form").hidden = !target.children.length; $("#return-reason").value = "";
+  }
+  $("#evidence-commit").textContent = step.evidence ? `직접 기록한 완료 근거${step.evidenceCommit ? ` · ${step.evidenceCommit.slice(0, 12)}` : ""}` : "";
+  const record = step.requests.at(-1), exchange = $("#exchange"); exchange.replaceChildren(); exchange.hidden = !record && !pending;
+  if (record) {
+    exchange.append(el("div", record.reply !== undefined ? "질의 답변" : pending ? transport[record.state] ?? record.state : "이전 질의 · 응답 미확인"));
+    if (record.reply !== undefined) exchange.append(el("div", record.reply));
+    if (record.sessionId && record.sessionId !== step.sessionId) exchange.append(el("small", "이전 담당 세션의 질의 기록"));
+    if (record.replyLimited) exchange.append(el("small", "답변 일부만 표시합니다. 전체 답변은 네이티브 세션에서 확인해 주세요."));
+    if (record.error) exchange.append(el("div", record.error));
+    if (record.requestId && record.reply === undefined && !pending) {
+      const recover = el("button", "답변 도착 확인"); recover.addEventListener("click", () => { void submitOperation("recover", { requestId: record.requestId }); }); exchange.append(recover);
+    }
+  } else if (pending) exchange.append(el("div", "접수 중"));
+  if (pending) exchange.append(el("div", transport[pending.state] ?? "응답 확인 중"));
 }
 async function loadPreview() {
-  const id = selected;
-  if (!id || !sessions.some(row => row.id === id)) return;
+  const selected = session(), identity = selected ? `${selected.id}:${selected.cwd}` : "", messages = $("#messages");
+  if (identity !== previewIdentity) { previewIdentity = identity; previewKey = ""; messages.replaceChildren(); }
+  if (!selected) return;
   try {
-    const value = await api(`sessions/${encodeURIComponent(id)}/preview`);
-    if (selected !== id) return;
-    $("#preview-error")?.remove();
-    const key = JSON.stringify([id, value.input, value.output, value.limited]);
-    if (key === previewKey) return;
-    previewKey = key;
-    const messages = $("#messages"); messages.replaceChildren();
-    for (const [title, text] of [["최근 입력", value.input], ["최근 응답", value.output]]) {
-      if (!text) continue;
-      const bubble = element("div", undefined, "bubble"); bubble.append(element("div", title, "bubble-label"), element("p", text)); messages.append(bubble);
+    const value = await api(`sessions/${encodeURIComponent(selected.id)}/preview`);
+    if (identity !== previewIdentity) return;
+    const key = JSON.stringify([value.input, value.output, value.limited]); if (key === previewKey) return; previewKey = key;
+    const scroll = messages.scrollTop; messages.replaceChildren();
+    for (const [title, content] of [["최근 입력", value.input], ["최근 응답", value.output]]) {
+      if (!content) continue; const bubble = el("div", undefined, "bubble"); bubble.append(el("small", title), el("p", content)); messages.append(bubble);
     }
-    if (!value.input && !value.output) messages.append(element("p", "아직 표시할 대화가 없습니다.", "empty"));
-    messages.append(element("p", `최근 입력·응답 미리보기${value.limited ? " · 조회 범위 제한 있음" : ""}`, "preview-note"));
-  } catch (error) {
-    if (selected === id) {
-      let errorNode = $("#preview-error");
-      if (!errorNode) { errorNode = element("p", undefined, "preview-note"); errorNode.id = "preview-error"; $("#messages").append(errorNode); }
-      errorNode.textContent = `대화 조회 실패: ${error.message}`;
-    }
-  }
-}
-function renderRequests({ records, jobs, limited }) {
-  const timeline = $("#timeline"); timeline.replaceChildren();
-  const relations = $("#relations"); relations.replaceChildren();
-  for (const request of jobs.filter(row => row.kind === "query").slice(-8)) {
-    const relation = element("div", undefined, "relation");
-    relation.append(element("span", "브라우저", "relation-source"), element("span", "→", "relation-arrow"));
-    const target = element("button", name(request.target), "relation-target");
-    target.addEventListener("click", () => select(request.target));
-    relation.append(target, element("span", label(request.state), "state")); relations.append(relation);
-  }
-  const covered = new Set(jobs.map(row => row.requestId).filter(Boolean));
-  const rows = [...jobs.map(row => ({ ...row, browser: true, reply: row.result?.reply })),
-    ...records.filter(row => !covered.has(row.requestId))].sort((a, b) => b.createdAt - a.createdAt);
-  $("#request-count").textContent = `${rows.length}건${limited ? " · 최근 일부" : ""}`;
-  for (const item of rows) {
-    const row = element("div", undefined, "timeline-row");
-    row.append(element("time", new Date(item.createdAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false }), "timeline-time"));
-    const content = element("div", undefined, "timeline-content");
-    content.append(element("strong", item.kind === "create" ? `브라우저 → ${item.provider} 새 세션` : `${item.browser ? "브라우저" : "출처 미기록"} → ${name(item.target)}`));
-    const details = [label(item.state), item.error?.message, item.requestId ? `요청 ${item.requestId}` : null].filter(Boolean);
-    content.append(element("p", details.join(" · ")));
-    if (item.events?.length) content.append(element("p", item.events.map(event => event.message ?? label(event.state)).join(" → ")));
-    if (item.reply !== undefined) {
-      const key = item.operationId ?? item.requestId;
-      const answer = element("details"); answer.open = openAnswers.has(key);
-      answer.addEventListener("toggle", () => {
-        if (!answer.isConnected) return;
-        if (answer.open) openAnswers.add(key); else openAnswers.delete(key);
-      });
-      answer.append(element("summary", "답변 보기"), element("pre", item.reply)); content.append(answer);
-    }
-    row.append(content);
-    if (item.kind === "create" && item.result?.session?.id) {
-      const open = element("button", "세션 보기");
-      open.addEventListener("click", () => select(item.result.session.id)); row.append(open);
-    } else if (item.requestId && item.state !== "replied" && (!item.browser || item.finished)) {
-      const recover = element("button", "결과 회수"); recover.addEventListener("click", async () => {
-        recover.disabled = true;
-        try { await api("recover", { operationId: crypto.randomUUID(), requestId: item.requestId }); await refresh(); }
-        catch (error) { notice(error.message); recover.disabled = false; }
-      }); row.append(recover);
-    } else row.append(element("span", label(item.state), "state"));
-    timeline.append(row);
-  }
-  if (!rows.length) timeline.append(element("p", "아직 요청이 없습니다. 선택한 세션에 첫 질의를 보내보세요.", "empty"));
+    if (value.limited) messages.append(el("p", "최근 대화 일부만 표시합니다.", "muted")); messages.scrollTop = scroll;
+  } catch (error) { if (identity === previewIdentity) notice(`대화 조회 실패: ${error.message}`); }
 }
 async function refresh() {
-  if (!ready || refreshing) return;
-  refreshing = true;
+  if (!ready || refreshing) return; refreshing = true;
   try {
-    const value = await api("sessions"); sessions = value.sessions;
-    $("#workspace-path").textContent = value.cwd; $("#create-cwd").textContent = `작업 폴더: ${value.cwd}`;
-    if (selected && !sessions.some(row => row.id === selected)) selected = null;
-    renderSessions(); renderSelection();
-    renderRequests(await api("requests")); await loadPreview();
-    refreshedAt = Date.now(); $("#connection").textContent = "로컬 연결됨";
-    notice(value.warnings.map(row => `${row.provider}: ${row.message}`).join(" · "));
-  } catch (error) {
-    $("#connection").textContent = refreshedAt ? "갱신 실패 · 이전 상태 표시" : "연결 실패"; notice(error.message);
-  } finally { refreshing = false; }
+    const discovery = await api("sessions"); sessions = discovery.sessions;
+    warning = discovery.warnings.map(row => `${row.provider}: ${row.message}`).join(" · ");
+    for (const [key, operation] of operations) {
+      let job;
+      try { job = await api(`operations/${operation.operationId}`); }
+      catch (error) { if (error.status !== 404) throw error; operations.delete(key); notice(error.message); continue; }
+      if (job.storageError) notice(job.storageError);
+      if (job.finished) { operations.delete(key); if (job.error) notice(job.error.message); }
+      else operations.set(key, job);
+    }
+    workflows = (await api("workflows")).workflows;
+    if (!flow()) { currentId = workflows[0]?.id ?? ""; nodeId = ""; }
+    $("#create-cwd").textContent = discovery.cwd;
+    render(); await loadPreview(); $("#connection").textContent = "연결됨";
+    if (warning) notice(warning);
+  } catch (error) { $("#connection").textContent = "갱신 실패"; notice(error.message); }
+  finally { refreshing = false; }
 }
-$("#search").addEventListener("input", renderSessions);
-document.querySelectorAll("[data-provider]").forEach(button => button.addEventListener("click", () => {
-  provider = button.dataset.provider;
-  document.querySelectorAll("[data-provider]").forEach(item => { item.classList.toggle("active", item === button); item.setAttribute("aria-pressed", String(item === button)); });
-  renderSessions();
-}));
-$("#refresh").addEventListener("click", refresh);
-$("#query-form").addEventListener("submit", async event => {
-  event.preventDefault();
-  if (sending || !selected || !$("#message").value.trim()) return;
-  const target = selected, message = $("#message").value;
-  sending = true; renderSelection();
+async function submitOperation(kind, input) {
+  const key = activeKey(), workflowId = currentId, stepId = nodeId;
+  if (!node() || operations.has(key)) return;
+  const operationId = crypto.randomUUID(); operations.set(key, { operationId, state: "starting" }); renderDetail();
   try {
-    await api("query", { operationId: crypto.randomUUID(), target, message });
-    if (selected === target) $("#message").value = "";
+    await api(kind, { ...input, operationId, workflowId, nodeId: stepId });
+    if (key === activeKey() && kind === "query") $("#message").value = "";
     await refresh();
-  } catch (error) { notice(`${error.message} · 자동 재전송하지 않았습니다. 요청 타임라인을 확인해 주세요.`); }
-  finally { sending = false; renderSelection(); }
+  } catch (error) { operations.delete(key); notice(`${error.message} · 자동 재전송하지 않았습니다.`); renderDetail(); }
+}
+async function mutate(value) {
+  if (saving || !flow()) return; saving = true;
+  try { const updated = await api(`workflows/${currentId}`, { ...value, revision: flow().revision }); draftKey = ""; updateFlow(updated); notice(warning); }
+  catch (error) { notice(error.message); throw error; }
+  finally { saving = false; renderDetail(); }
+}
+$("#workflow").addEventListener("change", event => { currentId = event.target.value; nodeId = ""; draftKey = ""; render(); });
+$("#close-detail").addEventListener("click", () => { nodeId = ""; render(); });
+for (const id of ["#new-workflow", "#first-workflow"]) $(id).addEventListener("click", () => $("#workflow-dialog").showModal());
+document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => $(`#${button.dataset.close}`).close()));
+$("#workflow-form").addEventListener("submit", async event => {
+  event.preventDefault(); const button = event.submitter; button.disabled = true;
+  try { const value = await api("workflows", { title: $("#workflow-title").value }); currentId = value.id; nodeId = value.nodes[0].id; draftKey = ""; updateFlow(value); $("#workflow-dialog").close(); $("#workflow-title").value = ""; }
+  catch (error) { notice(error.message); } finally { button.disabled = false; }
 });
-$("#new-session").addEventListener("click", () => $("#create-dialog").showModal());
-$("#close-dialog").addEventListener("click", () => $("#create-dialog").close());
-$("#create-form").addEventListener("submit", async event => {
+$("#session").addEventListener("change", async event => { try { await mutate({ action: "assign", nodeId, sessionId: event.target.value }); await loadPreview(); } catch { /* Error is shown by mutate. */ } });
+$("#state-form").addEventListener("submit", async event => {
   event.preventDefault();
-  const button = $("#create-submit"); if (button.disabled) return; button.disabled = true;
+  const context = activeKey();
+  const state = $("#phase-state").value, note = $("#phase-note").value, evidence = $("#phase-evidence").value, commit = $("#commit").value.trim();
+  const button = event.submitter; button.disabled = true;
   try {
-    await api("create", { operationId: crypto.randomUUID(), provider: $("#create-provider").value, message: $("#create-message").value });
-    $("#create-message").value = ""; $("#create-dialog").close(); await refresh();
-  } catch (error) { notice(`${error.message} · 자동 재전송하지 않았습니다. 타임라인을 확인해 주세요.`); }
-  finally { button.disabled = false; }
+    if (commit && commit !== flow().commit) await mutate({ action: "commit", commit });
+    if (context !== activeKey()) return;
+    await mutate({ action: "state", nodeId, state, note, evidence });
+  } catch { /* Error is shown by mutate. */ } finally { button.disabled = false; }
 });
+$("#rework-form").addEventListener("submit", async event => {
+  event.preventDefault(); try { await mutate({ action: "rework", nodeId, targetId: $("#return-to").value, note: $("#return-reason").value }); } catch { /* Error is shown by mutate. */ }
+});
+$("#query-form").addEventListener("submit", event => { event.preventDefault(); void submitOperation("query", { target: node()?.sessionId, message: $("#message").value }); });
+$("#new-session").addEventListener("click", () => $("#create-dialog").showModal());
+$("#create-form").addEventListener("submit", async event => {
+  event.preventDefault(); const input = { provider: $("#create-provider").value, message: $("#create-message").value };
+  $("#create-dialog").close(); await submitOperation("create", input);
+});
+$("#refresh").addEventListener("click", () => { void refresh(); });
 async function start() {
-  try {
-    const token = location.hash.slice(1);
-    history.replaceState(null, "", location.pathname);
-    if (token) await api("auth", { token });
-    ready = true; await refresh();
-  } catch (error) { notice(error.message); $("#connection").textContent = "접속 링크 필요"; }
+  try { const token = location.hash.slice(1); history.replaceState(null, "", location.pathname); if (token) await api("auth", { token }); ready = true; await refresh(); }
+  catch (error) { notice(error.message); $("#connection").textContent = "접속 링크 필요"; }
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); });
-setInterval(() => { if (!document.hidden) void refresh(); }, 5_000);
+setInterval(() => { if (!document.hidden) void refresh(); }, 5000);
 void start();

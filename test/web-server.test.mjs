@@ -35,7 +35,7 @@ test("web requires local authentication and same-origin JSON for mutations", asy
   let submitted = 0;
   const f = await fixture(t, { ask: async () => { submitted++; return { reply: "ok" }; } });
   const page = await f.request("/");
-  assert.equal(page.status, 200); assert.match(await page.text(), /세션 맵/);
+  assert.equal(page.status, 200); assert.match(await page.text(), /작업 그래프/);
   assert.match(page.headers.get("content-security-policy"), /frame-ancestors 'none'/);
   assert.equal((await f.request("/api/sessions")).status, 401);
   assert.equal((await f.request("/api/auth", { token: "wrong" })).status, 401);
@@ -176,4 +176,63 @@ test("CLI serve delegates a local workspace and port without opening the termina
   const bridge = { discover: async () => ({ sessions: [], warnings: [] }), recentRequests: async () => ({ records: [], limited: false }) };
   const starting = serveWeb({ bridge, port: 0, output: { write(value) { assert.match(value, /Waga web: http:\/\/127\.0\.0\.1/); process.emit("SIGTERM"); } } });
   assert.equal(await starting, 0);
+});
+
+test("workflow HTTP binds native queries to explicit stages, preserves answers after restart, and rejects unrelated recovery", async t => {
+  const { WorkflowStore } = await import("../src/workflow-store.mjs");
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "waga-proof-flow-http-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const workflowStore = new WorkflowStore(path.join(directory, "flows"));
+  const requestId = crypto.randomUUID(); let calls = 0;
+  const f = await fixture(t, { ask: async (target, message, options) => {
+    calls++; options.onProgress({ state: "accepted", requestId });
+    return { target, requestId, state: "replied", reply: "OBSERVED" };
+  } }, { workflowStore, cwd: directory });
+  assert.equal((await f.request("/api/workflows")).status, 401);
+  assert.equal((await f.post("/api/workflows", { title: "proof" }, { Origin: "http://evil.test" })).status, 403);
+  const created = await f.post("/api/workflows", { title: "proof", cwd: "/wrong" });
+  assert.equal(created.status, 201); let flow = await created.json(); assert.equal(flow.cwd, directory);
+  const route = `/api/workflows/${flow.id}`;
+  assert.equal((await f.post(route, { action: "assign", revision: flow.revision, nodeId: "plan", sessionId: "codex:missing" })).status, 404);
+  flow = await (await f.post(route, { action: "assign", revision: flow.revision, nodeId: "plan", sessionId: id })).json();
+  assert.equal((await f.post(route, { action: "state", revision: 1, nodeId: "plan", state: "active" })).status, 409);
+  const operationId = crypto.randomUUID();
+  assert.equal((await f.post("/api/query", { operationId, workflowId: flow.id, nodeId: "verify", target: id, message: "query" })).status, 409);
+  assert.equal(calls, 0);
+  assert.equal((await f.post("/api/query", { operationId, workflowId: flow.id, nodeId: "plan", target: id, message: "query" })).status, 202);
+  await tick();
+  const operation = await (await f.get(`/api/operations/${operationId}`)).json();
+  assert.equal(operation.result.reply, "OBSERVED"); assert.equal(calls, 1);
+  const persisted = workflowStore.read(flow.id);
+  assert.equal(persisted.nodes[0].state, "pending"); assert.equal(persisted.nodes[0].requests[0].requestId, requestId);
+  assert.equal((await f.post("/api/recover", { operationId: crypto.randomUUID(), workflowId: flow.id, nodeId: "plan", requestId: crypto.randomUUID() })).status, 409);
+  assert.equal((await f.get(`/api/operations/${crypto.randomUUID()}`)).status, 404);
+  const restarted = await fixture(t, {}, { workflowStore: new WorkflowStore(workflowStore.directory), cwd: directory });
+  const listing = await (await restarted.get("/api/workflows")).json();
+  assert.equal(listing.workflows[0].nodes[0].requests[0].reply, "OBSERVED");
+});
+
+test("workflow accepts real repository commits and new sessions bind only to the chosen stage", async t => {
+  const { execFileSync } = await import("node:child_process");
+  const { WorkflowStore } = await import("../src/workflow-store.mjs");
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "waga-proof-flow-git-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const git = args => execFileSync("git", ["-C", directory, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  git(["init"]);
+  git(["-c", "user.name=Waga Proof", "-c", "user.email=proof@example.invalid", "-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-m", "proof"]);
+  const commit = git(["rev-parse", "HEAD"]);
+  const workflowStore = new WorkflowStore(path.join(directory, "flows"));
+  const f = await fixture(t, { create: async () => ({ provider: "codex", nativeId: session.nativeId, session }) }, { workflowStore, cwd: directory });
+  const flow = await (await f.post("/api/workflows", { title: "repository proof" })).json();
+  const route = `/api/workflows/${flow.id}`;
+  assert.equal((await f.post(route, { revision: flow.revision, action: "commit", commit: "f".repeat(40) })).status, 400);
+  assert.equal((await f.post(route, { revision: flow.revision, action: "commit", commit })).status, 200);
+  const operationId = crypto.randomUUID();
+  assert.equal((await f.post("/api/create", { operationId, workflowId: flow.id, nodeId: "implement", provider: "codex", message: "proof task" })).status, 202);
+  await tick();
+  const updated = workflowStore.read(flow.id);
+  assert.equal(updated.nodes[1].sessionId, id);
+  assert.equal(updated.nodes[1].state, "pending"); assert.equal(updated.nodes[0].sessionId, "");
+  const job = await (await f.get(`/api/operations/${operationId}`)).json();
+  assert.equal(job.target, id); assert.equal(job.state, "created");
 });

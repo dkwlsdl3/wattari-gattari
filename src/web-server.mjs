@@ -1,6 +1,9 @@
 import crypto from "node:crypto";
 import http from "node:http";
 import fs from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { WorkflowStore } from "./workflow-store.mjs";
 
 const ASSETS = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
@@ -39,7 +42,7 @@ function publicSession(session) {
 
 // HTTP is a view/controller only. Native providers keep owning sessions and approval UI.
 export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, port = 4317,
-  token = crypto.randomBytes(32).toString("hex"), now = Date.now } = {}) {
+  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore() } = {}) {
   if (!bridge) throw new TypeError("A session bridge is required");
   const assets = new Map(await Promise.all([...ASSETS].map(async ([route, [file, type]]) =>
     [route, { type, data: await fs.readFile(new URL(`./web/${file}`, import.meta.url)) }])));
@@ -98,6 +101,30 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
       const cookie = request.headers.cookie?.split(/;\s*/).find(value => value.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
       if (!sameSecret(cookie, token)) throw fail(401, "실행 시 표시된 접속 링크를 열어 주세요.");
       if (closing) throw fail(503, "웹 서버가 종료 중입니다.");
+      if (request.method === "GET" && url.pathname === "/api/workflows") {
+        json(response, 200, { workflows: workflowStore.list(cwd) }); return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/workflows") {
+        json(response, 201, workflowStore.create({ title: (await body(request)).title, cwd })); return;
+      }
+      const workflowMatch = /^\/api\/workflows\/([^/]+)$/.exec(url.pathname);
+      if (request.method === "POST" && workflowMatch) {
+        const input = await body(request), id = workflowMatch[1];
+        if (workflowStore.read(id).cwd !== cwd) throw fail(404, "현재 작업 폴더의 기록이 아닙니다.");
+        if (input.action === "assign" && input.sessionId && !(await discover()).sessions.some(row => row.id === input.sessionId)) throw fail(404, "연결할 세션을 찾을 수 없습니다.");
+        if (input.action === "commit") {
+          if (!/^[0-9a-f]{40}$/i.test(input.commit ?? "")) throw fail(400, "전체 Git SHA가 필요합니다.");
+          try { await promisify(execFile)("git", ["-C", cwd, "cat-file", "-e", `${input.commit}^{commit}`], { timeout: 2000, maxBuffer: 4096 }); }
+          catch { throw fail(400, "현재 저장소에 존재하는 커밋을 지정해 주세요."); }
+        }
+        json(response, 200, workflowStore.update(id, input)); return;
+      }
+      const operationMatch = /^\/api\/operations\/([^/]+)$/.exec(url.pathname);
+      if (request.method === "GET" && operationMatch) {
+        const job = jobs.get(operationMatch[1]);
+        if (!job) throw fail(404, "웹 실행 기록이 없습니다. 연결한 작업 단계에서 답변을 확인해 주세요.");
+        json(response, 200, job); return;
+      }
       if (request.method === "GET" && url.pathname === "/api/sessions") {
         const { sessions, warnings } = await discover();
         json(response, 200, { sessions: sessions.map(publicSession), warnings, cwd }); return;
@@ -125,7 +152,16 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
       if (kind === "query" && !/^(claude|codex):[^\s]{1,200}$/.test(input.target ?? "")) throw fail(400, "세션 ID가 필요합니다.");
       if (kind === "create" && !["claude", "codex"].includes(input.provider)) throw fail(400, "Claude 또는 Codex를 선택해 주세요.");
       if (kind === "recover" && !UUID.test(input.requestId ?? "")) throw fail(400, "요청 ID가 필요합니다.");
+      if (input.workflowId !== undefined) {
+        const flow = workflowStore.read(input.workflowId), node = flow.nodes.find(row => row.id === input.nodeId);
+        if (flow.cwd !== cwd || !node) throw fail(404, "작업 단계를 찾을 수 없습니다.");
+        if (kind === "query" && node.sessionId !== input.target) throw fail(409, "단계에 연결된 세션과 질의 대상이 다릅니다.");
+        if (kind === "recover" && !node.requests.some(row => row.requestId === input.requestId)) throw fail(409, "이 단계의 요청만 조회할 수 있습니다.");
+        if (kind === "recover") input.target = node.requests.find(row => row.requestId === input.requestId).sessionId ?? node.sessionId;
+        input.commit = flow.commit;
+      }
       const job = { operationId: input.operationId, kind, target: input.target, provider: input.provider,
+        workflowId: input.workflowId, nodeId: input.nodeId,
         requestId: input.requestId, state: "starting", createdAt: now(), updatedAt: now(), events: [] };
       while (jobs.size >= 100) {
         const removable = [...jobs.values()].find(row => row.finished);
@@ -133,15 +169,25 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         jobs.delete(removable.operationId);
       }
       jobs.set(job.operationId, job); active++;
+      const attach = () => {
+        if (job.workflowId) workflowStore.attach(job.workflowId, job.nodeId, {
+          operationId: job.operationId, requestId: job.requestId, state: job.state, reply: job.result?.reply, error: job.error?.message, commit: input.commit, sessionId: job.target,
+        });
+      };
       const progress = event => {
         // Persisted RequestStore metadata remains the recovery authority after restart.
+        const previousRequestId = job.requestId;
         job.state = event.state ?? job.state; job.requestId = event.requestId ?? job.requestId;
         job.updatedAt = now();
         job.events.push({ state: event.state, message: event.message, at: job.updatedAt });
         if (job.events.length > 40) job.events.shift();
+        if (job.requestId && job.requestId !== previousRequestId) {
+          try { attach(); } catch (error) { job.storageError = error.message; }
+        }
       };
       const operation = async () => {
         try {
+          attach();
           if (kind === "query") job.result = await bridge.ask(input.target, input.message, {
             cwd: filterCwd, waitTimeoutMs: 30_000, replyTimeoutMs: 180_000, onProgress: progress,
           });
@@ -149,14 +195,23 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
             const created = await bridge.create(input.provider, input.message, { cwd, routing: {}, onProgress: progress });
             job.result = { provider: created.provider, nativeId: created.nativeId, turnId: created.turnId,
               session: created.session ? publicSession(created.session) : undefined };
+            job.target = created.session?.id ?? `${created.provider}:${created.nativeId}`;
             snapshot = null;
+            if (job.workflowId) {
+              const flow = workflowStore.read(job.workflowId);
+              workflowStore.update(job.workflowId, { revision: flow.revision, action: "assign", nodeId: job.nodeId,
+                sessionId: created.session?.id ?? `${created.provider}:${created.nativeId}` });
+            }
           } else job.result = await bridge.result(input.requestId);
           job.requestId = job.result.requestId ?? job.requestId;
           job.state = job.result.state ?? (kind === "create" ? "created" : "replied");
         } catch (error) {
           job.state = "error"; job.requestId = error.requestId ?? job.requestId;
           job.error = { code: error.code ?? "REQUEST_FAILED", message: (error.stderr?.trim() || error.message).slice(0, 1_000), delivery: error.delivery };
-        } finally { job.finished = true; job.updatedAt = now(); requestsSnapshot = null; active--; }
+        } finally {
+          job.finished = true; job.updatedAt = now(); requestsSnapshot = null; active--;
+          try { attach(); } catch (error) { job.storageError = `단계 기록 저장 실패: ${error.message}`; }
+        }
       };
       // The response does not own the exchange: browser disconnection never resends or cancels it.
       void operation();

@@ -65,12 +65,22 @@ discovery, bounded latest-message previews, `ask`, and request recovery with the
 New work uses provider defaults in the configured directory without calling LLR.
 Existing-session queries remain untrusted peer messages, and approvals stay in the native UI.
 
-The browser shows real session groups, browser query relationships, and request events.
-It does not infer missing roles or origins. Closing the browser does not cancel work.
-After server restart, recent request records and immutable answers remain recoverable;
-in-memory web events do not. A failed network request is never automatically resent.
-Check the timeline or `waga result` before submitting again. Duplicate operation IDs
-are deduplicated while retained in the server's latest 100 jobs, not across restarts.
+Create a work graph with **＋ 작업**, then connect native sessions to requirements,
+implementation, verification, independent review, and integration stages. Selecting a
+stage shows its session preview and latest exchange. Phase status and evidence are
+explicit user records, never inferred from session idle or an answer saying “done”.
+Passing requires evidence; verification/review/integration also require a full commit
+SHA that exists in the configured repository. Independent review cannot use the
+implementer's session. Rework invalidates downstream proofs, and a changed SHA resets
+verification, review and integration. This is a fixed workflow observer, not an
+automatic scheduler or arbitrary DAG editor.
+
+Graphs, assignments, evidence and the last five exchanges per stage (up to 4,000
+characters per answer) persist privately in `$XDG_STATE_HOME/wattari-gattari/workflows`.
+There is no global request timeline in the UI. Closing the browser does not cancel work.
+A failed network request is never automatically resent; inspect the stage's answer
+recovery or `waga result` before submitting again. Duplicate operation IDs are
+deduplicated within the running server's latest 100 jobs, not across restarts.
 
 See the [user service template](integrations/waga-web.service.example) for optional
 background operation. Replace its paths before manual installation. Waga does not
