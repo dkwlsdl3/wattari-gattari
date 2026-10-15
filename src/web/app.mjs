@@ -227,8 +227,7 @@ async function refresh() {
     if (version === orderVersion && !moving) sessions = discovery.sessions;
     const usage = $("#provider-usage"); usage.replaceChildren();
     for (const row of discovery.usage ?? []) {
-      const stale = row.observedAt && Date.now() - row.observedAt > 5 * 60_000;
-      const item = el("span", row.label ? `${row.label}${stale ? " · 이전 조회" : ""}` : `${row.provider === "claude" ? "Claude" : "Codex"} 사용량 미확인`);
+      const item = el("span", row.label || `${row.provider === "claude" ? "Claude" : "Codex"} 사용량 미확인`);
       item.dataset.provider = row.provider;
       item.title = row.observedAt ? `마지막 조회: ${new Date(row.observedAt).toLocaleString()}` : "아직 사용량을 받지 못했습니다.";
       usage.append(item);
