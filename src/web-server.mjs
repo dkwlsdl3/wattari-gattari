@@ -63,7 +63,7 @@ function publicSession(session) {
 
 // Native providers own sessions and decisions; the web attaches their frontend.
 export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, port = 4317,
-  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore(), orderStore = new DockOrderStore(), terminalSpawn } = {}) {
+  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore(), orderStore = new DockOrderStore(), terminalFactory } = {}) {
   if (!bridge) throw new TypeError("A session bridge is required");
   const assets = new Map(await Promise.all([...ASSETS].map(async ([route, [file, type]]) =>
     [route, { type, data: await fs.readFile(file instanceof URL ? file : new URL(`./web/${file}`, import.meta.url)) }])));
@@ -208,7 +208,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         const selected = sessions.find(row => row.id === decodeURIComponent(actionMatch[1]));
         if (!selected) throw fail(404, "세션을 찾을 수 없습니다.");
         const action = actionMatch[2];
-        if (action === "terminal") { json(response, 200, terminals.ticket(selected.id)); return; }
+        if (action === "terminal") { json(response, 200, terminals.ticket(selected.id, { observe: input.observe === true })); return; }
         if (action === "order") {
           if (input.targetId === undefined && !["up", "down"].includes(input.direction)) throw fail(400, "이동할 위치를 지정해 주세요.");
           orderedSessions(sessions);
@@ -350,7 +350,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
     }
   });
   const terminals = installWebTerminal(server, {
-    now, spawn: terminalSpawn,
+    now, terminalFactory,
     authorize: request => request.headers.host === new URL(origin).host && request.headers.origin === origin
       && sameSecret(request.headers.cookie?.split(/;\s*/).find(value => value.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1), token),
     connection: target => bridge.connection(target, { cwd: filterCwd }),

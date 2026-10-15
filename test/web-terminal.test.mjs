@@ -4,9 +4,13 @@ import test from "node:test";
 import { WebSocket } from "ws";
 import { startWebServer } from "../src/web-server.mjs";
 
-async function fixture(t, { now = Date.now, terminalSpawn } = {}) {
+async function fixture(t, { now = Date.now, terminalFactory } = {}) {
   const sessions = ["claude", "codex"].map(provider => ({ id: `${provider}:proof`, provider, nativeId: "proof", name: "waga-proof-terminal", cwd: "/tmp", status: "needs-input" }));
-  const web = await startWebServer({ port: 0, now, terminalSpawn, bridge: {
+  const web = await startWebServer({ port: 0, now, terminalFactory: terminalFactory ?? (async (spec, { observe }) => {
+    if (observe) return null;
+    const { spawn } = (await import("node-pty")).default;
+    return spawn(spec.command, spec.args, { cwd: spec.cwd, name: "xterm-256color", cols: 100, rows: 28 });
+  }), bridge: {
     discover: async () => ({ sessions, warnings: [] }),
     // A real PTY child exercises raw keyboard input, resizing and process exit.
     connection: async target => {
@@ -79,11 +83,36 @@ test("closing the web server closes terminal sockets and cleans up the owned fro
 });
 
 test("terminal connection failures release the session reservation", async t => {
-  const f = await fixture(t, { terminalSpawn: () => { throw new Error("spawn failed"); } });
+  const f = await fixture(t, { terminalFactory: () => { throw new Error("spawn failed"); } });
   for (let i = 0; i < 2; i++) {
     const { ws, messages } = await f.connect(await f.ticket("claude:proof"));
     await until(() => messages.some(row => row.type === "error"));
     assert.equal(messages.find(row => row.type === "error").message, "spawn failed");
     if (ws.readyState !== WebSocket.CLOSED) await once(ws, "close");
   }
+});
+
+test("read-only selection reports an unopened frontend without creating one", async t => {
+  const f = await fixture(t);
+  const response = await fetch(`${f.web.origin}/api/sessions/claude%3Aproof/terminal`, {
+    method: "POST", headers: f.headers, body: JSON.stringify({ observe: true }),
+  });
+  const { ws, messages } = await f.connect((await response.json()).ticket);
+  await until(() => messages.some(row => row.type === "unavailable"));
+  assert.ok(!messages.some(row => row.type === "ready" || row.type === "output"));
+  if (ws.readyState !== WebSocket.CLOSED) await once(ws, "close");
+});
+
+test("input confirmation follows the native write, never mere WebSocket receipt", async t => {
+  let finish;
+  const f = await fixture(t, { terminalFactory: async () => ({
+    onData() {}, onExit() {}, kill() {},
+    write: () => new Promise(resolve => { finish = resolve; }),
+  }) });
+  const { ws, messages } = await f.connect(await f.ticket("claude:proof"));
+  ws.send(JSON.stringify({ type: "input", data: "한글\r", id: 42 }));
+  await until(() => finish);
+  assert.ok(!messages.some(row => row.type === "input-result"));
+  finish();
+  await until(() => messages.some(row => row.type === "input-result" && row.id === 42));
 });

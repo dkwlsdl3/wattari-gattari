@@ -1,17 +1,18 @@
 import crypto from "node:crypto";
 import { WebSocket, WebSocketServer } from "ws";
+import { sharedNativeTerminal } from "./web-native-terminal.mjs";
 
-// Attach a frontend, never resume a second model process or change its policy.
+// Share the retained native frontend without creating a second provider attachment.
 // Input is deliberately opaque: native UI owns prompts, keys and decisions.
-export function installWebTerminal(server, { authorize, connection, spawn, now = Date.now }) {
+export function installWebTerminal(server, { authorize, connection, terminalFactory = sharedNativeTerminal, now = Date.now }) {
   const tickets = new Map(), sessions = new Map();
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 128 * 1024, perMessageDeflate: false });
   let closed = false;
-  function ticket(target) {
+  function ticket(target, { observe = false } = {}) {
     for (const [key, entry] of tickets) if (entry.expires <= now()) tickets.delete(key);
     if (closed || tickets.size >= 20) throw new Error("잠시 후 다시 연결해 주세요.");
     const key = crypto.randomBytes(32).toString("hex");
-    tickets.set(key, { target, expires: now() + 10_000 });
+    tickets.set(key, { target, observe, expires: now() + 10_000 });
     return { ticket: key };
   }
   const upgrade = async (request, socket, head) => {
@@ -31,9 +32,7 @@ export function installWebTerminal(server, { authorize, connection, spawn, now =
       try { spec = await connection(entry.target); }
       catch (error) { sessions.delete(entry.target); throw error; }
       if (closed || socket.destroyed) { sessions.delete(entry.target); socket.destroy(); return; }
-      const launch = spawn ?? (await import("node-pty")).default.spawn;
-      if (closed || socket.destroyed) { sessions.delete(entry.target); socket.destroy(); return; }
-      sockets.handleUpgrade(request, socket, head, ws => {
+      sockets.handleUpgrade(request, socket, head, async ws => {
         let terminal, ended = false;
         const cleanup = () => {
           if (ended) return;
@@ -49,20 +48,25 @@ export function installWebTerminal(server, { authorize, connection, spawn, now =
           if (ws.bufferedAmount > 1024 * 1024) { ws.close(1009, "화면 수신이 지연되어 연결을 닫았습니다."); cleanup(); return; }
           ws.send(JSON.stringify(value));
         };
-        ws.on("message", (raw, binary) => {
+        ws.on("message", async (raw, binary) => {
           try {
             if (binary) throw new Error("문자 입력만 지원합니다.");
             const value = JSON.parse(raw.toString("utf8"));
             if (value.type === "resize" && Number.isInteger(value.cols) && Number.isInteger(value.rows)
-              && value.cols >= 20 && value.cols <= 300 && value.rows >= 5 && value.rows <= 120) terminal.resize(value.cols, value.rows);
-            else if (value.type === "input" && typeof value.data === "string" && value.data.length <= 16_384) terminal.write(value.data);
+              && value.cols >= 20 && value.cols <= 300 && value.rows >= 5 && value.rows <= 120) terminal?.resize(value.cols, value.rows);
+            else if (value.type === "input" && typeof value.data === "string" && value.data.length <= 16_384) {
+              if (!terminal) throw new Error("입력 화면을 준비 중입니다.");
+              await terminal.write(value.data, { question: value.question });
+              send({ type: "input-result", id: value.id });
+            }
             else throw new Error("잘못된 입력입니다.");
-          } catch { ws.close(1008, "잘못된 입력입니다."); cleanup(); }
+          } catch (error) { send({ type: "error", message: error.message }); ws.close(1008, "입력을 전달하지 못했습니다."); cleanup(); }
         });
         try {
-          const env = { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor" };
-          delete env.TMUX; delete env.TMUX_PANE;
-          terminal = launch(spec.command, spec.args, { cwd: spec.cwd, name: "xterm-256color", cols: 100, rows: 28, env });
+          terminal = await terminalFactory(spec, { target: entry.target, observe: entry.observe });
+          if (ended) { terminal?.kill(); return; }
+          if (!terminal) { send({ type: "unavailable" }); cleanup(); ws.close(1000, "입력 화면 없음"); return; }
+          terminal.onSize?.(size => send({ type: "size", ...size }));
           terminal.onData(data => send({ type: "output", data }));
           terminal.onExit(({ exitCode }) => { send({ type: "exit", exitCode }); cleanup(); ws.close(1000, "세션 화면 연결 종료"); });
           send({ type: "ready" });

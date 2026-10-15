@@ -22,7 +22,7 @@ try { directSessionId = browserStorage.getItem("waga:selected-session") || ""; }
 function openControls() {
   const id = session()?.id;
   historyStream.sync(document.hidden ? null : session());
-  void controls.open().catch(error => { if (session()?.id === id) notice(error.message); });
+  void controls.observe().catch(error => { if (session()?.id === id) notice(error.message); });
 }
 function visibleSessions() {
   const needle = $("#session-search").value.trim().toLocaleLowerCase();
@@ -259,6 +259,7 @@ async function refresh() {
       try { browserStorage.setItem("waga:selected-session", directSessionId); } catch {}
     }
     render(); await loadHistory(); $("#connection").textContent = "연결됨";
+    if (!document.hidden && session()) openControls();
     if (warning) notice(warning);
   } catch (error) { $("#connection").textContent = "갱신 실패"; notice(error.message); }
   finally { refreshing = false; }
@@ -356,6 +357,9 @@ async function start() {
 document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); });
 setInterval(() => { if (!document.hidden) void refresh(); }, 5000);
 setInterval(() => { if (ready && !document.hidden && !historyStream.live()) void loadHistory(); }, 1000);
-document.addEventListener("visibilitychange", () => { historyStream.sync(document.hidden ? null : session()); });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { historyStream.sync(null); controls.disconnect(); }
+  else if (session()) openControls();
+});
 window.addEventListener("pagehide", () => historyStream.close());
 void start();

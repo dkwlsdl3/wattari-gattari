@@ -1,5 +1,4 @@
 import { Terminal } from "/xterm.mjs";
-import { FitAddon } from "/xterm-fit.mjs";
 import { nativeQuestion } from "./native-question.mjs";
 
 // The native frontend is a transport, not a second chat screen.
@@ -7,7 +6,8 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
   const host = document.querySelector("#terminal-screen"), fallback = document.querySelector("#native-fallback");
   const panel = document.querySelector("#session-question"), text = document.querySelector("#question-text"), choices = document.querySelector("#question-choices");
   const status = document.querySelector("#input-status");
-  let socket, terminal, observer, generation = 0, target = "", connecting, resolveReady, rejectReady, readyTimer, screenTimer;
+  let socket, terminal, generation = 0, target = "", connecting, resolveReady, rejectReady, readyTimer, screenTimer;
+  let observing = false, inputId = 0, lastInput = Promise.resolve(), pending = new Map();
   let question = null, answered = "", connected = false, progress = "";
   const setProgress = value => { if (value !== progress) { progress = value; onProgress(); } };
   const notify = message => { status.textContent = message; onChange(); };
@@ -17,9 +17,22 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
     if (error) rejectReady?.(error);
     else resolveReady?.(false);
     rejectReady = resolveReady = null; connecting = null; connected = false;
-    socket?.close(); socket = null; observer?.disconnect(); terminal?.dispose(); terminal = null;
+    socket?.close(); socket = null; terminal?.dispose(); terminal = null;
+    for (const { reject, timer } of pending.values()) { clearTimeout(timer); reject(error ?? new Error("입력 연결이 종료됐습니다. 전송 여부를 확인해 주세요.")); }
+    pending.clear();
     setProgress("");
     host.replaceChildren(); panel.hidden = true; fallback.hidden = true; question = null; answered = "";
+  }
+  function input(data, question, ws = socket) {
+    if (!ws || ws !== socket || ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error("세션 연결을 확인해 주세요."));
+    const id = ++inputId;
+    const result = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error("입력 전달 확인 시간이 지났습니다. 전송 여부를 확인해 주세요.")); }, 5000);
+      pending.set(id, { resolve, reject, timer });
+      ws.send(JSON.stringify({ type: "input", data, id, question }));
+    });
+    result.catch(() => {});
+    return result;
   }
   function inspect(current, session, ws) {
     if (current !== generation || !terminal || ws.readyState !== WebSocket.OPEN) return;
@@ -39,8 +52,9 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
               || nativeQuestion(lines(), session.provider)?.signature !== next.signature) return;
             answered = next.signature;
             for (const item of choices.querySelectorAll("button")) item.disabled = true;
-            ws.send(JSON.stringify({ type: "input", data: `${choice.key}\r` }));
-            notify("응답을 전달했습니다.");
+            void input(`${choice.key}\r`, next.signature, ws).then(
+              () => { if (current === generation) notify("응답을 전달했습니다."); },
+              error => { if (current === generation) notify(error.message); });
           });
           if (choice === next.choices[0] || /^No\b/.test(choice.label)) choices.append(button);
           else more.append(button);
@@ -58,27 +72,25 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
     setProgress(next ? "" : nativeProgress(screen));
     onActivity();
   }
-  async function open() {
+  async function open({ observe = false } = {}) {
     const session = selected(); if (!session) throw new Error("세션을 선택해 주세요.");
-    if (target === session.id && connecting) return connecting;
-    release(); target = session.id; const current = generation;
+    if (target === session.id && connecting && (!observing || observe)) return connecting;
+    release(); observing = observe; target = session.id; const current = generation;
     connecting = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
     // A selection may connect without an immediate send; retain handled rejection.
     connecting.catch(() => {});
-    notify("세션 연결 중…");
-    readyTimer = setTimeout(() => { if (current === generation) { const error = new Error("세션 연결 시간이 지났습니다. 메시지는 전송하지 않았습니다."); release(error); notify(error.message); } }, 20_000);
+    if (!observe) notify("세션 연결 중…");
+    readyTimer = setTimeout(() => { if (current === generation) { if (observe) { release(); return; } const error = new Error("세션 연결 시간이 지났습니다. 메시지는 전송하지 않았습니다."); release(error); notify(error.message); } }, 20_000);
     void (async () => {
       try {
-        const { ticket } = await api(`sessions/${encodeURIComponent(session.id)}/terminal`, {});
+        const { ticket } = await api(`sessions/${encodeURIComponent(session.id)}/terminal`, { observe });
         if (current !== generation) return;
         terminal = new Terminal({ fontSize: 14, scrollback: 1000, screenReaderMode: true,
           theme: { background: "#11181d", foreground: "#e1e8ed" } });
-        const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(host);
+        terminal.open(host);
         const ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/terminal?ticket=${encodeURIComponent(ticket)}`);
         socket = ws;
-        const send = value => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(value)); };
-        const resize = () => { if (current === generation && terminal) { fit.fit(); send({ type: "resize", cols: Math.max(20, Math.min(300, terminal.cols)), rows: Math.max(5, Math.min(120, terminal.rows)) }); } };
-        terminal.onData(data => send({ type: "input", data }));
+        terminal.onData(data => { lastInput = input(data, undefined, ws); void lastInput.catch(error => { if (current === generation) notify(error.message); }); });
         ws.addEventListener("message", event => {
           if (current !== generation) return;
           const message = JSON.parse(event.data);
@@ -86,22 +98,29 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
             if (current !== generation) return;
             if (!screenTimer) screenTimer = setTimeout(() => { screenTimer = null; inspect(current, session, ws); }, 60);
           });
-          if (message.type === "ready") resize();
+          if (message.type === "size") terminal.resize(message.cols, message.rows);
+          if (message.type === "unavailable") { release(); return; }
+          if (message.type === "input-result") {
+            const request = pending.get(message.id);
+            if (request) { clearTimeout(request.timer); pending.delete(message.id); request.resolve(); }
+          }
           if (message.type === "error") { release(new Error(message.message)); notify(message.message); }
         });
         ws.addEventListener("close", () => { if (current === generation) { const error = new Error("연결이 끊겼습니다. 다음 전송 때 다시 연결합니다."); release(error); notify(error.message); } });
         ws.addEventListener("error", () => { if (current === generation) notify("세션에 연결하지 못했습니다."); });
-        observer = new ResizeObserver(resize); observer.observe(host);
       } catch (error) { if (current === generation) { release(error); notify(error.message); } }
     })();
     return connecting;
   }
-  return { open, progress: () => progress, sync(id) { if (target && target !== id) { release(); target = ""; notify(""); } }, async sendText(value) {
+  return { open, disconnect: () => { release(); target = ""; }, observe: () => open({ observe: true }), progress: () => progress, sync(id) { if (target && target !== id) { release(); target = ""; notify(""); } }, async sendText(value) {
     const id = selected()?.id;
     const ready = await open();
     if (!ready || id !== selected()?.id || !connected || socket?.readyState !== WebSocket.OPEN) throw new Error("세션 연결을 확인해 주세요. 메시지는 전송하지 않았습니다.");
     if (nativeQuestion(lines(), selected().provider)) throw new Error("대기 중인 질문에 먼저 응답해 주세요. 작성한 메시지는 보관했습니다.");
-    terminal.paste(value); socket.send(JSON.stringify({ type: "input", data: "\r" }));
+    const ws = socket, current = generation;
+    terminal.paste(value); await lastInput;
+    if (current !== generation || id !== selected()?.id) throw new Error("입력 대상이 변경됐습니다. 작성한 메시지와 이전 세션의 입력창을 확인해 주세요.");
+    await input("\r", undefined, ws);
     notify(""); return true;
   } };
 }
