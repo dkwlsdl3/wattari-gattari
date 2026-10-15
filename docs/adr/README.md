@@ -47,7 +47,10 @@ provider 세션을 소유하지 않습니다. 새 세션을 시작하기 전 선
 ### 로컬 웹 화면
 
 `waga serve`는 기존 bridge의 목록·preview·create·instruct·ask·result를 호출하는 HTTP 화면입니다.
-loopback `127.0.0.1`만 지원하며 실행마다 새 비밀 접속 링크를 발급합니다. 비밀값은 URL fragment로
+loopback `127.0.0.1`만 지원하며 일반 CLI 실행마다 새 비밀 접속 링크를 발급합니다.
+독립 사용자 서비스는 `web-service.mjs`를 실행하며 XDG state의 `wattari-gattari/web-token`을
+0600 권한으로 보관·재사용합니다. 서비스 journal에는 비밀 접속 키를 출력하지 않습니다.
+비밀값은 URL fragment로
 전달한 뒤 주소에서 제거하고, 동일 origin의 JSON 인증 요청으로 HttpOnly·SameSite=Strict
 쿠키를 설정합니다. API는 쿠키를 요구하고 Host를 검증하며, 변경 요청은 정확한 Origin을 요구합니다.
 정적 화면은 별도 의존성·빌드 없이 패키지에 포함하고 provider 출력은 텍스트로만 렌더링합니다.

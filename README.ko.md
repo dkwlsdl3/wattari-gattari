@@ -88,6 +88,14 @@ Enter로 전송하고 Shift+Enter로 줄바꿈합니다. 초안은 정확한 수
 상시 실행용 예시는 [사용자 서비스 템플릿](integrations/waga-web.service.example)에 있습니다.
 설치 경로·Node 경로·작업 폴더를 실제 값으로 바꿔 수동 설치합니다. 웹 명령 자체는
 사용자 서비스나 provider daemon을 설치·재시작하지 않습니다.
+템플릿을 `~/.config/systemd/user/waga-web.service`로 저장한 뒤
+`systemctl --user daemon-reload`와 `systemctl --user enable --now waga-web.service`로 등록합니다.
+상태·로그는 `systemctl --user status waga-web.service`와
+`journalctl --user -u waga-web.service`로 확인합니다.
+서비스는 Codex/Claude와 독립적으로 실행되며 장애 시 자동 재시작합니다.
+접속 키는 `${XDG_STATE_HOME:-~/.local/state}/wattari-gattari/web-token`에 저장되어
+재시작 후에도 브라우저 인증이 유지됩니다. 새 브라우저에서는 파일의 키를
+`http://127.0.0.1:4317/#<키>`로 열어 접속합니다. 서비스 로그에는 키를 남기지 않습니다.
 
 ### 새 세션 자동 모델 라우팅
 

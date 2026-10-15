@@ -380,7 +380,7 @@ export async function serveWeb(options) {
     web.server.once("close", () => {
       process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); resolve();
     });
-    options.output?.write(`Waga web: ${web.url}\n`);
+    options.output?.write(`Waga web: ${options.showToken === false ? `${web.origin}/` : web.url}\n`);
   });
   return 0;
 }

@@ -6,10 +6,12 @@ Description=Waga local browser workspace
 [Service]
 Type=simple
 WorkingDirectory=/absolute/path/to/workspace
-ExecStart=/absolute/path/to/node /absolute/path/to/wattari-gattari/src/cli.mjs serve --port 4317
-Environment=PATH=/absolute/path/to/node-directory:/usr/local/bin:/usr/bin:/bin
+ExecStart=/absolute/path/to/node /absolute/path/to/wattari-gattari/src/web-service.mjs --port 4317
+Environment=PATH=/absolute/path/to/node-directory:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Restart=on-failure
 RestartSec=5
+# Native frontends outlive the web service; stop only its main process.
+KillMode=process
 Nice=10
 UMask=0077
 

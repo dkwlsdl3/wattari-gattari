@@ -94,6 +94,13 @@ are deduplicated within the running server's latest 100 jobs, not across restart
 See the [user service template](integrations/waga-web.service.example) for optional
 background operation. Replace its paths before manual installation. Waga does not
 install a service or start/restart a native provider daemon from the web command.
+Save the rendered unit as `~/.config/systemd/user/waga-web.service`, then run
+`systemctl --user daemon-reload` and `systemctl --user enable --now waga-web.service`.
+Use `systemctl --user status waga-web.service` and `journalctl --user -u waga-web.service`
+to inspect it. The service runs independently of Codex/Claude and restarts on failure.
+Its private token persists in `${XDG_STATE_HOME:-~/.local/state}/wattari-gattari/web-token`,
+so browser authentication survives restarts. For a new browser, open
+`http://127.0.0.1:4317/#<token>` using that file's value. The journal omits the token.
 
 ### Automatic model routing for new sessions
 
