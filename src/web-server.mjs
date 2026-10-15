@@ -10,6 +10,7 @@ import { RunStore } from "./run-store.mjs";
 import { sampleResources } from "./resource-gate.mjs";
 import { ExecutionStore } from "./execution-store.mjs";
 import { WorkflowStore } from "./workflow-store.mjs";
+import { installWebTerminal } from "./web-terminal.mjs";
 
 const ASSETS = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
@@ -18,6 +19,10 @@ const ASSETS = new Map([
   ["/executions.mjs", ["executions.mjs", "text/javascript; charset=utf-8"]],
   ["/sortable.mjs", [new URL(import.meta.resolve("sortablejs/modular/sortable.esm.js")), "text/javascript; charset=utf-8"]],
   ["/app.mjs", ["app.mjs", "text/javascript; charset=utf-8"]],
+  ["/terminal.mjs", ["terminal.mjs", "text/javascript; charset=utf-8"]],
+  ["/xterm.mjs", [new URL(import.meta.resolve("@xterm/xterm/lib/xterm.mjs")), "text/javascript; charset=utf-8"]],
+  ["/xterm-fit.mjs", [new URL(import.meta.resolve("@xterm/addon-fit/lib/addon-fit.mjs")), "text/javascript; charset=utf-8"]],
+  ["/xterm.css", [new URL(import.meta.resolve("@xterm/xterm/css/xterm.css")), "text/css; charset=utf-8"]],
   ["/style.css", ["style.css", "text/css; charset=utf-8"]],
 ]);
 const COOKIE = "waga_web";
@@ -49,12 +54,12 @@ const workspaceOf = session => path.resolve(session.projectCwd || session.cwd);
 
 function publicSession(session) {
   const { id, provider, name, cwd, status, updatedAt } = session;
-  return { id, provider, name, cwd, workspace: workspaceOf(session), status, updatedAt, canInstruct: provider === "codex" };
+  return { id, provider, name, cwd, workspace: workspaceOf(session), status, updatedAt, canControl: true };
 }
 
-// HTTP is a view/controller only. Native providers keep owning sessions and approval UI.
+// Native providers own sessions and decisions; the web attaches their frontend.
 export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, port = 4317,
-  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore(), orderStore = new DockOrderStore() } = {}) {
+  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore(), orderStore = new DockOrderStore(), terminalSpawn } = {}) {
   if (!bridge) throw new TypeError("A session bridge is required");
   const assets = new Map(await Promise.all([...ASSETS].map(async ([route, [file, type]]) =>
     [route, { type, data: await fs.readFile(file instanceof URL ? file : new URL(`./web/${file}`, import.meta.url)) }])));
@@ -182,12 +187,13 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         const { sessions, warnings } = await discover();
         json(response, 200, { sessions: applyOverviewOrder(sessions, orderStore.load()).map(publicSession), warnings, cwd }); return;
       }
-      const actionMatch = /^\/api\/sessions\/([^/]+)\/(order|rename|archive|connection)$/.exec(url.pathname);
+      const actionMatch = /^\/api\/sessions\/([^/]+)\/(order|rename|archive|connection|terminal)$/.exec(url.pathname);
       if (request.method === "POST" && actionMatch) {
         const input = await body(request), { sessions } = await discover();
         const selected = sessions.find(row => row.id === decodeURIComponent(actionMatch[1]));
         if (!selected) throw fail(404, "세션을 찾을 수 없습니다.");
         const action = actionMatch[2];
+        if (action === "terminal") { json(response, 200, terminals.ticket(selected.id)); return; }
         if (action === "order") {
           if (input.targetId === undefined && !["up", "down"].includes(input.direction)) throw fail(400, "이동할 위치를 지정해 주세요.");
           const workspace = workspaceOf(selected), order = reconcileOverviewOrder(orderStore.load(), sessions);
@@ -321,6 +327,12 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
       else response.end();
     }
   });
+  const terminals = installWebTerminal(server, {
+    now, spawn: terminalSpawn,
+    authorize: request => request.headers.host === new URL(origin).host && request.headers.origin === origin
+      && sameSecret(request.headers.cookie?.split(/;\s*/).find(value => value.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1), token),
+    connection: target => bridge.connection(target, { cwd: filterCwd }),
+  });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, "127.0.0.1", resolve);
@@ -328,6 +340,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
   origin = `http://127.0.0.1:${server.address().port}`;
   return { server, origin, url: `${origin}/#${token}`, close() {
     closing = true;
+    terminals.close();
     closed ??= new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     return closed;
   } };

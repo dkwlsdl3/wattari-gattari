@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Waga</title>
+  <link rel="stylesheet" href="/xterm.css">
   <link rel="stylesheet" href="/style.css">
   <script type="module" src="/app.mjs"></script>
 </head>
@@ -24,7 +25,7 @@
       <small class="order-help">드래그로 순서 변경 · Shift+↑↓</small>
     </aside>
     <div class="session-content">
-      <div class="session-heading"><div><h1 id="node-title">세션 선택</h1><p id="session-status" class="muted"></p></div><div class="session-actions"><button id="connect-session" disabled>터미널 연결</button><button id="rename-session" disabled>이름 변경</button><button id="archive-session" disabled>보관</button></div></div>
+      <div class="session-heading"><div><h1 id="node-title">세션 선택</h1><p id="session-status" class="muted"></p></div><div class="session-actions"><button id="control-session" disabled>입력·승인</button><button id="connect-session" disabled>터미널 연결</button><button id="rename-session" disabled>이름 변경</button><button id="archive-session" disabled>보관</button></div></div>
       <div class="view-tabs"><button id="show-conversation" aria-pressed="true">대화</button><button id="show-executions" aria-pressed="false">실행 흐름</button></div>
     <section id="execution-panel" aria-label="실제 실행 기록" hidden>
       <div class="execution-toolbar"><select id="execution-select" aria-label="실행 선택" hidden></select><button id="import-execution">기록 가져오기</button><button id="run-work-view" hidden>작업</button><button id="run-call-view" hidden>호출</button></div>
@@ -37,15 +38,19 @@
     <section id="detail" aria-label="세션 대화" hidden>
       <div id="messages" class="messages" role="log" aria-label="대화 내역"></div>
       <div id="operation-status" class="operation-status" role="status" hidden></div>
-      <form id="query-form">
-        <label for="message">메시지</label>
-        <div class="inline composer"><textarea id="message" rows="2" maxlength="16000" placeholder="메시지 입력 · Enter로 보내기, Shift+Enter로 줄바꿈" disabled required></textarea><button id="send" disabled>보내기</button></div>
-        <small id="message-help" class="muted"></small>
-      </form>
+      <div class="conversation-input"><button id="open-session-input" disabled>이 세션에 입력</button></div>
     </section>
     </div>
     </div>
   </main>
+  <dialog id="terminal-dialog" aria-labelledby="terminal-title">
+    <div class="terminal-heading"><h2 id="terminal-title"></h2><span id="terminal-status" role="status"></span><button id="terminal-reconnect">다시 연결</button><button id="terminal-close">닫기</button></div>
+    <div id="terminal-screen" aria-label="세션 입력과 승인"></div>
+    <div id="terminal-keys" hidden><button data-key="1">1</button><button data-key="2">2</button><button data-key="3">3</button><button data-key="4">4</button><button data-key="&#27;[A" aria-label="위쪽 선택">↑</button><button data-key="&#27;[B" aria-label="아래쪽 선택">↓</button><button data-key="&#13;">Enter</button><button data-key="&#27;">Esc</button></div>
+    <form id="query-form">
+      <label for="message">메시지</label><div class="inline composer"><textarea id="message" rows="2" maxlength="16000" placeholder="메시지 입력 · Enter로 보내기, Shift+Enter로 줄바꿈" disabled required></textarea><button id="send" disabled>보내기</button></div>
+    </form>
+  </dialog>
   <dialog id="connect-dialog"><h2>터미널에서 이어가기</h2><p class="muted">아래 명령을 터미널에서 실행하면 이 세션에 연결됩니다.</p><textarea id="connect-command" rows="5" readonly aria-label="터미널 연결 명령"></textarea><div class="actions"><button data-close="connect-dialog">닫기</button><button id="copy-command">명령 복사</button></div></dialog>
   <dialog id="rename-dialog"><form id="rename-form"><h2>세션 이름 변경</h2><label for="session-name">이름</label><input id="session-name" maxlength="200" required><div class="actions"><button type="button" data-close="rename-dialog">취소</button><button>변경</button></div></form></dialog>
   <dialog id="archive-dialog"><form id="archive-form"><h2>세션 보관</h2><p id="archive-name"></p><p class="muted">활성 목록에서 제외합니다. 현재 제공자의 보관 동작을 실행합니다.</p><div class="actions"><button type="button" data-close="archive-dialog">취소</button><button>보관</button></div></form></dialog>
@@ -60,7 +65,7 @@
   <dialog id="create-dialog"><form id="create-form">
     <h2>새 세션</h2>
     <label for="create-workspace">프로젝트 폴더</label><select id="create-workspace"></select>
-    <label for="create-provider">제공자</label><select id="create-provider"><option value="codex">Codex · 작업 지시 지원</option><option value="claude">Claude · 첫 작업만 지시 가능</option></select>
+    <label for="create-provider">제공자</label><select id="create-provider"><option value="codex">Codex</option><option value="claude">Claude</option></select>
     <label for="create-message">작업 지시</label><textarea id="create-message" rows="5" maxlength="16000" required></textarea>
     <p id="create-cwd" class="muted"></p>
     <div class="actions"><button type="button" data-close="create-dialog">취소</button><button id="create-submit" class="primary">생성</button></div>

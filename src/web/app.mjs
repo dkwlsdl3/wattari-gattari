@@ -1,4 +1,5 @@
 import Sortable from "/sortable.mjs";
+import { initTerminal } from "./terminal.mjs";
 import { DraftStore } from "./drafts.mjs";
 import { initExecutions } from "./executions.mjs";
 import { conversationItems } from "./conversation.mjs";
@@ -6,6 +7,7 @@ const $ = selector => document.querySelector(selector);
 const nativeStates = { idle: "대기 중", working: "작업 중", "needs-input": "입력 대기", done: "완료", error: "오류", unavailable: "연결 불가" };
 const transport = { starting: "접수 중", "waiting-local": "앞선 요청 대기", waiting: "전송 대기", submitting: "전송 중", submitted: "답변 대기", accepted: "답변 대기", "reply-received": "답변 수신", replied: "답변 수신", error: "질의 실패", created: "세션 생성됨", "not-sent": "미전송", "result-unknown": "결과 미확정" };
 let sessions = [], refreshing = false, ready = false;
+let controlReady = false;
 let directSessionId = "", composerRecipient = "", previewKey = "", previewIdentity = "", warning = "";
 let browserStorage; try { browserStorage = localStorage; } catch { browserStorage = { getItem() {}, setItem() {} }; }
 const histories = new Map(), sentMessages = new Map(), drafts = new DraftStore(browserStorage);
@@ -101,10 +103,8 @@ ${row.cwd}`; button.append(el("span", row.name, "session-name"), el("small", `${
 const session = () => sessions.find(row => row.id === directSessionId);
 const activeKey = () => `direct:${directSessionId}`;
 const recipientKey = () => `${activeKey()}:${directSessionId || "unassigned"}`;
+function resizeComposer() { const input = $("#message"); input.style.height = "auto"; input.style.height = `${Math.min(120, Math.max(50, input.scrollHeight))}px`; }
 const pendingForSession = () => [...operations.values()].find(row => row.target && row.target === directSessionId) ?? operations.get(activeKey());
-function resizeComposer() {
-  const input = $("#message"); input.style.height = "auto"; input.style.height = `${Math.min(160, Math.max(58, input.scrollHeight))}px`;
-}
 function el(tag, text, className) {
   const item = document.createElement(tag); if (text !== undefined) item.textContent = text; if (className) item.className = className; return item;
 }
@@ -115,20 +115,21 @@ async function api(route, value) {
 }
 function render() { renderSidebar(); renderDetail(); }
 function renderDetail() {
+  controls.sync(directSessionId);
   if (composerRecipient !== recipientKey()) {
     if (composerRecipient) drafts.set(composerRecipient, $("#message").value);
     composerRecipient = recipientKey(); $("#message").value = drafts.get(composerRecipient) ?? "";
   }
+  $("#message").disabled = !controlReady;
+  $("#send").disabled = !controlReady || !$("#message").value.trim();
+  resizeComposer();
   $("#detail").hidden = false; $("#node-title").textContent = session()?.name ?? "세션 대화";
   const selected = session();
-  const canInstruct = Boolean(selected?.canInstruct);
-  $("#message-help").hidden = !selected || canInstruct;
-  $("#message-help").textContent = "이 세션은 웹 작업 지시를 지원하지 않습니다. Codex 세션을 선택해 주세요.";
   $("#session-status").textContent = selected ? `${nativeStates[selected.status] ?? "상태 미확인"} · ${selected.cwd}` : "";
   const pending = pendingForSession();
-  $("#message").disabled = !canInstruct; $("#send").disabled = !canInstruct || Boolean(pending) || !$("#message").value.trim();
+  $("#control-session").disabled = !selected; $("#open-session-input").disabled = !selected;
   $("#connect-session").disabled = !selected; $("#rename-session").disabled = !selected; $("#archive-session").disabled = !selected || Boolean(pending) || selected.status === "working";
-  resizeComposer(); renderConversation();
+  renderConversation();
   const record = directRequests.get(directSessionId)?.at(-1), status = $("#operation-status"); status.replaceChildren();
   status.hidden = !pending && (!record || record.reply !== undefined || record.state === "created");
   if (pending) status.append(el("span", pending.kind === "create" ? "세션 생성 중…" : transport[pending.state] ?? "답변 대기 중…"));
@@ -218,7 +219,7 @@ async function refresh() {
   finally { refreshing = false; }
 }
 async function submitOperation(kind, input) {
-  const key = activeKey(), draftRecipient = recipientKey();
+  const key = activeKey();
   if (pendingForSession()) return;
   const operationId = crypto.randomUUID(); operations.set(key, { operationId, kind, target: input.target, state: "starting" });
   if (kind === "instruct") sentMessages.set(operationId, input.message);
@@ -226,7 +227,6 @@ async function submitOperation(kind, input) {
   renderDetail();
   try {
     await api(kind, { ...input, operationId });
-    if (draftRecipient === recipientKey() && kind === "instruct" && $("#message").value === input.message) { $("#message").value = ""; drafts.delete(draftRecipient); }
     await refresh();
   } catch (error) { operations.delete(key); notice(`${error.message} · 자동 재전송하지 않았습니다.`); renderDetail(); }
 }
@@ -240,6 +240,9 @@ $("#session-list").addEventListener("keydown", event => {
   if (event.shiftKey && ["ArrowUp", "ArrowDown"].includes(event.key)) { const id = event.target.dataset.sessionId; if (id) { event.preventDefault(); void moveSession(id, event.key === "ArrowUp" ? "up" : "down"); } }
 });
 $("#toggle-sessions").addEventListener("click", () => { const open = document.body.classList.toggle("sessions-open"); $("#toggle-sessions").setAttribute("aria-expanded", String(open)); });
+const controls = initTerminal({ api, selected: session, onReady: value => { controlReady = value; renderDetail(); }, onClose: () => { void loadHistory(); void refresh(); } });
+$("#control-session").addEventListener("click", controls.open);
+$("#open-session-input").addEventListener("click", controls.open);
 $("#connect-session").addEventListener("click", async () => {
   try {
     const spec = await api(`sessions/${encodeURIComponent(directSessionId)}/connection`, {});
@@ -271,11 +274,16 @@ $("#messages").addEventListener("scroll", () => {
   if ($("#messages").scrollTop < 80) void loadHistory(true);
 });
 $("#show-conversation").addEventListener("click", () => { requestAnimationFrame(() => { renderConversation(); if (scrollPositions.has(previewIdentity)) $("#messages").scrollTop = scrollPositions.get(previewIdentity); }); });
-$("#message").addEventListener("input", () => { resizeComposer(); drafts.set(recipientKey(), $("#message").value); $("#send").disabled = !session()?.canInstruct || Boolean(pendingForSession()) || !$("#message").value.trim(); });
+$("#message").addEventListener("input", () => { resizeComposer(); drafts.set(recipientKey(), $("#message").value); $("#send").disabled = !controlReady || !$("#message").value.trim(); });
 $("#message").addEventListener("keydown", event => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!$("#send").disabled) $("#query-form").requestSubmit(); }
 });
-$("#query-form").addEventListener("submit", event => { event.preventDefault(); if (session()?.canInstruct && $("#message").value.trim()) void submitOperation("instruct", { target: directSessionId, message: $("#message").value }); });
+$("#query-form").addEventListener("submit", event => {
+  event.preventDefault();
+  if (controlReady && $("#message").value.trim() && controls.sendText($("#message").value)) {
+    $("#message").value = ""; drafts.delete(recipientKey()); renderDetail();
+  }
+});
 $("#new-session").addEventListener("click", () => $("#create-dialog").showModal());
 $("#create-form").addEventListener("submit", async event => {
   event.preventDefault(); const input = { provider: $("#create-provider").value, workspace: $("#create-workspace").value, message: $("#create-message").value };
