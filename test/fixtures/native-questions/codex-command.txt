@@ -1,0 +1,24 @@
+› 추가 입력 회귀 시험입니다. exec_command로 sleep 25; printf BUSY_DONE_V2 > /t…
+ 
+• Running sleep 25; printf BUSY_DONE_V2 > /tmp/waga-proof-web-control/waga-proo…
+    + Show details                                                              
+ 
+ 
+  Would you like to run the following command?
+
+  Environment: local
+ 
+  Reason: 25초 기다린 뒤 지정된 파일에 BUSY_DONE_V2를 기록하는 명령을 한 번
+  실행하도록 승인하시겠습니까?
+ 
+  $ sleep 25; printf BUSY_DONE_V2 >
+  /tmp/waga-proof-web-control/waga-proof-work/codex-busy-v2.txt
+ 
+
+› 1. Yes, proceed (y)                                                           
+  2. Yes, and don't ask again for commands that start with `sleep 25; printf
+     BUSY_DONE_V2 > /tmp/waga-proof-web-control/waga-proof-work/codex-busy-
+     v2.txt` (p)
+  3. No, and tell Codex what to do differently (esc)
+
+  Press enter to confirm or esc to cancel                                       

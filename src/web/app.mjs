@@ -7,7 +7,7 @@ const $ = selector => document.querySelector(selector);
 const nativeStates = { idle: "대기 중", working: "작업 중", "needs-input": "입력 대기", done: "완료", error: "오류", unavailable: "연결 불가" };
 const transport = { starting: "접수 중", "waiting-local": "앞선 요청 대기", waiting: "전송 대기", submitting: "전송 중", submitted: "답변 대기", accepted: "답변 대기", "reply-received": "답변 수신", replied: "답변 수신", error: "질의 실패", created: "세션 생성됨", "not-sent": "미전송", "result-unknown": "결과 미확정" };
 let sessions = [], refreshing = false, ready = false;
-let controlReady = false;
+let sending = false, activityTimer;
 let directSessionId = "", composerRecipient = "", previewKey = "", previewIdentity = "", warning = "";
 let browserStorage; try { browserStorage = localStorage; } catch { browserStorage = { getItem() {}, setItem() {} }; }
 const histories = new Map(), sentMessages = new Map(), drafts = new DraftStore(browserStorage);
@@ -29,6 +29,7 @@ async function selectSession(id) {
   try { browserStorage.setItem("waga:selected-session", id); } catch {}
   document.body.classList.remove("sessions-open"); $("#toggle-sessions").setAttribute("aria-expanded", "false");
   render();
+  void controls.open().catch(error => notice(error.message));
   await Promise.all([loadHistory(), refreshExecutions().catch(error => notice(error.message))]);
 }
 async function moveSession(id, direction) {
@@ -120,14 +121,13 @@ function renderDetail() {
     if (composerRecipient) drafts.set(composerRecipient, $("#message").value);
     composerRecipient = recipientKey(); $("#message").value = drafts.get(composerRecipient) ?? "";
   }
-  $("#message").disabled = !controlReady;
-  $("#send").disabled = !controlReady || !$("#message").value.trim();
+  $("#message").disabled = !session();
+  $("#send").disabled = !session() || sending || !$("#message").value.trim();
   resizeComposer();
   $("#detail").hidden = false; $("#node-title").textContent = session()?.name ?? "세션 대화";
   const selected = session();
   $("#session-status").textContent = selected ? `${nativeStates[selected.status] ?? "상태 미확인"} · ${selected.cwd}` : "";
   const pending = pendingForSession();
-  $("#control-session").disabled = !selected; $("#open-session-input").disabled = !selected;
   $("#connect-session").disabled = !selected; $("#rename-session").disabled = !selected; $("#archive-session").disabled = !selected || Boolean(pending) || selected.status === "working";
   renderConversation();
   const record = directRequests.get(directSessionId)?.at(-1), status = $("#operation-status"); status.replaceChildren();
@@ -240,9 +240,9 @@ $("#session-list").addEventListener("keydown", event => {
   if (event.shiftKey && ["ArrowUp", "ArrowDown"].includes(event.key)) { const id = event.target.dataset.sessionId; if (id) { event.preventDefault(); void moveSession(id, event.key === "ArrowUp" ? "up" : "down"); } }
 });
 $("#toggle-sessions").addEventListener("click", () => { const open = document.body.classList.toggle("sessions-open"); $("#toggle-sessions").setAttribute("aria-expanded", String(open)); });
-const controls = initTerminal({ api, selected: session, onReady: value => { controlReady = value; renderDetail(); }, onClose: () => { void loadHistory(); void refresh(); } });
-$("#control-session").addEventListener("click", controls.open);
-$("#open-session-input").addEventListener("click", controls.open);
+const controls = initTerminal({ api, selected: session, onChange: renderDetail, onActivity: () => {
+  if (!activityTimer) activityTimer = setTimeout(() => { activityTimer = null; void loadHistory(); }, 1000);
+} });
 $("#connect-session").addEventListener("click", async () => {
   try {
     const spec = await api(`sessions/${encodeURIComponent(directSessionId)}/connection`, {});
@@ -274,15 +274,20 @@ $("#messages").addEventListener("scroll", () => {
   if ($("#messages").scrollTop < 80) void loadHistory(true);
 });
 $("#show-conversation").addEventListener("click", () => { requestAnimationFrame(() => { renderConversation(); if (scrollPositions.has(previewIdentity)) $("#messages").scrollTop = scrollPositions.get(previewIdentity); }); });
-$("#message").addEventListener("input", () => { resizeComposer(); drafts.set(recipientKey(), $("#message").value); $("#send").disabled = !controlReady || !$("#message").value.trim(); });
+$("#message").addEventListener("input", () => { resizeComposer(); drafts.set(recipientKey(), $("#message").value); $("#send").disabled = !session() || sending || !$("#message").value.trim(); });
 $("#message").addEventListener("keydown", event => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!$("#send").disabled) $("#query-form").requestSubmit(); }
 });
-$("#query-form").addEventListener("submit", event => {
+$("#query-form").addEventListener("submit", async event => {
   event.preventDefault();
-  if (controlReady && $("#message").value.trim() && controls.sendText($("#message").value)) {
-    $("#message").value = ""; drafts.delete(recipientKey()); renderDetail();
-  }
+  if (!session() || sending || !$("#message").value.trim()) return;
+  const text = $("#message").value, recipient = recipientKey();
+  sending = true; renderDetail();
+  try {
+    await controls.sendText(text);
+    if (recipient === recipientKey() && $("#message").value === text) { $("#message").value = ""; drafts.delete(recipient); }
+  } catch (error) { notice(error.message); }
+  finally { sending = false; renderDetail(); }
 });
 $("#new-session").addEventListener("click", () => $("#create-dialog").showModal());
 $("#create-form").addEventListener("submit", async event => {
@@ -291,7 +296,7 @@ $("#create-form").addEventListener("submit", async event => {
 });
 $("#refresh").addEventListener("click", () => { void refresh(); void refreshExecutions().catch(error => notice(error.message)); });
 async function start() {
-  try { const token = location.hash.slice(1); history.replaceState(null, "", location.pathname); if (token) await api("auth", { token }); ready = true; refreshExecutions = await initExecutions({ api, notice, selectedSession: session }); await refresh(); }
+  try { const token = location.hash.slice(1); history.replaceState(null, "", location.pathname); if (token) await api("auth", { token }); ready = true; refreshExecutions = await initExecutions({ api, notice, selectedSession: session }); await refresh(); if (session()) void controls.open().catch(error => notice(error.message)); }
   catch (error) { notice(error.message); $("#connection").textContent = "접속 링크 필요"; }
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); });

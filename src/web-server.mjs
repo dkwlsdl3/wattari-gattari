@@ -19,6 +19,7 @@ const ASSETS = new Map([
   ["/executions.mjs", ["executions.mjs", "text/javascript; charset=utf-8"]],
   ["/sortable.mjs", [new URL(import.meta.resolve("sortablejs/modular/sortable.esm.js")), "text/javascript; charset=utf-8"]],
   ["/app.mjs", ["app.mjs", "text/javascript; charset=utf-8"]],
+  ["/native-question.mjs", ["native-question.mjs", "text/javascript; charset=utf-8"]],
   ["/terminal.mjs", ["terminal.mjs", "text/javascript; charset=utf-8"]],
   ["/xterm.mjs", [new URL(import.meta.resolve("@xterm/xterm/lib/xterm.mjs")), "text/javascript; charset=utf-8"]],
   ["/xterm-fit.mjs", [new URL(import.meta.resolve("@xterm/addon-fit/lib/addon-fit.mjs")), "text/javascript; charset=utf-8"]],

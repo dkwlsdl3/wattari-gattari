@@ -66,15 +66,17 @@ New work uses provider defaults in the configured directory without calling LLR.
 The default conversation view lets users select a session and send instructions without
 registering a workflow. Every browser message is native user input for file edits and commands
 without overriding the session's approval or sandbox settings. Only inter-session messages
-use the untrusted peer contract; there is no transport selector. Existing Claude connections
-do not support user input, so their composer is disabled;
-native approvals stay in the provider UI.
+use the untrusted peer contract; there is no transport selector. Claude and Codex share one
+conversation composer, including input during work. Native approval choices appear as inline
+buttons; unrecognized questions retain inline native input, without a separate control dialog.
 
 The separate **실행 기록** view imports Claude Code OTLP JSON snapshots and displays
 observed main/agent call edges, tool outputs and diffs. A returned tool call is never
 classified as a passing check. Runs explicitly started by `waga run workflow.json` also stream
 live spans and display declared dependencies, machine checks, independent reviews and retries;
-see [record format and proof boundaries](docs/web-executions.md).
+Automatic OTLP collection for ordinary native sessions is not connected yet; an empty trace
+view does not mean the session has no work history.
+See [record format and proof boundaries](docs/web-executions.md).
 The **세션 대화** view provides the stage and conversation features below.
 
 Select a native session once and send user instructions. Manual work-group selectors,

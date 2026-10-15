@@ -138,7 +138,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
   function render() {
     if (currentRun && workView) { renderRun(); return; }
     const graph = $("#execution-graph"), calls = $("#execution-tools"), detail = $("#execution-evidence"); graph.replaceChildren(); calls.replaceChildren(); detail.replaceChildren();
-    if (!execution) { $("#execution-note").textContent = "이 세션에 연결된 실행 기록이 없습니다. 세션 ID가 기록된 OTLP JSON을 가져오면 호출 관계를 표시합니다."; return; }
+    if (!execution) { $("#execution-note").textContent = "이 세션은 자동 추적 수집이 연결되어 있지 않습니다. 현재 호출 그래프는 Waga 워크플로의 수집 기록 또는 가져온 OpenTelemetry 기록이 있을 때 표시됩니다."; return; }
     const { nodes, edges } = executionGraph(execution.spans);
     if (currentRun) for (const group of nodes) {
       const nativeId = group.spans[0]?.attributes["session.id"];
