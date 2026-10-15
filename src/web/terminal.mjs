@@ -11,9 +11,10 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
   let question = null, answered = "", connected = false;
   const notify = message => { status.textContent = message; onChange(); };
   const lines = () => Array.from({ length: terminal.rows }, (_, i) => terminal.buffer.active.getLine(terminal.buffer.active.viewportY + i)?.translateToString(true) ?? "");
-  function release() {
+  function release(error) {
     generation++; clearTimeout(readyTimer); clearTimeout(screenTimer); screenTimer = readyTimer = null;
-    rejectReady?.(new Error("세션 연결이 변경됐습니다. 메시지를 다시 확인해 주세요."));
+    if (error) rejectReady?.(error);
+    else resolveReady?.(false);
     rejectReady = resolveReady = null; connecting = null; connected = false;
     socket?.close(); socket = null; observer?.disconnect(); terminal?.dispose(); terminal = null;
     host.replaceChildren(); panel.hidden = true; fallback.hidden = true; question = null; answered = "";
@@ -49,7 +50,7 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
     // Unknown native questions remain operable inline, never guessed as Yes/No.
     fallback.hidden = Boolean(next) || Boolean(answered) || selected()?.status !== "needs-input";
     if (!connected && screen.some(line => /[›❯]/.test(line)) && !screen.some(line => line.includes("Resuming session…"))) {
-      connected = true; clearTimeout(readyTimer); resolveReady?.(); resolveReady = rejectReady = null;
+      connected = true; clearTimeout(readyTimer); resolveReady?.(true); resolveReady = rejectReady = null;
       notify(next ? "승인 요청에 응답해 주세요." : "");
     }
     onActivity();
@@ -62,7 +63,7 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
     // A selection may connect without an immediate send; retain handled rejection.
     connecting.catch(() => {});
     notify("세션 연결 중…");
-    readyTimer = setTimeout(() => { if (current === generation) { release(); notify("세션 연결 시간이 지났습니다. 메시지는 전송하지 않았습니다."); } }, 20_000);
+    readyTimer = setTimeout(() => { if (current === generation) { const error = new Error("세션 연결 시간이 지났습니다. 메시지는 전송하지 않았습니다."); release(error); notify(error.message); } }, 20_000);
     void (async () => {
       try {
         const { ticket } = await api(`sessions/${encodeURIComponent(session.id)}/terminal`, {});
@@ -79,22 +80,23 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
           if (current !== generation) return;
           const message = JSON.parse(event.data);
           if (message.type === "output") terminal.write(message.data, () => {
+            if (current !== generation) return;
             if (!screenTimer) screenTimer = setTimeout(() => { screenTimer = null; inspect(current, session, ws); }, 60);
           });
           if (message.type === "ready") resize();
-          if (message.type === "error") notify(message.message);
+          if (message.type === "error") { release(new Error(message.message)); notify(message.message); }
         });
-        ws.addEventListener("close", () => { if (current === generation) { release(); notify("연결이 끊겼습니다. 다음 전송 때 다시 연결합니다."); } });
+        ws.addEventListener("close", () => { if (current === generation) { const error = new Error("연결이 끊겼습니다. 다음 전송 때 다시 연결합니다."); release(error); notify(error.message); } });
         ws.addEventListener("error", () => { if (current === generation) notify("세션에 연결하지 못했습니다."); });
         observer = new ResizeObserver(resize); observer.observe(host);
-      } catch (error) { if (current === generation) { release(); notify(error.message); } }
+      } catch (error) { if (current === generation) { release(error); notify(error.message); } }
     })();
     return connecting;
   }
   return { open, sync(id) { if (target && target !== id) { release(); target = ""; notify(""); } }, async sendText(value) {
     const id = selected()?.id;
-    await open();
-    if (id !== selected()?.id || !connected || socket?.readyState !== WebSocket.OPEN) throw new Error("세션 연결을 확인해 주세요. 메시지는 전송하지 않았습니다.");
+    const ready = await open();
+    if (!ready || id !== selected()?.id || !connected || socket?.readyState !== WebSocket.OPEN) throw new Error("세션 연결을 확인해 주세요. 메시지는 전송하지 않았습니다.");
     if (nativeQuestion(lines(), selected().provider)) throw new Error("대기 중인 질문에 먼저 응답해 주세요. 작성한 메시지는 보관했습니다.");
     terminal.paste(value); socket.send(JSON.stringify({ type: "input", data: "\r" }));
     notify(""); return true;

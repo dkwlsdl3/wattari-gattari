@@ -18,6 +18,10 @@ let sortables = [];
 let filter = "all", moving = false, actionTarget = "", sidebarKey = "";
 const collapsed = new Set(), scrollPositions = new Map();
 try { directSessionId = browserStorage.getItem("waga:selected-session") || ""; } catch {}
+function openControls() {
+  const id = session()?.id;
+  void controls.open().catch(error => { if (session()?.id === id) notice(error.message); });
+}
 function visibleSessions() {
   const needle = $("#session-search").value.trim().toLocaleLowerCase();
   return sessions.filter(row => (filter === "all" || row.status === filter) && `${row.name} ${row.workspace} ${row.provider}`.toLocaleLowerCase().includes(needle));
@@ -28,8 +32,8 @@ async function selectSession(id) {
   directSessionId = id;
   try { browserStorage.setItem("waga:selected-session", id); } catch {}
   document.body.classList.remove("sessions-open"); $("#toggle-sessions").setAttribute("aria-expanded", "false");
-  render();
-  void controls.open().catch(error => notice(error.message));
+  notice(); render();
+  openControls();
   await Promise.all([loadHistory(), refreshExecutions().catch(error => notice(error.message))]);
 }
 async function moveSession(id, direction) {
@@ -296,7 +300,7 @@ $("#create-form").addEventListener("submit", async event => {
 });
 $("#refresh").addEventListener("click", () => { void refresh(); void refreshExecutions().catch(error => notice(error.message)); });
 async function start() {
-  try { const token = location.hash.slice(1); history.replaceState(null, "", location.pathname); if (token) await api("auth", { token }); ready = true; refreshExecutions = await initExecutions({ api, notice, selectedSession: session }); await refresh(); if (session()) void controls.open().catch(error => notice(error.message)); }
+  try { const token = location.hash.slice(1); history.replaceState(null, "", location.pathname); if (token) await api("auth", { token }); ready = true; refreshExecutions = await initExecutions({ api, notice, selectedSession: session }); await refresh(); if (session()) openControls(); }
   catch (error) { notice(error.message); $("#connection").textContent = "접속 링크 필요"; }
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); });
