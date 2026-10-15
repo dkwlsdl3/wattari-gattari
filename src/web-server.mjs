@@ -2,6 +2,7 @@ import path from "node:path";
 import { DockOrderStore } from "./dock-order.mjs";
 import { applyOverviewOrder, reconcileOverviewOrder, moveOverviewSession } from "./overview.mjs";
 import crypto from "node:crypto";
+import { NativeExecutionCollector } from "./native-execution.mjs";
 import http from "node:http";
 import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -65,8 +66,15 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
   const assets = new Map(await Promise.all([...ASSETS].map(async ([route, [file, type]]) =>
     [route, { type, data: await fs.readFile(file instanceof URL ? file : new URL(`./web/${file}`, import.meta.url)) }])));
   const jobs = new Map(), previews = new Map();
+  let viewOrder = new Map();
+  const orderedSessions = sessions => {
+    for (const [workspace, ids] of orderStore.load()) viewOrder.set(workspace, ids);
+    viewOrder = reconcileOverviewOrder(viewOrder, [...sessions].sort((a, b) => workspaceOf(a).localeCompare(workspaceOf(b))));
+    return applyOverviewOrder(sessions, viewOrder);
+  };
   let snapshot = null, discovering = null, readingRequests = null, requestsSnapshot = null;
   let active = 0, closing = false, closed = null;
+  const collector = new NativeExecutionCollector({ bridge, store: executionStore });
   const discover = async () => {
     if (snapshot && now() - snapshot.at < 5_000) return snapshot.value;
     if (!discovering) discovering = Promise.resolve().then(() => bridge.discover({ cwd: filterCwd }))
@@ -132,7 +140,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         if (!scopeSession) return true;
         const ids = new Set([scopeSession.id, scopeSession.nativeId, scopeSession.sessionId].filter(Boolean));
         const spans = row.spans ?? row.traceSpans ?? [];
-        return spans.some(span => [span.attributes?.["session.id"], span.attributes?.["gen_ai.conversation.id"]].some(id => ids.has(id)))
+        return ids.has(row.sessionId) || spans.some(span => [span.attributes?.["session.id"], span.attributes?.["gen_ai.conversation.id"]].some(id => ids.has(id)))
           || row.nodes?.some(node => node.sessions?.some(session => ids.has(session.id)) || node.attempts.some(attempt => ids.has(attempt.worker?.sessionId) || ids.has(attempt.review?.sessionId)));
       };
       if (request.method === "GET" && url.pathname === "/api/resources") { json(response, 200, sampleResources()); return; }
@@ -186,7 +194,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
       }
       if (request.method === "GET" && url.pathname === "/api/sessions") {
         const { sessions, warnings } = await discover();
-        json(response, 200, { sessions: applyOverviewOrder(sessions, orderStore.load()).map(publicSession), warnings, cwd }); return;
+        json(response, 200, { sessions: orderedSessions(sessions).map(publicSession), warnings, cwd }); return;
       }
       const actionMatch = /^\/api\/sessions\/([^/]+)\/(order|rename|archive|connection|terminal)$/.exec(url.pathname);
       if (request.method === "POST" && actionMatch) {
@@ -197,7 +205,8 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         if (action === "terminal") { json(response, 200, terminals.ticket(selected.id)); return; }
         if (action === "order") {
           if (input.targetId === undefined && !["up", "down"].includes(input.direction)) throw fail(400, "이동할 위치를 지정해 주세요.");
-          const workspace = workspaceOf(selected), order = reconcileOverviewOrder(orderStore.load(), sessions);
+          orderedSessions(sessions);
+          const workspace = workspaceOf(selected), order = viewOrder;
           const peers = applyOverviewOrder(sessions, order).filter(row => workspaceOf(row) === workspace).map(row => row.id);
           const visible = input.visibleIds ?? peers;
           if (!Array.isArray(visible) || !visible.includes(selected.id) || new Set(visible).size !== visible.length || visible.some(id => !peers.includes(id))) throw fail(400, "같은 폴더의 세션만 이동할 수 있습니다.");
@@ -211,7 +220,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
             moved = ids.some((id, index) => id !== previous[index]) ? new Map(order).set(workspace, ids) : null;
           } else moved = moveOverviewSession(order, workspace, selected.id, input.direction, peers.filter(id => visible.includes(id)));
           if (moved) orderStore.saveWorkspace(workspace, moved.get(workspace));
-          json(response, 200, { moved: Boolean(moved), sessions: applyOverviewOrder(sessions, moved ?? order).map(publicSession) }); return;
+          json(response, 200, { moved: Boolean(moved), sessions: orderedSessions(sessions).map(publicSession) }); return;
         }
         if (action === "connection") { json(response, 200, await bridge.connection(selected.id, { cwd: filterCwd })); return; }
         if (action === "rename") {
@@ -339,8 +348,12 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
     server.listen(port, "127.0.0.1", resolve);
   });
   origin = `http://127.0.0.1:${server.address().port}`;
+  const collect = async () => { try { if (!closing && typeof bridge.execution === "function") await collector.sweep((await discover()).sessions); } catch { /* Discovery errors remain visible through the sessions API. */ } };
+  const collectionTimer = setInterval(() => { void collect(); }, 5_000); collectionTimer.unref();
+  void collect();
   return { server, origin, url: `${origin}/#${token}`, close() {
     closing = true;
+    clearInterval(collectionTimer); collector.close();
     terminals.close();
     closed ??= new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     return closed;

@@ -111,6 +111,12 @@ export class SessionBridge {
     return provider.history(session, options);
   }
 
+  async execution(session, options) {
+    const provider = this.#provider(session.provider);
+    if (typeof provider.execution !== "function") throw new BridgeError("EXECUTION_UNAVAILABLE", "이 제공자의 실행 기록을 읽을 수 없습니다.");
+    return provider.execution(session, options);
+  }
+
   async connection(target, { cwd } = {}) {
     const { provider, session } = await this.#resolve(target, cwd);
     const { command, args, cwd: workspace } = await nativeSessionCommand(session, { codexProvider: provider, startDaemon: false });

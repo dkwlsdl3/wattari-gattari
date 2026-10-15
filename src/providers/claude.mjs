@@ -143,6 +143,13 @@ export class ClaudeProvider {
     return readClaudeHistory(session, { ...options, homeDirectory: this.#home });
   }
 
+  async execution(session, options = {}) {
+    const page = await readClaudeHistory(session, { ...options, homeDirectory: this.#home,
+      mapRecord: row => row?.sessionId === session.sessionId && (options.agentId ? row.agentId === options.agentId : !row.isSidechain) && !row.isMeta
+        && ["assistant", "user"].includes(row.type) ? row : null });
+    return { records: page.messages, nextCursor: page.nextCursor, skipped: page.skipped };
+  }
+
   async #refreshUsage() {
     const checkedAt = this.#now();
     if (this.#usageCache && checkedAt - this.#usageCache.checkedAt < this.#usageCacheMs) return;

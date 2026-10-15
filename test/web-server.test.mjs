@@ -431,3 +431,27 @@ test("drag placement moves directly before or after a same-folder session and pr
   const asset = await f.get("/sortable.mjs");
   assert.equal(asset.status, 200); assert.match(asset.headers.get("content-type"), /javascript/);
 });
+
+test('web folder and session positions remain stable across activity sorting, disappearance and return', async t => {
+  const { DockOrderStore } = await import('../src/dock-order.mjs');
+  const directory=await fs.mkdtemp(path.join(os.tmpdir(),'waga-proof-web-order-'));t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+  let now=0, rows=[{...session,id:'codex:w',cwd:'/tmp/wattari-gattari'},{...session,id:'codex:a',cwd:'/tmp/ai-podcast'}];
+  const f=await fixture(t,{discover:async()=>({sessions:rows,warnings:[]})},{now:()=>now,orderStore:new DockOrderStore(path.join(directory,'order.json'))});
+  const ids=async()=> (await (await f.get('/api/sessions')).json()).sessions.map(s=>s.id);
+  const before=await ids(); rows=rows.toReversed();now+=6000;assert.deepEqual(await ids(),before);
+  const removed=rows[0];rows=rows.slice(1);now+=6000;await ids();rows.unshift(removed);now+=6000;assert.deepEqual(await ids(),before);
+});
+
+test('ordinary active sessions collect automatically before opening their execution view and stay scoped', async t=>{
+ const { ExecutionStore }=await import('../src/execution-store.mjs');
+ const directory=await fs.mkdtemp(path.join(os.tmpdir(),'waga-proof-web-native-'));t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+ const executionStore=new ExecutionStore(directory),records=JSON.parse(await fs.readFile(new URL('./fixtures/native-executions/codex.json',import.meta.url))).records;
+ const second={...session,id:'codex:other',nativeId:'other',name:'waga-proof-other'};
+ const f=await fixture(t,{discover:async()=>({sessions:[session,second],warnings:[]}),execution:async()=>({records,nextCursor:null})},{executionStore});
+ for(let i=0;i<30&&!executionStore.native(second);i++)await tick();
+ assert.ok(executionStore.native(session));assert.ok(executionStore.native(second));
+ const scope=`?session=${encodeURIComponent(session.id)}`;
+ const listing=await (await f.get('/api/executions'+scope)).json();assert.equal(listing.executions.length,1);assert.equal(listing.executions[0].source,'native');
+ const native=await(await f.get('/api/executions/'+listing.executions[0].id+scope)).json();assert.ok(native.spans.some(s=>s.command==='printf native-fixture'));
+ assert.equal((await f.get('/api/executions/'+executionStore.native(second).id+scope)).status,404);
+});

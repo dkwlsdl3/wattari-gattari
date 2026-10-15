@@ -51,7 +51,7 @@ function acceptClaudeLine(line, session, result) {
 
 // Scan complete records backwards, stopping as soon as both latest messages are found.
 // I/O yields between chunks; neither the entire file nor unbounded records enter memory.
-async function scanClaudeRange(file, start, end, session, signal, history = false) {
+async function scanClaudeRange(file, start, end, session, signal, history = false, mapRecord = claudeHistoryMessage) {
   const result = { input: "", output: "", skipped: false, offset: start };
   if (history) { result.messages = []; result.cursor = start; }
   let position = end, carry = Buffer.alloc(0), oversized = false, trailing = true;
@@ -63,7 +63,7 @@ async function scanClaudeRange(file, start, end, session, signal, history = fals
     else if (oversized) result.skipped = true;
     else if (history) {
       try {
-        const row = claudeHistoryMessage(JSON.parse(carry.toString("utf8")), session, offset);
+        const row = mapRecord(JSON.parse(carry.toString("utf8")), session, offset);
         if (row) result.messages.push(row);
       } catch { result.skipped = true; }
     } else acceptClaudeLine(carry.toString("utf8"), session, result);
@@ -105,8 +105,13 @@ async function scanClaudeRange(file, start, end, session, signal, history = fals
   return result;
 }
 
-export async function readClaudeHistory(session, { homeDirectory, cursor, signal } = {}) {
-  const file = await fs.open(claudePreviewPath(session, homeDirectory), "r");
+export async function readClaudeHistory(session, { homeDirectory, cursor, signal, mapRecord, agentId } = {}) {
+  let filename = claudePreviewPath(session, homeDirectory);
+  if (agentId !== undefined) {
+    if (!/^[a-zA-Z0-9_-]{1,128}$/.test(agentId)) throw new Error("Invalid Claude agent identity");
+    filename = path.join(filename.slice(0, -6), "subagents", `agent-${agentId}.jsonl`);
+  }
+  const file = await fs.open(filename, "r");
   try {
     const stat = await file.stat();
     if (!stat.isFile()) throw new Error("Claude transcript is not a file");
@@ -116,7 +121,7 @@ export async function readClaudeHistory(session, { homeDirectory, cursor, signal
       if (!parts || Number(parts[1]) !== stat.dev || Number(parts[2]) !== stat.ino || Number(parts[3]) > stat.size) throw Object.assign(new Error("대화 기록이 변경되었습니다. 다시 불러와 주세요."), { status: 409 });
       end = Number(parts[3]);
     }
-    const result = await scanClaudeRange(file, Math.max(0, end - 4 * 1024 * 1024), end, session, signal, true);
+    const result = await scanClaudeRange(file, Math.max(0, end - 4 * 1024 * 1024), end, session, signal, true, mapRecord);
     return { messages: result.messages.reverse(), nextCursor: result.cursor > 0 ? `${stat.dev}:${stat.ino}:${result.cursor}` : null, skipped: result.skipped };
   } finally { await file.close(); }
 }

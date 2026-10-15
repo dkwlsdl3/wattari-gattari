@@ -228,6 +228,19 @@ export class CodexProvider {
     } finally { await client.close(); }
   }
 
+  async execution(session, { cursor, signal } = {}) {
+    const daemon = await this.daemonInfo({ start: false });
+    this.#assertDaemonAvailable(daemon);
+    const client = await this.#clientFactory(daemon.socketPath);
+    try {
+      const boundedSignal = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(5_000)]);
+      await client.initialize({ signal: boundedSignal });
+      const page = await client.request("thread/items/list", { threadId: session.nativeId, limit: 50, sortDirection: "desc", ...(cursor == null ? {} : { cursor }) }, { signal: boundedSignal });
+      if (!Array.isArray(page?.data) || (page.nextCursor != null && typeof page.nextCursor !== "string")) throw new Error("Invalid Codex execution page");
+      return { records: page.data.toReversed(), nextCursor: page.nextCursor ?? null };
+    } finally { await client.close(); }
+  }
+
   async #refreshUsage() {
     const checkedAt = this.#now();
     if (this.#usageCache && checkedAt - this.#usageCache.checkedAt < this.#usageCacheMs) return;

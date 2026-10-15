@@ -74,7 +74,23 @@ export class ExecutionStore {
     try { files = fs.readdirSync(this.directory); } catch (error) { if (error.code === "ENOENT") return []; throw error; }
     return files.filter(name => /^[0-9a-f]{64}\.json$/.test(name)).map(name => this.read(name.slice(0, -5)))
       .filter(row => !cwd || row.cwd === cwd).sort((a, b) => b.importedAt - a.importedAt)
-      .map(({ id, title, importedAt, spans, includesContent }) => ({ id, title, importedAt, spanCount: spans.length, includesContent }));
+      .map(({ id, title, importedAt, spans, includesContent, source, sessionId }) => ({ id, title, importedAt, spanCount: spans.length, includesContent, ...(source ? { source, sessionId } : {}) }));
+  }
+  #nativeId(session) { return crypto.createHash("sha256").update(`native:${session.id}:${session.cwd}`).digest("hex"); }
+  native(session) {
+    try { return this.read(this.#nativeId(session)); } catch (error) { if (error.status === 404) return null; throw error; }
+  }
+  saveNative(session, spans, collection) {
+    const id = this.#nativeId(session), previous = this.native(session);
+    const retained = spans.slice(-2000);
+    let size = retained.reduce((sum, span) => sum + Buffer.byteLength(JSON.stringify(span)) + 1, 0), limited = Boolean(previous?.collection?.limited || spans.length >= 2000);
+    while (size > 3 * 1024 * 1024 && retained.length) { size -= Buffer.byteLength(JSON.stringify(retained.shift())) + 1; limited = true; }
+    const value = { source: "native", sessionId: session.id, title: session.name, cwd: session.projectCwd || session.cwd,
+      spans: retained, includesContent: true, collection: { ...collection, limited } };
+    if (previous && JSON.stringify(value) === JSON.stringify(Object.fromEntries(Object.keys(value).map(key => [key, previous[key]])))) return previous;
+    const row = { version: 1, id, importedAt: Date.now(), ...value };
+    this.#write(id, JSON.stringify(row));
+    return row;
   }
   import(input, cwd) {
     const normalized = normalizeExecution(input.document, input.includeContent === true);
@@ -85,12 +101,15 @@ export class ExecutionStore {
     const row = { version: 1, id, title, cwd, importedAt: Date.now(), ...normalized };
     const data = JSON.stringify(row);
     if (Buffer.byteLength(data) > 4 * 1024 * 1024) throw fail(413, "정규화된 기록이 너무 큽니다.");
+    this.#write(id, data);
+    return row;
+  }
+  #write(id, data) {
     fs.mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     const directory = fs.lstatSync(this.directory);
     if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== process.getuid() || (directory.mode & 0o077)) throw fail(500, "실행 기록 경로는 본인 소유의 비공개 디렉터리여야 합니다.");
     const file = this.#file(id), temporary = `${file}.${crypto.randomUUID()}.tmp`;
     try { fs.writeFileSync(temporary, data, { flag: "wx", mode: 0o600 }); fs.renameSync(temporary, file); }
     finally { fs.rmSync(temporary, { force: true }); }
-    return row;
   }
 }

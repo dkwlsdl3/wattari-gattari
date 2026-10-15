@@ -723,3 +723,11 @@ test("Codex conversation pages preserve complete text, repeated messages, and na
   assert.equal(older.messages[1].text, long);
   assert.equal(older.nextCursor, null);
 });
+
+test('Codex native execution pages preserve real tool entries, read cursors and never start or resume',async()=>{
+ const page=JSON.parse(fs.readFileSync(new URL('./fixtures/native-executions/codex.json',import.meta.url)));
+ const {provider,calls}=harness((method,params)=>{assert.equal(method,'thread/items/list');assert.equal(params.cursor,'older');return {data:page.records.toReversed(),nextCursor:null};});
+ const result=await provider.execution({nativeId:'proof'},{cursor:'older'});
+ assert.deepEqual(result.records,page.records);assert.equal(result.nextCursor,null);
+ assert.ok(!calls.some(([method,args])=>method.includes('resume')||(method==='run'&&args.includes('start'))));
+});

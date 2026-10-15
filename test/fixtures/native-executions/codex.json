@@ -1,0 +1,64 @@
+{
+  "source": "Codex 0.162.1 thread/items/list, 2026-10-15; commands, paths and content sanitized",
+  "records": [
+    {
+      "turnId": "01a13ddf-72e6-7ef2-bebe-a44ccbae0f0b",
+      "item": {
+        "type": "agentMessage",
+        "id": "msg_071d9e82ebdf2e48016ad05a3d1bec8191b8af29b2ee5bf6e3",
+        "text": "작업 응답",
+        "phase": "commentary",
+        "memoryCitation": null,
+        "delivery": null,
+        "questions": null
+      },
+      "startedAtMs": 1792039485199,
+      "completedAtMs": 1792039487202
+    },
+    {
+      "turnId": "01a13dcc-2131-7200-bc51-6ed57a248699",
+      "item": {
+        "type": "fileChange",
+        "id": "exec-986419b8-3759-409c-8ec6-55827edd0d0d",
+        "changes": [
+          {
+            "path": "/tmp/waga-proof-native/fixture.txt",
+            "kind": {
+              "type": "update",
+              "move_path": null
+            },
+            "diff": "@@ -1 +1 @@\n-before\n+after"
+          }
+        ],
+        "status": "completed"
+      },
+      "startedAtMs": 1792039181037,
+      "completedAtMs": 1792039181042
+    },
+    {
+      "turnId": "01a13ddf-72e6-7ef2-bebe-a44ccbae0f0b",
+      "item": {
+        "type": "commandExecution",
+        "id": "exec-615d6b92-93b6-4b2e-8196-d6e2e5cdcb18",
+        "pluginId": null,
+        "scriptPath": null,
+        "command": "printf native-fixture",
+        "cwd": "/tmp/waga-proof-native",
+        "processId": "14533",
+        "source": "unifiedExecStartup",
+        "status": "completed",
+        "commandActions": [
+          {
+            "type": "unknown",
+            "command": "sed -n '1015,1105p' /tmp/waga-proof-native-schema/v2/ThreadItemsListResponse.json; sed -n '1290,1382p' /tmp/waga-proof-native-schema/v2/ThreadItemsListResponse.json; tail -65 /tmp/waga-proof-native-schema/v2/ThreadItemsListResponse.json; cat test/fixtures/codex-preview-items.json | head -12"
+          }
+        ],
+        "aggregatedOutput": "native-fixture",
+        "exitCode": 0,
+        "durationMs": 0
+      },
+      "startedAtMs": 1792039497471,
+      "completedAtMs": 1792039497472
+    }
+  ]
+}

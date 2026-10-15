@@ -70,12 +70,11 @@ use the untrusted peer contract; there is no transport selector. Claude and Code
 conversation composer, including input during work. Native approval choices appear as inline
 buttons; unrecognized questions retain inline native input, without a separate control dialog.
 
-The separate **실행 기록** view imports Claude Code OTLP JSON snapshots and displays
-observed main/agent call edges, tool outputs and diffs. A returned tool call is never
-classified as a passing check. Runs explicitly started by `waga run workflow.json` also stream
-live spans and display declared dependencies, machine checks, independent reviews and retries;
-Automatic OTLP collection for ordinary native sessions is not connected yet; an empty trace
-view does not mean the session has no work history.
+The **실행 흐름** view automatically collects tool calls and results for every active session
+visible in dock, using Claude's local JSONL and Codex's official App Server. Explicitly linked
+subagents are collected too. No file import or provider configuration is needed. A returned
+tool call is never classified as a passing check. Runs started by `waga run workflow.json`
+also display declared dependencies, checks, independent reviews and retries.
 See [record format and proof boundaries](docs/web-executions.md).
 The **세션 대화** view provides the stage and conversation features below.
 
