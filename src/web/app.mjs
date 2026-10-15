@@ -119,6 +119,11 @@ async function api(route, value) {
   const result = await response.json(); if (!response.ok) throw Object.assign(new Error(result.error?.message ?? `요청 실패 (${response.status})`), { status: response.status }); return result;
 }
 function render() { renderSidebar(); renderDetail(); }
+function renderSessionStatus() {
+  const selected = session(), status = $("#session-status");
+  status.textContent = selected ? `${controls.progress() || nativeStates[selected.status] || "상태 미확인"} · ${selected.cwd}` : "";
+  status.title = selected?.cwd ?? "";
+}
 function renderDetail() {
   controls.sync(directSessionId);
   if (composerRecipient !== recipientKey()) {
@@ -130,7 +135,7 @@ function renderDetail() {
   resizeComposer();
   $("#detail").hidden = false; $("#node-title").textContent = session()?.name ?? "세션 대화";
   const selected = session();
-  $("#session-status").textContent = selected ? `${nativeStates[selected.status] ?? "상태 미확인"} · ${selected.cwd}` : "";
+  renderSessionStatus();
   const pending = pendingForSession();
   $("#connect-session").disabled = !selected; $("#rename-session").disabled = !selected; $("#archive-session").disabled = !selected || Boolean(pending) || selected.status === "working";
   renderConversation();
@@ -200,7 +205,6 @@ async function refresh() {
       item.title = row.observedAt ? `마지막 조회: ${new Date(row.observedAt).toLocaleString()}` : "아직 사용량을 받지 못했습니다.";
       usage.append(item);
     }
-    controls.update();
     warning = discovery.warnings.map(row => `${row.provider}: ${row.message}`).join(" · ");
     for (const [key, operation] of operations) {
       let job;
@@ -254,7 +258,7 @@ $("#session-list").addEventListener("keydown", event => {
   if (event.shiftKey && ["ArrowUp", "ArrowDown"].includes(event.key)) { const id = event.target.dataset.sessionId; if (id) { event.preventDefault(); void moveSession(id, event.key === "ArrowUp" ? "up" : "down"); } }
 });
 $("#toggle-sessions").addEventListener("click", () => { const open = document.body.classList.toggle("sessions-open"); $("#toggle-sessions").setAttribute("aria-expanded", String(open)); });
-const controls = initTerminal({ api, selected: session, onChange: renderDetail, onActivity: () => {
+const controls = initTerminal({ api, selected: session, onChange: renderDetail, onProgress: renderSessionStatus, onActivity: () => {
   if (!activityTimer) activityTimer = setTimeout(() => { activityTimer = null; void loadHistory(); }, 250);
 } });
 $("#connect-session").addEventListener("click", async () => {

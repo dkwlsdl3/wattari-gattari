@@ -10,7 +10,7 @@ const aliases = new Map([
 const hooks = registerHooks({ resolve(specifier, context, next) {
   return aliases.has(specifier) ? { url: aliases.get(specifier), shortCircuit: true } : next(specifier, context);
 } });
-const { initTerminal } = await import('../src/web/terminal.mjs');
+const { initTerminal, nativeProgress } = await import('../src/web/terminal.mjs');
 hooks.deregister();
 
 function fixture(t, api = () => new Promise(() => {})) {
@@ -47,13 +47,14 @@ test('an actual connection failure retains its original reason', async t => {
 });
 
 
-test('changing session immediately clears the previous native output', async t => {
-  const { controls, select } = fixture(t);
-  const pending = controls.open();
-  const panel = document.querySelector('#live-output'), output = document.querySelector('#live-output-text');
-  panel.hidden = false; output.textContent = 'previous session tool output';
-  select('waga-proof-b');
-  await pending;
-  assert.equal(panel.hidden, true);
-  assert.equal(output.textContent, '');
+test('native progress uses only the status row, excluding response text and native keyboard commands', () => {
+  const screen = [
+    'A response that belongs in the conversation.',
+    'Working (45s • esc to interrupt) · 3 background terminals running · /ps to view · /stop to close',
+    '└ Tip: Use /title to choose what appears in your terminal’s title.',
+    '› Ask Codex to do anything',
+  ];
+  assert.equal(nativeProgress(screen), 'Working (45s) · 3 background terminals running');
+  assert.equal(nativeProgress(['› Explain Working (45s • esc to interrupt)', 'A completed response']), '');
+  assert.equal(nativeProgress(['› Ask Codex to do anything']), '');
 });

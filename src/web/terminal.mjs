@@ -3,16 +3,13 @@ import { FitAddon } from "/xterm-fit.mjs";
 import { nativeQuestion } from "./native-question.mjs";
 
 // The native frontend is a transport, not a second chat screen.
-export function initTerminal({ api, selected, onChange = () => {}, onActivity = () => {} }) {
+export function initTerminal({ api, selected, onChange = () => {}, onActivity = () => {}, onProgress = () => {} }) {
   const host = document.querySelector("#terminal-screen"), fallback = document.querySelector("#native-fallback");
   const panel = document.querySelector("#session-question"), text = document.querySelector("#question-text"), choices = document.querySelector("#question-choices");
   const status = document.querySelector("#input-status");
-  const live = document.querySelector("#live-output"), liveText = document.querySelector("#live-output-text");
-  function update() {
-    live.hidden = !terminal || (selected()?.status !== "working" && !/esc to interrupt/i.test(liveText.textContent)) || Boolean(question) || !liveText.textContent;
-  }
   let socket, terminal, observer, generation = 0, target = "", connecting, resolveReady, rejectReady, readyTimer, screenTimer;
-  let question = null, answered = "", connected = false;
+  let question = null, answered = "", connected = false, progress = "";
+  const setProgress = value => { if (value !== progress) { progress = value; onProgress(); } };
   const notify = message => { status.textContent = message; onChange(); };
   const lines = () => Array.from({ length: terminal.rows }, (_, i) => terminal.buffer.active.getLine(terminal.buffer.active.viewportY + i)?.translateToString(true) ?? "");
   function release(error) {
@@ -21,19 +18,12 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
     else resolveReady?.(false);
     rejectReady = resolveReady = null; connecting = null; connected = false;
     socket?.close(); socket = null; observer?.disconnect(); terminal?.dispose(); terminal = null;
-    live.hidden = true; liveText.textContent = "";
+    setProgress("");
     host.replaceChildren(); panel.hidden = true; fallback.hidden = true; question = null; answered = "";
   }
   function inspect(current, session, ws) {
     if (current !== generation || !terminal || ws.readyState !== WebSocket.OPEN) return;
     const screen = lines();
-    // xterm supplies the rendered text; do not decode ANSI or infer task state.
-    // Stop at the native composer so its prompt and footer do not become a second input UI.
-    const prompt = screen.findLastIndex(line => /^[\s]*[›❯]/u.test(line));
-    const output = (prompt < 0 ? screen : screen.slice(0, prompt)).join("\n").trim();
-    const changed = liveText.textContent !== output;
-    const atEnd = liveText.scrollHeight - liveText.scrollTop - liveText.clientHeight < 30;
-    if (changed) liveText.textContent = output;
     const next = nativeQuestion(screen, session.provider);
     if (next?.signature !== question?.signature) {
       question = next; if (next) answered = ""; panel.hidden = !next;
@@ -65,8 +55,7 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
       connected = true; clearTimeout(readyTimer); resolveReady?.(true); resolveReady = rejectReady = null;
       notify(next ? "승인 요청에 응답해 주세요." : "");
     }
-    update();
-    if (changed && atEnd) liveText.scrollTop = liveText.scrollHeight;
+    setProgress(next ? "" : nativeProgress(screen));
     onActivity();
   }
   async function open() {
@@ -107,7 +96,7 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
     })();
     return connecting;
   }
-  return { open, update, sync(id) { if (target && target !== id) { release(); target = ""; notify(""); } }, async sendText(value) {
+  return { open, progress: () => progress, sync(id) { if (target && target !== id) { release(); target = ""; notify(""); } }, async sendText(value) {
     const id = selected()?.id;
     const ready = await open();
     if (!ready || id !== selected()?.id || !connected || socket?.readyState !== WebSocket.OPEN) throw new Error("세션 연결을 확인해 주세요. 메시지는 전송하지 않았습니다.");
@@ -115,4 +104,12 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
     terminal.paste(value); socket.send(JSON.stringify({ type: "input", data: "\r" }));
     notify(""); return true;
   } };
+}
+
+// Extract only the native status row confirmed by the Codex screen fixture.
+// Terminal content remains transport data, never an assistant message.
+export function nativeProgress(screen) {
+  const line = screen.findLast(line => /^\s*Working \(/.test(line) && line.includes("esc to interrupt"));
+  if (!line) return "";
+  return line.trim().replace(" • esc to interrupt", "").split(" · ").filter(part => !part.startsWith("/")).join(" · ").slice(0, 240);
 }
