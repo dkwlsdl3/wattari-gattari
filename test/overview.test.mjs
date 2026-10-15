@@ -20,6 +20,7 @@ import {
   selectOverviewSessions,
 } from "../src/overview.mjs";
 import { defaultProviderExecutionSettings } from "../src/provider-execution.mjs";
+import { DockOrderStore } from "../src/dock-order.mjs";
 
 const runningOverviews = new Set();
 function runOverview(options) {
@@ -427,6 +428,30 @@ test("Shift+Up and Shift+Down persist manual order across refreshes", async (t) 
 
   pressAlt(input, "q");
   assert.equal(await running, 0);
+});
+
+test("overview follows externally saved workspace order while retaining its selected session", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-order-sync-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, "order.json"), orderStore = new DockOrderStore(file);
+  const rows = [
+    { id: "codex:first", provider: "codex", status: "idle", name: "First", cwd: directory },
+    { id: "claude:second", provider: "claude", status: "working", name: "Second", cwd: directory },
+  ];
+  const input = ttyInput(), output = capturedOutput();
+  const running = runOverview({ bridge: { discover: async () => ({ sessions: rows, warnings: [] }) }, workspace: { leave: async () => ({ closeOverview: true }) }, orderStore,
+    defaultCwd: directory, inputStream: input, outputStream: output, refreshMs: 20, listenForSignals: false });
+  t.after(async () => { input.emit("end"); await running; });
+  await waitFor(() => output.writes.some(frame => frame.includes("Second")));
+  input.emit("keypress", "", { name: "down" });
+  assert.equal(selectedSessionName(output), "First");
+  // The web server writes through a separate store instance to this same file.
+  new DockOrderStore(file).saveWorkspace(directory, [rows[1].id, rows[0].id]);
+  await waitFor(() => { const frame = plain(output.writes.at(-1)); return frame.indexOf("Second") < frame.indexOf("First"); }, 1000);
+  assert.equal(selectedSessionName(output), "First");
+  input.emit("keypress", "", { name: "up", shift: true });
+  assert.deepEqual(new DockOrderStore(file).load().get(directory), [rows[0].id, rows[1].id]);
+  assert.equal(selectedSessionName(output), "First");
 });
 
 test("overview frame switches to a compact layout when the terminal narrows", () => {

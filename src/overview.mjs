@@ -664,11 +664,16 @@ export async function runOverview({
   let missingSessionCounts = new Map();
   let providerUsage = {};
   let orderWarning = null;
+  let orderReadWarning = null;
   let orderByWorkspace = new Map();
-  if (orderStore) {
-    try { orderByWorkspace = orderStore.load(); }
-    catch (error) { orderWarning = { provider: "waga", message: error.message }; }
-  }
+  const readSavedOrder = () => {
+    if (!orderStore) return;
+    try {
+      for (const [workspacePath, ids] of orderStore.load()) orderByWorkspace.set(workspacePath, ids);
+      orderReadWarning = null;
+    } catch (error) { orderReadWarning = { provider: "waga", message: error.message }; }
+  };
+  readSavedOrder();
   let providerSettings = defaultProviderExecutionSettings();
   let codexExecutionMode = CODEX_EXECUTION_MODES.DEFAULT;
   let settingsWarning = null;
@@ -749,6 +754,7 @@ export async function runOverview({
       warnings: [
         ...(settingsWarning ? [settingsWarning] : []),
         ...(orderWarning ? [orderWarning] : []),
+        ...(orderReadWarning ? [orderReadWarning] : []),
         ...warnings,
       ],
       provider,
@@ -917,6 +923,7 @@ export async function runOverview({
       );
       missingSessionCounts = snapshot.missingCounts;
       const activeSessions = snapshot.sessions;
+      readSavedOrder();
       orderByWorkspace = reconcileOverviewOrder(orderByWorkspace, activeSessions);
       allSessions = applyOverviewOrder(activeSessions, orderByWorkspace);
       if (pendingCreated) {
