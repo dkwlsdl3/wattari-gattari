@@ -27,3 +27,9 @@ test("pending input appears immediately and unrelated native text stays intact",
   assert.equal(readableReply("문서에서 [WAGA REPLY example]를 설명합니다."), "문서에서 [WAGA REPLY example]를 설명합니다.");
   assert.deepEqual(conversationItems({ preview: { input: "질문", output: "<script>alert(1)</script>" } }).map(row => row.text), ["질문", "<script>alert(1)</script>"]);
 });
+
+test("a pending user instruction is shown before any native answer arrives", () => {
+  const pending = { kind: "instruct", operationId: "user-task" };
+  const items = conversationItems({ pending, inputs: new Map([[pending.operationId, "파일을 수정해 주세요"]]) });
+  assert.deepEqual(items.map(row => [row.role, row.text]), [["user", "파일을 수정해 주세요"]]);
+});

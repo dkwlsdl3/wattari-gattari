@@ -46,14 +46,19 @@ provider 세션을 소유하지 않습니다. 새 세션을 시작하기 전 선
 
 ### 로컬 웹 화면
 
-`waga serve`는 기존 bridge의 목록·preview·create·ask·result를 호출하는 HTTP 화면입니다.
+`waga serve`는 기존 bridge의 목록·preview·create·instruct·ask·result를 호출하는 HTTP 화면입니다.
 loopback `127.0.0.1`만 지원하며 실행마다 새 비밀 접속 링크를 발급합니다. 비밀값은 URL fragment로
 전달한 뒤 주소에서 제거하고, 동일 origin의 JSON 인증 요청으로 HttpOnly·SameSite=Strict
 쿠키를 설정합니다. API는 쿠키를 요구하고 Host를 검증하며, 변경 요청은 정확한 Origin을 요구합니다.
 정적 화면은 별도 의존성·빌드 없이 패키지에 포함하고 provider 출력은 텍스트로만 렌더링합니다.
 
 웹 새 작업은 지정 cwd와 provider 기본 모델·정책으로 생성하고 LLR을 호출하지 않습니다.
-기존 세션에 보내는 질의는 peer 신뢰 경계를 그대로 유지합니다. native 승인 UI는 웹에서
+인증한 웹 사용자의 Codex 작업 지시는 `/api/instruct`에서 공식 App Server `turn/start`의
+text input으로 전달합니다. 승인·샌드박스 설정을 덮어쓰지 않습니다. 같은 FIFO·RequestStore로
+요청 turn을 추적하고 재전송 없이 결과를 회수합니다. 작업 답변은 최대 30분 기다립니다.
+기존 Claude peer 연결에는 사용자 입력 경로가 없으므로 작업 지시를 비활성화하고
+에이전트 질의만 허용합니다. CLI `send`·`ask`와 웹의 에이전트 질의는 peer 신뢰 경계를
+그대로 유지하며 클라이언트의 임의 source/trusted 필드로 사용자 입력으로 승격하지 않습니다. native 승인 UI는 웹에서
 대체하지 않습니다. 서버의 수명과 provider 세션의 수명은 분리됩니다.
 
 목록·선택 대화는 5초 캐시하며 동시 동일 조회를 합칩니다. 미리보기는 20개 identity로 제한합니다.

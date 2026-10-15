@@ -687,3 +687,21 @@ test("Codex ask times out before submitting work to a persistently busy target",
   }), { code: "TARGET_BUSY_TIMEOUT" });
   assert.equal(calls.some(([method]) => method === "turn/start"), false);
 });
+
+test("native user instructions preserve their text and session policies; peer requests remain tool input", async () => {
+  const { provider, calls } = harness(method => {
+    if (method === "thread/read") return { thread: { status: { type: "idle" } } };
+    if (method === "turn/start") return { turn: { id: "user-turn" } };
+    if (method === "thread/turns/list") return { data: [{ id: "user-turn", status: "completed" }], nextCursor: null };
+    if (method === "thread/items/list") return { data: [{ turnId: "user-turn", item: { type: "agentMessage", text: "수정했습니다" } }], nextCursor: null };
+    throw new Error(method);
+  });
+  const target = { id: "codex:t", nativeId: "t" }, prompt = "파일을 수정하고 검증해 주세요";
+  const reply = await provider.instruct(target, prompt, { requestId: "user-request", timeoutMs: 100 });
+  assert.equal(reply.reply, "수정했습니다");
+  const input = calls.find(([method]) => method === "turn/start")[1];
+  assert.deepEqual(input, { threadId: "t", input: [{ type: "text", text: prompt, textElements: [] }] });
+  await provider.ask(target, prompt, { requestId: "peer-request", timeoutMs: 100 });
+  const peer = calls.filter(([method]) => method === "turn/start").at(-1)[1];
+  assert.deepEqual(peer.input, []); assert.match(peer.toolOutput.output, /trust: untrusted/);
+});

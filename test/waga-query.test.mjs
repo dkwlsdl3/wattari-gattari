@@ -17,6 +17,39 @@ function storeFor(t) {
 }
 function output() { return { value: "", write(text) { this.value += text; } }; }
 
+test("web user instructions retain native turn recovery and never fall back to Claude peer delivery", async t => {
+  const store = storeFor(t);
+  const session = { id: "codex:proof", nativeId: "proof", provider: "codex" };
+  let submissions = 0;
+  const provider = {
+    name: "codex", list: async () => [session],
+    async instruct(_session, message, { onProgress }) {
+      submissions++;
+      assert.equal(message, "파일을 수정해 주세요");
+      onProgress({ state: "submitted", delivery: "accepted", turnId: "native-user-turn" });
+      throw Object.assign(new Error("answer still running"), { code: "REPLY_TIMEOUT" });
+    },
+    async result(record) {
+      assert.equal(record.kind, "instruct");
+      assert.equal(record.turnId, "native-user-turn");
+      return { state: "replied", reply: "수정했습니다" };
+    },
+  };
+  const bridge = new SessionBridge({ providers: [provider], requestStore: store });
+  let requestId;
+  await assert.rejects(bridge.instruct(session.id, "파일을 수정해 주세요"), error => {
+    requestId = error.requestId;
+    return error.code === "REPLY_TIMEOUT";
+  });
+  const restarted = new SessionBridge({ providers: [provider], requestStore: store });
+  assert.equal((await restarted.result(requestId)).reply, "수정했습니다");
+  assert.equal((await restarted.result(requestId)).reply, "수정했습니다");
+  assert.equal(submissions, 1);
+  const claude = { name: "claude", list: async () => [{ id: "claude:proof", provider: "claude" }],
+    async ask() { assert.fail("a user instruction must never become a peer query"); } };
+  await assert.rejects(new SessionBridge({ providers: [claude], requestStore: store }).instruct("claude:proof", "실행해 주세요"), { code: "USER_INPUT_UNAVAILABLE" });
+});
+
 test("Claude ask recovers the measured screen-only answer without waiting for SendMessage or idle", async t => {
   const store = storeFor(t), home = store.directory;
   // Keeper #259, 2026-10-07: assistant printed this answer four minutes before SendMessage.

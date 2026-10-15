@@ -13,7 +13,7 @@ export function conversationItems({ preview, records = [], inputs = new Map(), p
     exchanges.set(key, { ...previous, ...record, reply: record.reply ?? previous?.reply,
       input: inputs.get(record.operationId) ?? previous?.input, at: previous?.at ?? record.at });
   }
-  if (pending?.kind === "query" && !records.some(row => row.operationId === pending.operationId)) {
+  if (["query", "instruct"].includes(pending?.kind) && !records.some(row => row.operationId === pending.operationId)) {
     exchanges.set(pending.operationId, { operationId: pending.operationId, input: inputs.get(pending.operationId) });
   }
   const items = [];

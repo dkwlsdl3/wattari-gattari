@@ -362,7 +362,15 @@ export class CodexProvider {
     });
   }
 
-  async ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, timeoutMs, onProgress = () => {}, onReply = async () => {} }) {
+  async instruct(session, message, options) {
+    return this.#answer(session, message, options, true);
+  }
+
+  async ask(session, message, options) {
+    return this.#answer(session, message, options, false);
+  }
+
+  async #answer(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, timeoutMs, onProgress = () => {}, onReply = async () => {} }, userInput) {
     return this.#withClient(async (client) => {
       const fallbackTimeout = timeoutMs ?? 180_000;
       const busyTimeout = waitTimeoutMs ?? fallbackTimeout;
@@ -370,18 +378,16 @@ export class CodexProvider {
       const read = (method, params, deadline, error) => readBeforeDeadline(
         (signal) => client.request(method, params, { signal }), { deadline, now: this.#now, error },
       );
-      const envelope = buildPeerEnvelope({ message, requestId, expectsReply: true });
+      const envelope = userInput ? null : buildPeerEnvelope({ message, requestId, expectsReply: true });
       await this.#waitUntilIdle(client, session, busyTimeout, onProgress);
       onProgress({ state: "submitting", target: session.id, delivery: "unknown" });
       const started = await client.request("turn/start", {
         threadId: session.nativeId,
-        input: [],
-        toolOutput: {
-          name: "waga_peer_message",
-          namespace: "waga",
-          output: envelope,
-        },
-        turnTrigger: "waga-peer",
+        ...(userInput ? { input: [{ type: "text", text: message, textElements: [] }] } : {
+          input: [],
+          toolOutput: { name: "waga_peer_message", namespace: "waga", output: envelope },
+          turnTrigger: "waga-peer",
+        }),
       });
       this.#assertTurnId(started);
       const turnId = started.turn.id;

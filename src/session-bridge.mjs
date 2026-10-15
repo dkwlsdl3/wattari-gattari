@@ -129,6 +129,16 @@ export class SessionBridge {
     return provider.ask(session, message, { requestId, waitTimeoutMs, replyTimeoutMs, untilIdle, onProgress, ...(onReply ? { onReply } : {}), expectsReply: true });
   }
 
+  // Only the authenticated web controller calls this; CLI send/ask stay peer-only.
+  async instruct(target, message, { cwd, waitTimeoutMs = 30_000, replyTimeoutMs = 30 * 60_000, onProgress } = {}) {
+    if (typeof message !== "string" || !message.trim() || message.length > 16_000) throw new BridgeError("MESSAGE_REQUIRED", "1~16,000자의 작업 지시가 필요합니다.");
+    const { provider, session } = await this.#resolve(target, cwd);
+    if (typeof provider.instruct !== "function") throw new BridgeError("USER_INPUT_UNAVAILABLE", "이 세션 연결은 에이전트 질의만 지원합니다. 작업 지시는 Codex 세션을 선택해 주세요.");
+    const options = { kind: "instruct", waitTimeoutMs, replyTimeoutMs, onProgress };
+    if (this.#requests) return this.#exchange(provider, session, message, options);
+    return provider.instruct(session, message, { ...options, requestId: crypto.randomUUID() });
+  }
+
   async #exchange(provider, session, message, options) {
     const record = this.#requests.create(session, options);
     const progress = (event) => {

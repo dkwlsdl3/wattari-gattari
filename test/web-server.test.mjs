@@ -260,3 +260,38 @@ test("execution imports require authentication, preserve private content opt-in,
   assert.equal((await second.post("/api/executions", { document: {} })).status, 400);
   assert.equal((await second.post("/api/executions", { document, includeContent: true })).status, 201);
 });
+
+test("authenticated web instructions use native user input, while peer queries keep their trust boundary", async t => {
+  let instructions = 0, queries = 0;
+  const f = await fixture(t, {
+    instruct: async (target, message, options) => { instructions++; assert.equal(target, id); assert.equal(message, "수정해 주세요"); assert.equal(options.source, undefined); return { requestId: crypto.randomUUID(), reply: "수정 결과" }; },
+    ask: async () => { queries++; return { requestId: crypto.randomUUID(), reply: "질의 답변" }; },
+  });
+  const input = { operationId: crypto.randomUUID(), target: id, message: "수정해 주세요" };
+  assert.equal((await f.request("/api/instruct", input)).status, 401);
+  assert.equal((await f.request("/api/instruct", input, { Authorization: `Bearer ${f.web.url.split("#")[1]}` })).status, 401);
+  assert.equal((await f.post("/api/instruct", input, { Origin: "http://evil.test" })).status, 403);
+  assert.equal(instructions, 0);
+  assert.equal((await f.post("/api/instruct", input)).status, 202); await tick();
+  assert.equal(instructions, 1); assert.equal(queries, 0);
+  assert.equal((await f.post("/api/instruct", input)).status, 202); assert.equal(instructions, 1);
+  assert.equal((await f.post("/api/query", { ...input, operationId: crypto.randomUUID(), source: "user", trusted: true })).status, 202); await tick();
+  assert.equal(queries, 1); assert.equal(instructions, 1);
+});
+
+test("web instructions cannot switch away from the session assigned to the selected stage", async t => {
+  const { WorkflowStore } = await import("../src/workflow-store.mjs");
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "waga-proof-web-instruct-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const workflowStore = new WorkflowStore(path.join(directory, "flows"));
+  let calls = 0;
+  const f = await fixture(t, { instruct: async () => { calls++; return { reply: "done" }; } }, { workflowStore, cwd: directory });
+  const flow = workflowStore.create({ title: "user instruction binding", cwd: directory });
+  workflowStore.update(flow.id, { revision: flow.revision, action: "assign", nodeId: "plan", sessionId: id });
+  const input = { operationId: crypto.randomUUID(), target: "codex:other", message: "실행", workflowId: flow.id, nodeId: "plan" };
+  assert.equal((await f.post("/api/instruct", input)).status, 409);
+  assert.equal(calls, 0);
+  assert.equal((await f.post("/api/instruct", { ...input, target: id })).status, 202);
+  await tick();
+  assert.equal(calls, 1);
+});

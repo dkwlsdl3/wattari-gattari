@@ -6,7 +6,7 @@ const phases = { pending: "대기", active: "진행", blocked: "막힘", passed:
 const nativeStates = { idle: "대기 중", working: "작업 중", "needs-input": "입력 대기", done: "완료", error: "오류", unavailable: "연결 불가" };
 const transport = { starting: "접수 중", "waiting-local": "앞선 요청 대기", waiting: "전송 대기", submitting: "전송 중", submitted: "답변 대기", accepted: "답변 대기", "reply-received": "답변 수신", replied: "답변 수신", error: "질의 실패", created: "세션 생성됨", "not-sent": "미전송", "result-unknown": "결과 미확정" };
 let sessions = [], workflows = [], currentId = "", nodeId = "", refreshing = false, ready = false, saving = false;
-let composerRecipient = "", draftKey = "", previewKey = "", previewIdentity = "", warning = "";
+let modeRecipient = "", composerRecipient = "", draftKey = "", previewKey = "", previewIdentity = "", warning = "";
 let browserStorage; try { browserStorage = localStorage; } catch { browserStorage = { getItem() {}, setItem() {} }; }
 const previews = new Map(), sentMessages = new Map(), drafts = new DraftStore(browserStorage);
 const operations = new Map();
@@ -74,7 +74,18 @@ function renderDetail() {
   }
   if (step.sessionId && !session()) { const option = el("option", "연결된 세션 조회 불가"); option.value = step.sessionId; picker.append(option); }
   picker.value = step.sessionId;
-  const selected = session(); $("#session-status").textContent = selected ? `${nativeStates[selected.status] ?? "상태 미확인"} · ${selected.cwd}` : "";
+  const selected = session();
+  const mode = $("#message-mode"), canInstruct = Boolean(selected?.canInstruct);
+  mode.querySelector('[value="instruct"]').disabled = !canInstruct;
+  if (modeRecipient !== recipientKey()) { modeRecipient = recipientKey(); mode.value = canInstruct ? "instruct" : "query"; }
+  if (!canInstruct) mode.value = "query";
+  mode.disabled = !selected;
+  $("#send").textContent = mode.value === "instruct" ? "작업 지시 보내기" : "질의 보내기";
+  $("#message-help").textContent = mode.value === "instruct"
+    ? "사용자 지시로 전달합니다. 파일 수정·명령 실행은 이 세션의 기존 권한 정책을 따릅니다."
+    : canInstruct ? "에이전트 간 질의로 전달합니다. 작업을 시키려면 ‘작업 지시’를 선택하세요."
+      : "이 Claude 연결은 에이전트 질의용입니다. 계속 작업을 지시하려면 Codex 세션을 연결하거나 새로 만드세요.";
+  $("#session-status").textContent = selected ? `${nativeStates[selected.status] ?? "상태 미확인"} · ${selected.cwd}` : "";
   const pending = pendingForSession();
   $("#message").disabled = !selected; $("#send").disabled = !selected || Boolean(pending) || !$("#message").value.trim();
   $("#session").disabled = Boolean(pending) || saving; $("#new-session").disabled = Boolean(pending);
@@ -153,12 +164,12 @@ async function submitOperation(kind, input) {
   const key = activeKey(), draftRecipient = recipientKey(), workflowId = currentId, stepId = nodeId;
   if (!node() || pendingForSession()) return;
   const operationId = crypto.randomUUID(); operations.set(key, { operationId, kind, target: input.target, state: "starting" });
-  if (kind === "query") sentMessages.set(operationId, input.message);
+  if (["query", "instruct"].includes(kind)) sentMessages.set(operationId, input.message);
   while (sentMessages.size > 100) sentMessages.delete(sentMessages.keys().next().value);
   renderDetail();
   try {
     await api(kind, { ...input, operationId, workflowId, nodeId: stepId });
-    if (draftRecipient === recipientKey() && kind === "query" && $("#message").value === input.message) { $("#message").value = ""; drafts.delete(draftRecipient); }
+    if (draftRecipient === recipientKey() && ["query", "instruct"].includes(kind) && $("#message").value === input.message) { $("#message").value = ""; drafts.delete(draftRecipient); }
     await refresh();
   } catch (error) { operations.delete(key); notice(`${error.message} · 자동 재전송하지 않았습니다.`); renderDetail(); }
 }
@@ -192,11 +203,12 @@ $("#state-form").addEventListener("submit", async event => {
 $("#rework-form").addEventListener("submit", async event => {
   event.preventDefault(); try { await mutate({ action: "rework", nodeId, targetId: $("#return-to").value, note: $("#return-reason").value }); } catch { /* Error is shown by mutate. */ }
 });
+$("#message-mode").addEventListener("change", () => renderDetail());
 $("#message").addEventListener("input", () => { resizeComposer(); drafts.set(recipientKey(), $("#message").value); $("#send").disabled = !session() || Boolean(pendingForSession()) || !$("#message").value.trim(); });
 $("#message").addEventListener("keydown", event => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!$("#send").disabled) $("#query-form").requestSubmit(); }
 });
-$("#query-form").addEventListener("submit", event => { event.preventDefault(); if ($("#message").value.trim()) void submitOperation("query", { target: node()?.sessionId, message: $("#message").value }); });
+$("#query-form").addEventListener("submit", event => { event.preventDefault(); if ($("#message").value.trim()) void submitOperation($("#message-mode").value, { target: node()?.sessionId, message: $("#message").value }); });
 $("#new-session").addEventListener("click", () => $("#create-dialog").showModal());
 $("#create-form").addEventListener("submit", async event => {
   event.preventDefault(); const input = { provider: $("#create-provider").value, message: $("#create-message").value };

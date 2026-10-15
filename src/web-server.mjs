@@ -43,7 +43,7 @@ async function body(request, limit = 64 * 1024) {
 
 function publicSession(session) {
   const { id, provider, name, cwd, status, updatedAt } = session;
-  return { id, provider, name, cwd, status, updatedAt };
+  return { id, provider, name, cwd, status, updatedAt, canInstruct: provider === "codex" };
 }
 
 // HTTP is a view/controller only. Native providers keep owning sessions and approval UI.
@@ -174,7 +174,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         const listing = await recent();
         json(response, 200, { ...listing, jobs: [...jobs.values()] }); return;
       }
-      if (request.method !== "POST" || !["/api/query", "/api/create", "/api/recover"].includes(url.pathname)) throw fail(404, "없는 경로입니다.");
+      if (request.method !== "POST" || !["/api/instruct", "/api/query", "/api/create", "/api/recover"].includes(url.pathname)) throw fail(404, "없는 경로입니다.");
       const input = await body(request);
       if (!UUID.test(input.operationId ?? "")) throw fail(400, "요청 식별자가 필요합니다.");
       const previous = jobs.get(input.operationId);
@@ -184,13 +184,13 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
       if (active >= 2) throw fail(429, "진행 중인 요청이 끝난 뒤 보내 주세요.");
       const kind = url.pathname.slice(5);
       if (kind !== "recover" && (typeof input.message !== "string" || !input.message.trim() || input.message.length > 16_000)) throw fail(400, "1~16,000자의 내용을 입력해 주세요.");
-      if (kind === "query" && !/^(claude|codex):[^\s]{1,200}$/.test(input.target ?? "")) throw fail(400, "세션 ID가 필요합니다.");
+      if (["query", "instruct"].includes(kind) && !/^(claude|codex):[^\s]{1,200}$/.test(input.target ?? "")) throw fail(400, "세션 ID가 필요합니다.");
       if (kind === "create" && !["claude", "codex"].includes(input.provider)) throw fail(400, "Claude 또는 Codex를 선택해 주세요.");
       if (kind === "recover" && !UUID.test(input.requestId ?? "")) throw fail(400, "요청 ID가 필요합니다.");
       if (input.workflowId !== undefined) {
         const flow = workflowStore.read(input.workflowId), node = flow.nodes.find(row => row.id === input.nodeId);
         if (flow.cwd !== cwd || !node) throw fail(404, "작업 단계를 찾을 수 없습니다.");
-        if (kind === "query" && node.sessionId !== input.target) throw fail(409, "단계에 연결된 세션과 질의 대상이 다릅니다.");
+        if (["query", "instruct"].includes(kind) && node.sessionId !== input.target) throw fail(409, "단계에 연결된 세션과 질의 대상이 다릅니다.");
         if (kind === "recover" && !node.requests.some(row => row.requestId === input.requestId)) throw fail(409, "이 단계의 요청만 조회할 수 있습니다.");
         if (kind === "recover") input.target = node.requests.find(row => row.requestId === input.requestId).sessionId ?? node.sessionId;
         input.commit = flow.commit;
@@ -223,8 +223,8 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
       const operation = async () => {
         try {
           attach();
-          if (kind === "query") job.result = await bridge.ask(input.target, input.message, {
-            cwd: filterCwd, waitTimeoutMs: 30_000, replyTimeoutMs: 180_000, onProgress: progress,
+          if (["query", "instruct"].includes(kind)) job.result = await bridge[kind === "instruct" ? "instruct" : "ask"](input.target, input.message, {
+            cwd: filterCwd, waitTimeoutMs: 30_000, replyTimeoutMs: kind === "instruct" ? 30 * 60_000 : 180_000, onProgress: progress,
           });
           else if (kind === "create") {
             const created = await bridge.create(input.provider, input.message, { cwd, routing: {}, onProgress: progress });
