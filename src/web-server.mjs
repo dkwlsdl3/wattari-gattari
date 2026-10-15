@@ -16,6 +16,7 @@ const ASSETS = new Map([
   ["/drafts.mjs", ["drafts.mjs", "text/javascript; charset=utf-8"]],
   ["/conversation.mjs", ["conversation.mjs", "text/javascript; charset=utf-8"]],
   ["/executions.mjs", ["executions.mjs", "text/javascript; charset=utf-8"]],
+  ["/sortable.mjs", [new URL(import.meta.resolve("sortablejs/modular/sortable.esm.js")), "text/javascript; charset=utf-8"]],
   ["/app.mjs", ["app.mjs", "text/javascript; charset=utf-8"]],
   ["/style.css", ["style.css", "text/css; charset=utf-8"]],
 ]);
@@ -56,7 +57,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
   token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore(), orderStore = new DockOrderStore() } = {}) {
   if (!bridge) throw new TypeError("A session bridge is required");
   const assets = new Map(await Promise.all([...ASSETS].map(async ([route, [file, type]]) =>
-    [route, { type, data: await fs.readFile(new URL(`./web/${file}`, import.meta.url)) }])));
+    [route, { type, data: await fs.readFile(file instanceof URL ? file : new URL(`./web/${file}`, import.meta.url)) }])));
   const jobs = new Map(), previews = new Map();
   let snapshot = null, discovering = null, readingRequests = null, requestsSnapshot = null;
   let active = 0, closing = false, closed = null;
@@ -188,13 +189,20 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         if (!selected) throw fail(404, "세션을 찾을 수 없습니다.");
         const action = actionMatch[2];
         if (action === "order") {
-          if (!["up", "down"].includes(input.direction)) throw fail(400, "위 또는 아래 이동을 지정해 주세요.");
+          if (input.targetId === undefined && !["up", "down"].includes(input.direction)) throw fail(400, "이동할 위치를 지정해 주세요.");
           const workspace = workspaceOf(selected), order = reconcileOverviewOrder(orderStore.load(), sessions);
           const peers = applyOverviewOrder(sessions, order).filter(row => workspaceOf(row) === workspace).map(row => row.id);
           const visible = input.visibleIds ?? peers;
           if (!Array.isArray(visible) || !visible.includes(selected.id) || new Set(visible).size !== visible.length || visible.some(id => !peers.includes(id))) throw fail(400, "같은 폴더의 세션만 이동할 수 있습니다.");
           // The server's current saved order is authoritative, including during concurrent browser requests.
-          const moved = moveOverviewSession(order, workspace, selected.id, input.direction, peers.filter(id => visible.includes(id)));
+          let moved;
+          if (input.targetId !== undefined) {
+            if (input.targetId === selected.id || !visible.includes(input.targetId) || !["before", "after"].includes(input.position)) throw fail(400, "같은 폴더 안의 놓을 위치를 지정해 주세요.");
+            const previous = order.get(workspace), ids = previous.filter(id => id !== selected.id);
+            const destination = ids.indexOf(input.targetId) + (input.position === "after" ? 1 : 0);
+            ids.splice(destination, 0, selected.id);
+            moved = ids.some((id, index) => id !== previous[index]) ? new Map(order).set(workspace, ids) : null;
+          } else moved = moveOverviewSession(order, workspace, selected.id, input.direction, peers.filter(id => visible.includes(id)));
           if (moved) orderStore.saveWorkspace(workspace, moved.get(workspace));
           json(response, 200, { moved: Boolean(moved), sessions: applyOverviewOrder(sessions, moved ?? order).map(publicSession) }); return;
         }

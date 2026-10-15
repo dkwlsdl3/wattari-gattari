@@ -32,6 +32,7 @@
     "node": ">=22"
   },
   "dependencies": {
+    "sortablejs": "1.15.7",
     "ws": "^8.18.3"
   }
 }

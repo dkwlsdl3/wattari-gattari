@@ -406,3 +406,28 @@ test("web terminal connection uses native bridge without starting or configuring
   assert.deepEqual(calls, [{ start: false }]);
   assert.equal((await f.get("/api/sessions")).status, 200);
 });
+
+test("drag placement moves directly before or after a same-folder session and preserves hidden entries", async t => {
+  const { DockOrderStore } = await import("../src/dock-order.mjs");
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "waga-proof-web-drag-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const orderStore = new DockOrderStore(path.join(directory, "order.json"));
+  const rows = ["a", "b", "c", "d"].map(letter => ({ ...session, id: `codex:${letter}` }));
+  rows.push({ ...session, id: "codex:other", cwd: "/tmp/waga-proof-other" });
+  const f = await fixture(t, { discover: async () => ({ sessions: rows, warnings: [] }) }, { orderStore });
+  orderStore.saveWorkspace(session.cwd, ["codex:a", "codex:hidden", "codex:b", "codex:c", "codex:d"]);
+  const route = "/api/sessions/codex%3Aa/order";
+  const moved = await f.post(route, { targetId: "codex:d", position: "after" });
+  assert.equal(moved.status, 200);
+  assert.deepEqual((await moved.json()).sessions.map(row => row.id), ["codex:b", "codex:c", "codex:d", "codex:a", "codex:other"]);
+  assert.deepEqual(orderStore.load().get(session.cwd), ["codex:hidden", "codex:b", "codex:c", "codex:d", "codex:a"]);
+  assert.equal((await (await f.post(route, { targetId: "codex:d", position: "after" })).json()).moved, false);
+  await f.post(route, { targetId: "codex:c", position: "before", visibleIds: ["codex:a", "codex:c", "codex:d"] });
+  assert.deepEqual(orderStore.load().get(session.cwd), ["codex:hidden", "codex:b", "codex:a", "codex:c", "codex:d"]);
+  for (const input of [{ targetId: "codex:other", position: "after" }, { targetId: "codex:a", position: "before" }, { targetId: "codex:missing", position: "after" }, { targetId: "codex:d", position: "invalid" }, { targetId: "codex:b", position: "after", visibleIds: ["codex:a", "codex:c"] }]) {
+    assert.equal((await f.post(route, input)).status, 400);
+  }
+  assert.deepEqual(orderStore.load().get(session.cwd), ["codex:hidden", "codex:b", "codex:a", "codex:c", "codex:d"]);
+  const asset = await f.get("/sortable.mjs");
+  assert.equal(asset.status, 200); assert.match(asset.headers.get("content-type"), /javascript/);
+});

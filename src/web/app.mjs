@@ -1,3 +1,4 @@
+import Sortable from "/sortable.mjs";
 import { DraftStore } from "./drafts.mjs";
 import { initExecutions } from "./executions.mjs";
 import { conversationItems } from "./conversation.mjs";
@@ -10,7 +11,8 @@ let browserStorage; try { browserStorage = localStorage; } catch { browserStorag
 const histories = new Map(), sentMessages = new Map(), drafts = new DraftStore(browserStorage);
 const operations = new Map(), directRequests = new Map();
 let refreshExecutions = async () => {};
-let orderVersion = 0;
+let orderVersion = 0, dragging = false;
+let sortables = [];
 let filter = "all", moving = false, actionTarget = "", sidebarKey = "";
 const collapsed = new Set(), scrollPositions = new Map();
 try { directSessionId = browserStorage.getItem("waga:selected-session") || ""; } catch {}
@@ -28,39 +30,68 @@ async function selectSession(id) {
   await Promise.all([loadHistory(), refreshExecutions().catch(error => notice(error.message))]);
 }
 async function moveSession(id, direction) {
-  if (moving) return;
+  const selected = sessions.find(row => row.id === id); if (!selected) return;
+  const visible = visibleSessions().filter(row => row.workspace === selected.workspace);
+  const index = visible.findIndex(row => row.id === id), target = visible[index + (direction === "up" ? -1 : 1)];
+  if (target) await placeSession(id, target.id, direction === "up" ? "before" : "after");
+}
+async function placeSession(id, targetId, position) {
+  if (moving || dragging) return;
   const selected = sessions.find(row => row.id === id); if (!selected) return;
   const visibleIds = visibleSessions().filter(row => row.workspace === selected.workspace).map(row => row.id);
+  if (!visibleIds.includes(targetId) || targetId === id) return;
+  const previous = sessions;
+  sessions = sessions.filter(row => row.id !== id);
+  sessions.splice(sessions.findIndex(row => row.id === targetId) + (position === "after" ? 1 : 0), 0, selected);
   moving = true; orderVersion++; renderSidebar();
-  try { const result = await api(`sessions/${encodeURIComponent(id)}/order`, { direction, visibleIds }); sessions = result.sessions; }
-  catch (error) { notice(`순서 저장 실패: ${error.message}`); }
+  try { const result = await api(`sessions/${encodeURIComponent(id)}/order`, { targetId, position, visibleIds }); sessions = result.sessions; }
+  catch (error) { sessions = previous; notice(`순서 저장 실패: ${error.message}`); }
   finally { moving = false; renderSidebar(); }
 }
 function renderSidebar() {
+  if (dragging) return;
   const rows = visibleSessions(), key = JSON.stringify([rows, directSessionId, moving, [...collapsed]]);
   if (key === sidebarKey) return; sidebarKey = key;
   const nav = $("#session-list"), groups = new Map();
   for (const row of rows) { if (!groups.has(row.workspace)) groups.set(row.workspace, []); groups.get(row.workspace).push(row); }
   const focused = document.activeElement?.dataset, focusId = focused?.sessionId, focusAction = focused?.action;
-  const top = nav.scrollTop; nav.replaceChildren();
+  const top = nav.scrollTop;
+  for (const sortable of sortables) sortable.destroy(); sortables = [];
+  nav.replaceChildren();
   for (const [workspace, items] of groups) {
     const group = el("section", undefined, "session-group"), heading = el("button", undefined, "project-heading");
     const closed = collapsed.has(workspace); heading.setAttribute("aria-expanded", String(!closed)); heading.title = workspace;
     heading.append(el("span", `${closed ? "▸" : "▾"} ${workspace.split("/").filter(Boolean).at(-1) || "/"}`), el("small", String(items.length)));
     heading.addEventListener("click", () => { if (closed) collapsed.delete(workspace); else collapsed.add(workspace); renderSidebar(); }); group.append(heading);
-    if (!closed) items.forEach((row, index) => {
+    const list = el("div", undefined, "session-rows"); group.append(list);
+    if (!closed) items.forEach(row => {
       const line = el("div", undefined, `session-row${row.id === directSessionId ? " selected" : ""}`);
+      line.dataset.id = row.id;
       const button = el("button", undefined, "session-choice"); button.dataset.sessionId = row.id; button.dataset.action = "select"; button.setAttribute("aria-current", String(row.id === directSessionId));
       button.title = `${row.name}
 ${row.cwd}`; button.append(el("span", row.name, "session-name"), el("small", `${row.provider === "claude" ? "Claude" : "Codex"} · ${nativeStates[row.status] ?? "상태 미확인"}`, `session-state state-${row.status}`));
       button.addEventListener("click", () => { void selectSession(row.id); }); line.append(button);
-      const moves = el("div", undefined, "session-moves");
-      for (const [direction, label, disabled] of [["up", "↑", index === 0], ["down", "↓", index === items.length - 1]]) {
-        const move = el("button", label); move.dataset.sessionId = row.id; move.dataset.action = direction; move.setAttribute("aria-label", `${row.name} ${direction === "up" ? "위로" : "아래로"}`); move.title = direction === "up" ? "위로 이동" : "아래로 이동"; move.disabled = disabled || moving;
-        move.addEventListener("click", () => { void moveSession(row.id, direction); }); moves.append(move);
-      }
-      line.append(moves); group.append(line);
+      list.append(line);
     });
+    if (!closed) sortables.push(new Sortable(list, {
+      group: { name: workspace, pull: false, put: false }, draggable: ".session-row", disabled: moving,
+      animation: matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 150,
+      delay: 200, delayOnTouchOnly: true, touchStartThreshold: 5,
+      ghostClass: "session-placeholder", chosenClass: "session-chosen", dragClass: "session-dragging",
+      onStart() { dragging = true; },
+      onEnd(event) {
+        dragging = false; sidebarKey = "";
+        const point = event.originalEvent?.changedTouches?.[0] ?? event.originalEvent;
+        const outside = point && Number.isFinite(point.clientX) && Number.isFinite(point.clientY)
+          && document.elementFromPoint(point.clientX, point.clientY)?.closest(".session-group") !== group;
+        const id = event.item.dataset.id;
+        const next = event.item.nextElementSibling?.dataset.id, previous = event.item.previousElementSibling?.dataset.id;
+        queueMicrotask(() => {
+          if (outside || event.oldDraggableIndex === event.newDraggableIndex || (!next && !previous)) { renderSidebar(); return; }
+          void placeSession(id, next || previous, next ? "before" : "after");
+        });
+      },
+    }));
     nav.append(group);
   }
   if (!rows.length) nav.append(el("p", "조건에 맞는 세션이 없습니다.", "conversation-empty"));
@@ -177,7 +208,10 @@ async function refresh() {
     projectPicker.replaceChildren();
     for (const workspace of new Set([discovery.cwd, ...sessions.map(row => row.workspace)])) { const option = el("option", workspace); option.value = workspace; projectPicker.append(option); }
     projectPicker.value = [...projectPicker.options].some(option => option.value === previousWorkspace) ? previousWorkspace : discovery.cwd;
-    if (!directSessionId && sessions.length) directSessionId = sessions[0].id;
+    if (!directSessionId && sessions.length) {
+      directSessionId = sessions[0].id;
+      try { browserStorage.setItem("waga:selected-session", directSessionId); } catch {}
+    }
     render(); await loadHistory(); $("#connection").textContent = "연결됨";
     if (warning) notice(warning);
   } catch (error) { $("#connection").textContent = "갱신 실패"; notice(error.message); }
