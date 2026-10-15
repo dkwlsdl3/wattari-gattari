@@ -61,6 +61,9 @@ main{max-width:none!important;margin:0;display:grid;grid-template-columns:300px 
 .flow-agents{display:flex;flex-wrap:wrap;gap:6px}.flow-agents small{display:block;font-size:10px;color:var(--muted);margin-top:4px}
 .flow-caption{font-size:11px;margin:10px 0 16px}
 .flow-events{display:flex;flex-direction:column}
+.flow-day{min-width:0}.flow-day-label{position:sticky;top:var(--flow-toolbar-height,0px);z-index:1;margin:0;padding:10px 5px;background:var(--bg);border-bottom:1px solid var(--line);font-size:12px;font-weight:600}
+.flow-filters{z-index:2}
+@media(max-width:700px){.flow-day-label{top:0}}
 .flow-event{display:grid;grid-template-columns:76px minmax(0,1fr);gap:14px;text-align:left;border:0;border-radius:0;padding:0 0 0 5px;background:transparent;width:100%}
 .flow-event time{font:10px/1.5 ui-monospace,monospace;color:var(--muted);padding-top:14px}
 .flow-body{display:flex;flex-direction:column;gap:6px;padding:12px 12px 16px 18px;border-left:2px solid var(--line);position:relative;min-width:0}

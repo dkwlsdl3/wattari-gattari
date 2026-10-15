@@ -102,7 +102,11 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     }
     graph.prepend(svg);
   }
-  new ResizeObserver(drawEdges).observe($("#execution-graph"));
+  function flowToolbarHeight() {
+    const graph = $("#execution-graph");
+    graph.style.setProperty("--flow-toolbar-height", `${graph.querySelector(".flow-filters")?.offsetHeight || 0}px`);
+  }
+  new ResizeObserver(() => { drawEdges(); flowToolbarHeight(); }).observe($("#execution-graph"));
   function mode(graph) {
     $("#execution-panel").hidden = !graph; $("#conversation-workspace").hidden = graph;
     $("#show-executions").setAttribute("aria-pressed", String(graph)); $("#show-conversation").setAttribute("aria-pressed", String(!graph));
@@ -231,15 +235,24 @@ export async function initExecutions({ api, notice, selectedSession = () => null
       more.addEventListener("click", () => { visibleCount += 80; render({ keepPosition: true }); }); graph.append(more);
     }
     const timeline = el("div", undefined, "flow-events");
+    let dayKey, dayGroup;
     for (const row of filtered.slice(-visibleCount)) {
       const span = row.span, button = el("button", undefined, `flow-event${row.changes.length ? " flow-change" : ""}${span.state === "error" ? " flow-error" : ""}`);
       button.dataset.span = span.id; button.setAttribute("aria-pressed", String(selectedSpan === span.id));
       const ms = span.start ? Number(BigInt(span.start) / 1000000n) : NaN;
+      const date = Number.isFinite(ms) ? new Date(ms) : null;
+      const key = date ? `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}` : "unknown";
+      if (key !== dayKey) {
+        dayKey = key;
+        dayGroup = el("section", undefined, "flow-day");
+        dayGroup.append(el("h3", date ? date.toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" }) : "날짜 미기록", "flow-day-label"));
+        timeline.append(dayGroup);
+      }
       const time = el("time", Number.isFinite(ms) ? new Date(ms).toLocaleTimeString("ko-KR", { hour12: false }) : "시각 미기록");
       if (Number.isFinite(ms)) { time.dateTime = new Date(ms).toISOString(); time.title = new Date(ms).toLocaleString("ko-KR"); }
       const body = el("span", undefined, "flow-body");
       body.append(el("small", `${row.agent} · ${row.changes.length ? "파일 변경" : tool(span)} · ${states[span.state]}`), el("strong", (row.changes.length ? row.changes.map(change => displayPath(change.path)).join(" · ") : span.command || span.file || tool(span))));
-      button.append(time, body); button.addEventListener("click", () => { evidence(span); }); timeline.append(button);
+      button.append(time, body); button.addEventListener("click", () => { evidence(span); }); dayGroup.append(button);
     }
     if (!filtered.length) timeline.append(el("p", "조건에 맞는 실행 기록이 없습니다.", "muted"));
     graph.append(timeline);
@@ -252,9 +265,10 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     if (!files.size) fileList.append(el("p", "기록된 파일 변경이 없습니다.", "muted")); calls.append(fileList);
     const selected = rows.find(row => row.span.id === selectedSpan) || changes.at(-1) || rows.at(-1);
     if (selected) evidence(selected.span);
+    flowToolbarHeight();
     if (followLatest) graph.scrollTop = graph.scrollHeight;
     else {
-      const nextAnchor = anchor && [...timeline.children].find(node => node.dataset.span === anchor.dataset.span);
+      const nextAnchor = anchor && [...timeline.querySelectorAll(".flow-event")].find(node => node.dataset.span === anchor.dataset.span);
       graph.scrollTop = nextAnchor ? graph.scrollTop + nextAnchor.getBoundingClientRect().top - graph.getBoundingClientRect().top - anchorOffset : graphTop;
     }
   }
