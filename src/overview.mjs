@@ -65,7 +65,7 @@ function graphemes(value) {
 }
 
 function widthOf(value) {
-  return graphemes(value).reduce((sum, grapheme) => sum + [...grapheme].reduce((part, character) => part + cellWidth(character), 0), 0);
+  return [...String(value)].reduce((sum, character) => sum + cellWidth(character), 0);
 }
 
 function fit(value, width) {
