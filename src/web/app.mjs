@@ -1,3 +1,4 @@
+import { DraftStore } from "./drafts.mjs";
 import { initExecutions } from "./executions.mjs";
 import { conversationItems } from "./conversation.mjs";
 const $ = selector => document.querySelector(selector);
@@ -5,18 +6,19 @@ const phases = { pending: "대기", active: "진행", blocked: "막힘", passed:
 const nativeStates = { idle: "대기 중", working: "작업 중", "needs-input": "입력 대기", done: "완료", error: "오류", unavailable: "연결 불가" };
 const transport = { starting: "접수 중", "waiting-local": "앞선 요청 대기", waiting: "전송 대기", submitting: "전송 중", submitted: "답변 대기", accepted: "답변 대기", "reply-received": "답변 수신", replied: "답변 수신", error: "질의 실패", created: "세션 생성됨", "not-sent": "미전송", "result-unknown": "결과 미확정" };
 let sessions = [], workflows = [], currentId = "", nodeId = "", refreshing = false, ready = false, saving = false;
-let draftKey = "", previewKey = "", previewIdentity = "", warning = "";
-const previews = new Map(), sentMessages = new Map(), drafts = new Map();
+let composerRecipient = "", draftKey = "", previewKey = "", previewIdentity = "", warning = "";
+let browserStorage; try { browserStorage = localStorage; } catch { browserStorage = { getItem() {}, setItem() {} }; }
+const previews = new Map(), sentMessages = new Map(), drafts = new DraftStore(browserStorage);
 const operations = new Map();
 let refreshExecutions = async () => {};
 const flow = () => workflows.find(row => row.id === currentId);
 const node = () => flow()?.nodes.find(row => row.id === nodeId);
 const session = () => sessions.find(row => row.id === node()?.sessionId);
 const activeKey = () => `${currentId}:${nodeId}`;
+const recipientKey = () => `${activeKey()}:${node()?.sessionId || "unassigned"}`;
 const pendingForSession = () => [...operations.values()].find(row => row.target && row.target === node()?.sessionId) ?? operations.get(activeKey());
 function chooseNode(id) {
-  drafts.set(activeKey(), $("#message").value); nodeId = id; draftKey = "";
-  $("#message").value = drafts.get(activeKey()) ?? ""; render(); void loadPreview();
+  nodeId = id; draftKey = ""; render(); void loadPreview();
 }
 function resizeComposer() {
   const input = $("#message"); input.style.height = "auto"; input.style.height = `${Math.min(160, Math.max(58, input.scrollHeight))}px`;
@@ -59,6 +61,10 @@ function render() {
   renderDetail();
 }
 function renderDetail() {
+  if (composerRecipient !== recipientKey()) {
+    if (composerRecipient) drafts.set(composerRecipient, $("#message").value);
+    composerRecipient = recipientKey(); $("#message").value = drafts.get(composerRecipient) ?? "";
+  }
   const value = flow(), step = node(); $("#detail").hidden = !step;
   if (!step) return;
   $("#flow-title").textContent = value.title; $("#node-title").textContent = step.title;
@@ -136,7 +142,7 @@ async function refresh() {
     }
     workflows = (await api("workflows")).workflows;
     if (!flow()) { currentId = workflows[0]?.id ?? ""; nodeId = ""; }
-    if (!node() && flow()) { nodeId = flow().nodes.find(row => row.state === "active")?.id ?? flow().nodes.find(row => row.sessionId)?.id ?? flow().nodes[0].id; draftKey = ""; $("#message").value = drafts.get(activeKey()) ?? ""; }
+    if (!node() && flow()) { nodeId = flow().nodes.find(row => row.state === "active")?.id ?? flow().nodes.find(row => row.sessionId)?.id ?? flow().nodes[0].id; draftKey = ""; }
     $("#create-cwd").textContent = discovery.cwd;
     render(); await loadPreview(); $("#connection").textContent = "연결됨";
     if (warning) notice(warning);
@@ -144,7 +150,7 @@ async function refresh() {
   finally { refreshing = false; }
 }
 async function submitOperation(kind, input) {
-  const key = activeKey(), workflowId = currentId, stepId = nodeId;
+  const key = activeKey(), draftRecipient = recipientKey(), workflowId = currentId, stepId = nodeId;
   if (!node() || pendingForSession()) return;
   const operationId = crypto.randomUUID(); operations.set(key, { operationId, kind, target: input.target, state: "starting" });
   if (kind === "query") sentMessages.set(operationId, input.message);
@@ -152,7 +158,7 @@ async function submitOperation(kind, input) {
   renderDetail();
   try {
     await api(kind, { ...input, operationId, workflowId, nodeId: stepId });
-    if (key === activeKey() && kind === "query" && $("#message").value === input.message) { $("#message").value = ""; drafts.delete(key); }
+    if (draftRecipient === recipientKey() && kind === "query" && $("#message").value === input.message) { $("#message").value = ""; drafts.delete(draftRecipient); }
     await refresh();
   } catch (error) { operations.delete(key); notice(`${error.message} · 자동 재전송하지 않았습니다.`); renderDetail(); }
 }
@@ -162,16 +168,16 @@ async function mutate(value) {
   catch (error) { notice(error.message); throw error; }
   finally { saving = false; renderDetail(); }
 }
-$("#workflow").addEventListener("change", event => { drafts.set(activeKey(), $("#message").value); currentId = event.target.value; nodeId = ""; $("#message").value = ""; chooseNode(flow()?.nodes.find(row => row.sessionId)?.id ?? flow()?.nodes[0]?.id ?? ""); });
+$("#workflow").addEventListener("change", event => { currentId = event.target.value; nodeId = ""; chooseNode(flow()?.nodes.find(row => row.sessionId)?.id ?? flow()?.nodes[0]?.id ?? ""); });
 $("#edit-evidence").addEventListener("click", () => $("#evidence-dialog").showModal());
 for (const id of ["#new-workflow", "#first-workflow"]) $(id).addEventListener("click", () => $("#workflow-dialog").showModal());
 document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => $(`#${button.dataset.close}`).close()));
 $("#workflow-form").addEventListener("submit", async event => {
   event.preventDefault(); const button = event.submitter; button.disabled = true;
-  try { const value = await api("workflows", { title: $("#workflow-title").value }); drafts.set(activeKey(), $("#message").value); $("#message").value = ""; currentId = value.id; nodeId = value.nodes[0].id; draftKey = ""; updateFlow(value); $("#workflow-dialog").close(); $("#workflow-title").value = ""; }
+  try { const value = await api("workflows", { title: $("#workflow-title").value }); currentId = value.id; nodeId = value.nodes[0].id; draftKey = ""; updateFlow(value); $("#workflow-dialog").close(); $("#workflow-title").value = ""; }
   catch (error) { notice(error.message); } finally { button.disabled = false; }
 });
-$("#session").addEventListener("change", async event => { try { await mutate({ action: "assign", nodeId, sessionId: event.target.value }); await loadPreview(); } catch { /* Error is shown by mutate. */ } });
+$("#session").addEventListener("change", async event => { try { await mutate({ action: "assign", nodeId, sessionId: event.target.value }); resizeComposer(); await loadPreview(); } catch { /* Error is shown by mutate. */ } });
 $("#state-form").addEventListener("submit", async event => {
   event.preventDefault();
   const context = activeKey();
@@ -186,7 +192,7 @@ $("#state-form").addEventListener("submit", async event => {
 $("#rework-form").addEventListener("submit", async event => {
   event.preventDefault(); try { await mutate({ action: "rework", nodeId, targetId: $("#return-to").value, note: $("#return-reason").value }); } catch { /* Error is shown by mutate. */ }
 });
-$("#message").addEventListener("input", () => { resizeComposer(); drafts.set(activeKey(), $("#message").value); $("#send").disabled = !session() || Boolean(pendingForSession()) || !$("#message").value.trim(); });
+$("#message").addEventListener("input", () => { resizeComposer(); drafts.set(recipientKey(), $("#message").value); $("#send").disabled = !session() || Boolean(pendingForSession()) || !$("#message").value.trim(); });
 $("#message").addEventListener("keydown", event => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!$("#send").disabled) $("#query-form").requestSubmit(); }
 });
@@ -198,7 +204,7 @@ $("#create-form").addEventListener("submit", async event => {
 });
 $("#refresh").addEventListener("click", () => { void refresh(); void refreshExecutions().catch(error => notice(error.message)); });
 async function start() {
-  try { const token = location.hash.slice(1); history.replaceState(null, "", location.pathname); if (token) await api("auth", { token }); ready = true; await refresh(); refreshExecutions = await initExecutions({ api, notice }); }
+  try { const token = location.hash.slice(1); history.replaceState(null, "", location.pathname); if (token) await api("auth", { token }); ready = true; refreshExecutions = await initExecutions({ api, notice }); await refresh(); }
   catch (error) { notice(error.message); $("#connection").textContent = "접속 링크 필요"; }
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); });

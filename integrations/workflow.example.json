@@ -1,0 +1,31 @@
+{
+  "title": "산술 함수 검토",
+  "includeContent": false,
+  "resources": { "reserveGiB": 6, "maxCpuPercent": 80 },
+  "nodes": [
+    {
+      "id": "inspect",
+      "title": "현행 동작 조사",
+      "role": "scan",
+      "prompt": "Read sum.mjs and sum.test.mjs. Explain the expected behavior and any defect. Read-only.",
+      "check": ["node", "--check", "sum.mjs"]
+    },
+    {
+      "id": "fix",
+      "title": "함수 수정",
+      "role": "edit",
+      "dependsOn": ["inspect"],
+      "prompt": "Ensure sum(a,b) returns a+b. Only change sum.mjs and preserve its export interface.",
+      "outputs": ["sum.mjs"],
+      "check": ["node", "sum.test.mjs"]
+    },
+    {
+      "id": "verify-input",
+      "title": "검증한 산출물 확인",
+      "role": "scan",
+      "inputs": [{ "from": "fix", "path": "sum.mjs" }],
+      "prompt": "Read sum.mjs and its tests. Verify the received implementation satisfies the expected addition behavior. Read-only.",
+      "check": ["node", "sum.test.mjs"]
+    }
+  ]
+}

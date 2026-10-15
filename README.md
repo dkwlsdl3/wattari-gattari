@@ -67,7 +67,8 @@ Existing-session queries remain untrusted peer messages, and approvals stay in t
 
 The default **실행 그래프** view imports Claude Code OTLP JSON snapshots and displays
 observed main/agent call edges, tool outputs and diffs. A returned tool call is never
-classified as a passing check. This is file import, with live collection still pending;
+classified as a passing check. Runs explicitly started by `waga run workflow.json` also stream
+live spans and display declared dependencies, machine checks, independent reviews and retries;
 see [record format and proof boundaries](docs/web-executions.md).
 The **세션 대화** view provides the stage and conversation features below.
 
@@ -75,8 +76,8 @@ Create a work graph with **＋ 작업**, then connect native sessions to require
 implementation, verification, independent review, and integration stages. Selecting a
 stage opens a wide central conversation below the compact stage graph. Native previews
 and recovered answers are displayed without repeating the same response. Enter sends;
-Shift+Enter inserts a newline. Drafts survive stage changes within the open page,
-but drafts and sent message bodies are not retained across reloads. Phase status and evidence are
+Shift+Enter inserts a newline. Drafts persist in browser localStorage, isolated by stage
+and native recipient. Temporary sent-message displays remain page-local. Phase status and evidence are
 explicit user records, never inferred from session idle or an answer saying “done”.
 Passing requires evidence; verification/review/integration also require a full commit
 SHA that exists in the configured repository. Independent review cannot use the

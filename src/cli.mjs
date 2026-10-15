@@ -20,6 +20,7 @@ import { SessionBridge } from "./session-bridge.mjs";
 import { enterSessionDock } from "./session-dock.mjs";
 import { TmuxWorkspace } from "./tmux-workspace.mjs";
 import { WagaSettingsStore } from "./waga-settings.mjs";
+import { runWorkflow } from "./workflow-runtime.mjs";
 import { serveWeb } from "./web-server.mjs";
 
 function usage() {
@@ -27,6 +28,7 @@ function usage() {
     `${CLI_NAME} [--cwd PATH] [--backend auto|direct|tmux]`,
     "                                Open the global dock, optionally filtered by workspace",
     `${CLI_NAME} list [--provider claude|codex] [--cwd PATH] [--json]`,
+    `${CLI_NAME} run <workflow.json> [--resume RUN_ID]    Run isolated native work with checks and independent review`,
     `${CLI_NAME} serve [--port 4317] [--cwd PATH]    Open the local browser workspace`,
     `${CLI_NAME} send <session-id-or-name> <message> [--cwd PATH]    One-way notification`,
     `${CLI_NAME} ask <session-id-or-name> <message> [--notify-origin] [--wait-timeout SEC] [--reply-timeout SEC] [--cwd PATH]`,
@@ -85,11 +87,19 @@ export async function runCli(args = process.argv.slice(2), {
   originNotifier = notifyOrigin,
   origin = claudeOrigin(),
   web = serveWeb,
+  workflowRuntime = runWorkflow,
   handleSignals = false,
 } = {}) {
   let options;
   try { options = parseCliArgs(args); }
   catch (error) { stderr.write(`${error.message}\n${usage()}\n`); return 2; }
+  if (options.command === "run") {
+    const controller = new AbortController(), stop = () => controller.abort();
+    if (handleSignals) { process.once("SIGINT", stop); process.once("SIGTERM", stop); }
+    try { const run = await workflowRuntime(path.resolve(options.manifest), { resume: options.resume, output: stdout, signal: controller.signal }); stdout.write(`${run.state}\n`); return ["review_required", "approved"].includes(run.state) ? 0 : 2; }
+    catch (error) { stderr.write(`${error.message}\n`); return 1; }
+    finally { process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
+  }
   bridge ??= defaultBridge({ autoStartDaemon: options.command !== "serve" });
 
   const cwd = path.resolve(options.cwd ?? process.cwd());

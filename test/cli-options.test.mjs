@@ -64,3 +64,10 @@ test("internal tmux Agents view accepts only a tmux window id", () => {
   });
   assert.throws(() => parseCliArgs(["tmux-agents-view", "not-a-window"]), { code: "INVALID_ARGUMENT" });
 });
+
+test("run requires a local manifest and validates resume scope", () => {
+  assert.equal(parseCliArgs(["run", "workflow.json"]).manifest, "workflow.json");
+  const id = "11111111-1111-4111-8111-111111111111";
+  assert.equal(parseCliArgs(["run", "workflow.json", "--resume", id]).resume, id);
+  for (const args of [["run"], ["run", "a", "b"], ["run", "a", "--resume", "bad"], ["list", "--resume", id]]) assert.throws(() => parseCliArgs(args), { code: "INVALID_ARGUMENT" });
+});

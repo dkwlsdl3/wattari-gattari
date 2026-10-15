@@ -1,4 +1,4 @@
-const COMMANDS = new Set(["serve", "list", "agents", "send", "ask", "result", "open", "overview", "tmux-agents-view", "doctor", "help"]);
+const COMMANDS = new Set(["run", "serve", "list", "agents", "send", "ask", "result", "open", "overview", "tmux-agents-view", "doctor", "help"]);
 const DEFAULT_WAIT_TIMEOUT_MS = 30 * 60 * 1_000;
 const DEFAULT_REPLY_TIMEOUT_MS = 3 * 60 * 1_000;
 
@@ -27,9 +27,10 @@ export function parseCliArgs(args) {
     if (arg === "--json") { options.json = true; continue; }
     if (arg === "--until-idle") { options.untilIdle = true; continue; }
     if (arg === "--notify-origin") { options.notifyOrigin = true; continue; }
-    if (["--port", "--cwd", "--provider", "--backend", "--timeout", "--wait-timeout", "--reply-timeout"].includes(arg)) {
+    if (["--resume", "--port", "--cwd", "--provider", "--backend", "--timeout", "--wait-timeout", "--reply-timeout"].includes(arg)) {
       const value = args[++index];
       if (!value) throw invalid(`${arg} requires a value`);
+      if (arg === "--resume") options.resume = value;
       if (arg === "--cwd") options.cwd = value;
       if (arg === "--provider") options.provider = value;
       if (arg === "--backend") options.backend = value;
@@ -62,7 +63,12 @@ export function parseCliArgs(args) {
   if (options.backend !== "auto" && options.command !== "default") throw invalid("--backend is only valid for the interactive dock");
   if (options.untilIdle && options.command !== "ask") throw invalid("--until-idle is only valid for ask");
   if (options.notifyOrigin && options.command !== "ask") throw invalid("--notify-origin is only valid for ask");
-  if (["send", "ask"].includes(options.command)) {
+  if (options.resume && options.command !== "run") throw invalid("--resume is only valid for run");
+  if (options.command === "run") {
+    options.manifest = positional.shift();
+    if (!options.manifest || positional.length) throw invalid("run requires one workflow JSON file");
+    if (options.resume && !/^[0-9a-f-]{36}$/.test(options.resume)) throw invalid("--resume requires a run ID");
+  } else if (["send", "ask"].includes(options.command)) {
     options.target = positional.shift();
     options.message = positional.join(" ").trim();
     if (!options.target || !options.message) throw invalid(`${options.command} requires a target and message`);

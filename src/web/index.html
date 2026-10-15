@@ -20,7 +20,8 @@
   <p id="notice" role="status" hidden></p>
   <main>
     <section id="execution-panel" aria-label="실제 실행 기록">
-      <div class="execution-toolbar"><select id="execution-select" aria-label="실행 선택"></select><button id="import-execution">기록 가져오기</button></div>
+      <div class="execution-toolbar"><select id="execution-select" aria-label="실행 선택"></select><button id="import-execution">기록 가져오기</button><button id="run-work-view" hidden>작업</button><button id="run-call-view" hidden>호출</button></div>
+      <div id="run-controls" hidden><button id="run-pause">일시정지</button><button id="run-resume">재개</button><button id="run-stop">중단</button><button id="run-approve" hidden>최종 검토 완료</button><button id="run-resource-settings">자원 설정</button><span id="run-resource" class="muted"></span></div>
       <p id="execution-note" class="muted" role="status"></p>
       <div id="execution-graph" aria-label="에이전트 호출 관계"></div>
       <div class="execution-inspector"><section id="execution-tools" aria-label="선택한 에이전트의 도구 호출"></section><section id="execution-evidence" aria-label="선택한 호출의 근거"></section></div>
@@ -44,6 +45,7 @@
     </section>
     </div>
   </main>
+  <dialog id="resource-dialog"><form id="resource-form"><h2>실행 여유 자원</h2><label for="reserve-memory">남겨둘 메모리 (GiB)</label><input id="reserve-memory" type="number" min="4.5" max="128" step="0.5" required><label for="max-cpu">PC CPU 사용률 상한 (%)</label><input id="max-cpu" type="number" min="10" max="90" required><div class="actions"><button type="button" data-close="resource-dialog">취소</button><button>적용</button></div></form></dialog>
   <dialog id="import-dialog"><form id="import-form">
     <h2>실행 기록 가져오기</h2>
     <label for="trace-file">OpenTelemetry OTLP JSON 파일 · 최대 4MiB</label><input id="trace-file" type="file" accept=".json,application/json" required>

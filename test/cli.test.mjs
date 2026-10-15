@@ -175,3 +175,13 @@ test("internal tmux Agents command delegates the source window", async () => {
   assert.equal(code, 0);
   assert.equal(seen, "@7");
 });
+
+test("run delegates only to explicit workflow runtime and preserves failure status", async () => {
+  const stdout = output(), stderr = output();
+  let invoked = false;
+  assert.equal(await runCli(["run", "workflow.json"], { stdout, stderr, workflowRuntime: async file => { invoked = true; assert.equal(file, path.resolve("workflow.json")); return { state: "review_required" }; } }), 0);
+  assert.equal(invoked, true); assert.equal(stdout.value, "review_required\n");
+  assert.equal(await runCli(["run", "workflow.json"], { stdout, stderr, workflowRuntime: async () => ({ state: "needs-replan" }) }), 2);
+  assert.equal(await runCli(["run", "workflow.json"], { stdout, stderr, workflowRuntime: async () => { throw new Error("explicit failure"); } }), 1);
+  assert.match(stderr.value, /explicit failure/);
+});
