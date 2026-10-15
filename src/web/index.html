@@ -21,20 +21,20 @@
       <div id="empty" class="empty"><p>등록된 작업이 없습니다.</p><button id="first-workflow">작업 만들기</button></div>
       <div id="graph" class="graph" hidden></div>
     </section>
-    <aside id="detail" hidden>
-      <div class="detail-heading"><div><span id="flow-title"></span><h1 id="node-title"></h1></div><button id="close-detail" aria-label="단계 상세 닫기">✕</button></div>
-      <label for="session">담당 세션</label>
-      <div class="inline"><select id="session"><option value="">세션 연결</option></select><button id="new-session">＋ 세션</button></div>
+    <section id="detail" aria-label="세션 대화" hidden>
+      <div class="detail-heading"><div><span id="flow-title"></span><h1 id="node-title"></h1></div><button id="edit-evidence">단계 상태·근거</button></div>
+      <div class="inline session-picker"><label for="session">담당 세션</label><select id="session"><option value="">세션 연결</option></select><button id="new-session">＋ 세션</button></div>
       <p id="session-status" class="muted"></p>
-      <div id="messages" class="messages"></div>
-      <div id="exchange" class="exchange" role="status" hidden></div>
+      <div id="messages" class="messages" role="log" aria-label="대화 내역"></div>
+      <div id="operation-status" class="operation-status" role="status" hidden></div>
       <form id="query-form">
         <label for="message">세션에 질의</label>
-        <div class="inline composer"><textarea id="message" rows="2" maxlength="16000" placeholder="전달할 내용" disabled required></textarea><button id="send" disabled>보내기</button></div>
+        <div class="inline composer"><textarea id="message" rows="2" maxlength="16000" placeholder="메시지 입력 · Enter로 보내기, Shift+Enter로 줄바꿈" disabled required></textarea><button id="send" disabled>보내기</button></div>
         <small class="muted">질의는 peer 메시지로 전달됩니다. 권한 승인은 네이티브 화면에서 처리합니다.</small>
       </form>
-      <details id="evidence-panel">
-        <summary>단계 상태·완료 근거</summary>
+    </section>
+  </main>
+      <dialog id="evidence-dialog"><div class="detail-heading"><h2>단계 상태·완료 근거</h2><button type="button" data-close="evidence-dialog" aria-label="닫기">✕</button></div>
         <form id="state-form">
           <label for="phase-state">단계 상태 <small class="muted">직접 기록</small></label>
           <select id="phase-state"><option value="pending">대기</option><option value="active">진행</option><option value="blocked">막힘</option><option value="passed">통과</option></select>
@@ -49,9 +49,8 @@
           <label for="return-reason">되돌리는 이유</label><input id="return-reason" maxlength="2000" required>
           <button id="return-submit">되돌리기</button>
         </form>
-      </details>
-    </aside>
-  </main>
+      </dialog>
+
   <dialog id="workflow-dialog"><form id="workflow-form">
     <h2>작업 만들기</h2>
     <label for="workflow-title">작업명 / 이슈</label><input id="workflow-title" maxlength="160" required placeholder="예: Keeper #263">

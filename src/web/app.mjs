@@ -1,14 +1,24 @@
+import { conversationItems } from "./conversation.mjs";
 const $ = selector => document.querySelector(selector);
 const phases = { pending: "대기", active: "진행", blocked: "막힘", passed: "통과" };
 const nativeStates = { idle: "대기 중", working: "작업 중", "needs-input": "입력 대기", done: "완료", error: "오류", unavailable: "연결 불가" };
 const transport = { starting: "접수 중", "waiting-local": "앞선 요청 대기", waiting: "전송 대기", submitting: "전송 중", submitted: "답변 대기", accepted: "답변 대기", "reply-received": "답변 수신", replied: "답변 수신", error: "질의 실패", created: "세션 생성됨", "not-sent": "미전송", "result-unknown": "결과 미확정" };
 let sessions = [], workflows = [], currentId = "", nodeId = "", refreshing = false, ready = false, saving = false;
 let draftKey = "", previewKey = "", previewIdentity = "", warning = "";
+const previews = new Map(), sentMessages = new Map(), drafts = new Map();
 const operations = new Map();
 const flow = () => workflows.find(row => row.id === currentId);
 const node = () => flow()?.nodes.find(row => row.id === nodeId);
 const session = () => sessions.find(row => row.id === node()?.sessionId);
 const activeKey = () => `${currentId}:${nodeId}`;
+const pendingForSession = () => [...operations.values()].find(row => row.target && row.target === node()?.sessionId) ?? operations.get(activeKey());
+function chooseNode(id) {
+  drafts.set(activeKey(), $("#message").value); nodeId = id; draftKey = "";
+  $("#message").value = drafts.get(activeKey()) ?? ""; render(); void loadPreview();
+}
+function resizeComposer() {
+  const input = $("#message"); input.style.height = "auto"; input.style.height = `${Math.min(160, Math.max(58, input.scrollHeight))}px`;
+}
 function el(tag, text, className) {
   const item = document.createElement(tag); if (text !== undefined) item.textContent = text; if (className) item.className = className; return item;
 }
@@ -36,7 +46,7 @@ function render() {
       button.append(el("small", assigned?.name ?? (step.sessionId ? "연결된 세션 조회 불가" : "담당 세션 미연결")));
       if (assigned) button.append(el("span", `${assigned.provider === "claude" ? "Claude" : "Codex"} · ${nativeStates[assigned.status] ?? "상태 미확인"}`, "native"));
       if (step.state === "blocked" && step.note) button.append(el("small", step.note));
-      button.addEventListener("click", () => { nodeId = step.id; draftKey = ""; $("#message").value = ""; render(); void loadPreview(); });
+      button.addEventListener("click", () => chooseNode(step.id));
       holder.append(button); stages.append(holder);
     }
     graph.append(stages);
@@ -57,8 +67,8 @@ function renderDetail() {
   if (step.sessionId && !session()) { const option = el("option", "연결된 세션 조회 불가"); option.value = step.sessionId; picker.append(option); }
   picker.value = step.sessionId;
   const selected = session(); $("#session-status").textContent = selected ? `${nativeStates[selected.status] ?? "상태 미확인"} · ${selected.cwd}` : "";
-  const pending = operations.get(activeKey());
-  $("#message").disabled = !selected || Boolean(pending); $("#send").disabled = !selected || Boolean(pending);
+  const pending = pendingForSession();
+  $("#message").disabled = !selected; $("#send").disabled = !selected || Boolean(pending) || !$("#message").value.trim();
   $("#session").disabled = Boolean(pending) || saving; $("#new-session").disabled = Boolean(pending);
   if (draftKey !== activeKey()) {
     draftKey = activeKey(); $("#phase-state").value = step.state; $("#phase-note").value = step.note;
@@ -68,34 +78,47 @@ function renderDetail() {
     $("#rework-form").hidden = !target.children.length; $("#return-reason").value = "";
   }
   $("#evidence-commit").textContent = step.evidence ? `직접 기록한 완료 근거${step.evidenceCommit ? ` · ${step.evidenceCommit.slice(0, 12)}` : ""}` : "";
-  const record = step.requests.at(-1), exchange = $("#exchange"); exchange.replaceChildren(); exchange.hidden = !record && !pending;
-  if (record) {
-    exchange.append(el("div", record.reply !== undefined ? "질의 답변" : pending ? transport[record.state] ?? record.state : "이전 질의 · 응답 미확인"));
-    if (record.reply !== undefined) exchange.append(el("div", record.reply));
-    if (record.sessionId && record.sessionId !== step.sessionId) exchange.append(el("small", "이전 담당 세션의 질의 기록"));
-    if (record.replyLimited) exchange.append(el("small", "답변 일부만 표시합니다. 전체 답변은 네이티브 세션에서 확인해 주세요."));
-    if (record.error) exchange.append(el("div", record.error));
-    if (record.requestId && record.reply === undefined && !pending) {
-      const recover = el("button", "답변 도착 확인"); recover.addEventListener("click", () => { void submitOperation("recover", { requestId: record.requestId }); }); exchange.append(recover);
+  resizeComposer(); renderConversation();
+  const record = step.requests.at(-1), status = $("#operation-status"); status.replaceChildren();
+  status.hidden = !pending && (!record || record.reply !== undefined || record.state === "created");
+  if (pending) status.append(el("span", pending.kind === "create" ? "세션 생성 중…" : transport[pending.state] ?? "답변 대기 중…"));
+  else if (!status.hidden) {
+    status.append(el("span", record.error ?? "아직 답변을 확인하지 못했습니다."));
+    if (record.requestId) {
+      const recover = el("button", "답변 다시 확인"); recover.addEventListener("click", () => { void submitOperation("recover", { requestId: record.requestId }); }); status.append(recover);
     }
-  } else if (pending) exchange.append(el("div", "접수 중"));
-  if (pending) exchange.append(el("div", transport[pending.state] ?? "응답 확인 중"));
+  }
+}
+function renderConversation() {
+  const step = node(), selected = session(), messages = $("#messages");
+  if (!step) return;
+  const identity = selected ? `${selected.id}:${selected.cwd}` : activeKey();
+  const records = selected ? flow().nodes.flatMap(row => row.requests.filter(record => record.sessionId === selected.id || (!record.sessionId && row.id === step.id))) : [];
+  const items = conversationItems({ preview: previews.get(identity), records, inputs: sentMessages, pending: pendingForSession() });
+  const key = JSON.stringify([identity, items]); if (key === previewKey) return;
+  const scrollTop = messages.scrollTop;
+  const follow = identity !== previewIdentity || messages.scrollHeight - messages.scrollTop - messages.clientHeight < 80;
+  previewIdentity = identity; previewKey = key; messages.replaceChildren();
+  for (const item of items) {
+    const bubble = el("article", undefined, `bubble ${item.role}`);
+    bubble.append(el("small", item.label), el("p", item.text));
+    if (item.limited) bubble.append(el("small", "일부만 표시 · 전체 내용은 네이티브 세션에서 확인할 수 있습니다."));
+    messages.append(bubble);
+  }
+  if (!items.length) messages.append(el("p", selected ? "이 세션에 메시지를 보내세요." : "담당 세션을 연결하면 대화가 표시됩니다.", "conversation-empty"));
+  messages.scrollTop = follow ? messages.scrollHeight : scrollTop;
 }
 async function loadPreview() {
-  const selected = session(), identity = selected ? `${selected.id}:${selected.cwd}` : "", messages = $("#messages");
-  if (identity !== previewIdentity) { previewIdentity = identity; previewKey = ""; messages.replaceChildren(); }
+  const selected = session(), identity = selected ? `${selected.id}:${selected.cwd}` : "";
   if (!selected) return;
   try {
     const value = await api(`sessions/${encodeURIComponent(selected.id)}/preview`);
-    if (identity !== previewIdentity) return;
-    const key = JSON.stringify([value.input, value.output, value.limited]); if (key === previewKey) return; previewKey = key;
-    const scroll = messages.scrollTop; messages.replaceChildren();
-    for (const [title, content] of [["최근 입력", value.input], ["최근 응답", value.output]]) {
-      if (!content) continue; const bubble = el("div", undefined, "bubble"); bubble.append(el("small", title), el("p", content)); messages.append(bubble);
-    }
-    if (value.limited) messages.append(el("p", "최근 대화 일부만 표시합니다.", "muted")); messages.scrollTop = scroll;
-  } catch (error) { if (identity === previewIdentity) notice(`대화 조회 실패: ${error.message}`); }
+    if (session()?.id !== selected.id || session()?.cwd !== selected.cwd) return;
+    previews.set(identity, value); if (previews.size > 20) previews.delete(previews.keys().next().value);
+    renderConversation();
+  } catch (error) { if (session()?.id === selected.id) notice(`대화 조회 실패: ${error.message}`); }
 }
+
 async function refresh() {
   if (!ready || refreshing) return; refreshing = true;
   try {
@@ -111,6 +134,7 @@ async function refresh() {
     }
     workflows = (await api("workflows")).workflows;
     if (!flow()) { currentId = workflows[0]?.id ?? ""; nodeId = ""; }
+    if (!node() && flow()) { nodeId = flow().nodes.find(row => row.state === "active")?.id ?? flow().nodes.find(row => row.sessionId)?.id ?? flow().nodes[0].id; draftKey = ""; $("#message").value = drafts.get(activeKey()) ?? ""; }
     $("#create-cwd").textContent = discovery.cwd;
     render(); await loadPreview(); $("#connection").textContent = "연결됨";
     if (warning) notice(warning);
@@ -119,11 +143,14 @@ async function refresh() {
 }
 async function submitOperation(kind, input) {
   const key = activeKey(), workflowId = currentId, stepId = nodeId;
-  if (!node() || operations.has(key)) return;
-  const operationId = crypto.randomUUID(); operations.set(key, { operationId, state: "starting" }); renderDetail();
+  if (!node() || pendingForSession()) return;
+  const operationId = crypto.randomUUID(); operations.set(key, { operationId, kind, target: input.target, state: "starting" });
+  if (kind === "query") sentMessages.set(operationId, input.message);
+  while (sentMessages.size > 100) sentMessages.delete(sentMessages.keys().next().value);
+  renderDetail();
   try {
     await api(kind, { ...input, operationId, workflowId, nodeId: stepId });
-    if (key === activeKey() && kind === "query") $("#message").value = "";
+    if (key === activeKey() && kind === "query" && $("#message").value === input.message) { $("#message").value = ""; drafts.delete(key); }
     await refresh();
   } catch (error) { operations.delete(key); notice(`${error.message} · 자동 재전송하지 않았습니다.`); renderDetail(); }
 }
@@ -133,13 +160,13 @@ async function mutate(value) {
   catch (error) { notice(error.message); throw error; }
   finally { saving = false; renderDetail(); }
 }
-$("#workflow").addEventListener("change", event => { currentId = event.target.value; nodeId = ""; draftKey = ""; render(); });
-$("#close-detail").addEventListener("click", () => { nodeId = ""; render(); });
+$("#workflow").addEventListener("change", event => { drafts.set(activeKey(), $("#message").value); currentId = event.target.value; nodeId = ""; $("#message").value = ""; chooseNode(flow()?.nodes.find(row => row.sessionId)?.id ?? flow()?.nodes[0]?.id ?? ""); });
+$("#edit-evidence").addEventListener("click", () => $("#evidence-dialog").showModal());
 for (const id of ["#new-workflow", "#first-workflow"]) $(id).addEventListener("click", () => $("#workflow-dialog").showModal());
 document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => $(`#${button.dataset.close}`).close()));
 $("#workflow-form").addEventListener("submit", async event => {
   event.preventDefault(); const button = event.submitter; button.disabled = true;
-  try { const value = await api("workflows", { title: $("#workflow-title").value }); currentId = value.id; nodeId = value.nodes[0].id; draftKey = ""; updateFlow(value); $("#workflow-dialog").close(); $("#workflow-title").value = ""; }
+  try { const value = await api("workflows", { title: $("#workflow-title").value }); drafts.set(activeKey(), $("#message").value); $("#message").value = ""; currentId = value.id; nodeId = value.nodes[0].id; draftKey = ""; updateFlow(value); $("#workflow-dialog").close(); $("#workflow-title").value = ""; }
   catch (error) { notice(error.message); } finally { button.disabled = false; }
 });
 $("#session").addEventListener("change", async event => { try { await mutate({ action: "assign", nodeId, sessionId: event.target.value }); await loadPreview(); } catch { /* Error is shown by mutate. */ } });
@@ -157,7 +184,11 @@ $("#state-form").addEventListener("submit", async event => {
 $("#rework-form").addEventListener("submit", async event => {
   event.preventDefault(); try { await mutate({ action: "rework", nodeId, targetId: $("#return-to").value, note: $("#return-reason").value }); } catch { /* Error is shown by mutate. */ }
 });
-$("#query-form").addEventListener("submit", event => { event.preventDefault(); void submitOperation("query", { target: node()?.sessionId, message: $("#message").value }); });
+$("#message").addEventListener("input", () => { resizeComposer(); drafts.set(activeKey(), $("#message").value); $("#send").disabled = !session() || Boolean(pendingForSession()) || !$("#message").value.trim(); });
+$("#message").addEventListener("keydown", event => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) { event.preventDefault(); if (!$("#send").disabled) $("#query-form").requestSubmit(); }
+});
+$("#query-form").addEventListener("submit", event => { event.preventDefault(); if ($("#message").value.trim()) void submitOperation("query", { target: node()?.sessionId, message: $("#message").value }); });
 $("#new-session").addEventListener("click", () => $("#create-dialog").showModal());
 $("#create-form").addEventListener("submit", async event => {
   event.preventDefault(); const input = { provider: $("#create-provider").value, message: $("#create-message").value };

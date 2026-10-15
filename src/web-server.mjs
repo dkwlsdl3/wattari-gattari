@@ -7,6 +7,7 @@ import { WorkflowStore } from "./workflow-store.mjs";
 
 const ASSETS = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
+  ["/conversation.mjs", ["conversation.mjs", "text/javascript; charset=utf-8"]],
   ["/app.mjs", ["app.mjs", "text/javascript; charset=utf-8"]],
   ["/style.css", ["style.css", "text/css; charset=utf-8"]],
 ]);

@@ -67,7 +67,10 @@ Existing-session queries remain untrusted peer messages, and approvals stay in t
 
 Create a work graph with **＋ 작업**, then connect native sessions to requirements,
 implementation, verification, independent review, and integration stages. Selecting a
-stage shows its session preview and latest exchange. Phase status and evidence are
+stage opens a wide central conversation below the compact stage graph. Native previews
+and recovered answers are displayed without repeating the same response. Enter sends;
+Shift+Enter inserts a newline. Drafts survive stage changes within the open page,
+but drafts and sent message bodies are not retained across reloads. Phase status and evidence are
 explicit user records, never inferred from session idle or an answer saying “done”.
 Passing requires evidence; verification/review/integration also require a full commit
 SHA that exists in the configured repository. Independent review cannot use the
