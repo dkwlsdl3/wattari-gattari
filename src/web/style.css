@@ -57,6 +57,7 @@ main{max-width:none!important;margin:0;display:grid;grid-template-columns:300px 
 .flow-filters{display:flex;gap:6px;flex-wrap:wrap;padding:0 0 10px;position:sticky;top:-4px;background:var(--bg);z-index:1}
 .flow-filters button,.flow-agents button{font-size:11px;padding:7px 10px}
 .flow-filters input{width:100%;margin:0;font-size:12px;padding:9px}
+.flow-search-status{width:100%;font-size:11px}
 .flow-filters [aria-pressed=true],.flow-agents [aria-pressed=true]{border-color:var(--accent);color:var(--accent)}
 .flow-agents{display:flex;flex-wrap:wrap;gap:6px}.flow-agents small{display:block;font-size:10px;color:var(--muted);margin-top:4px}
 .flow-caption{font-size:11px;margin:10px 0 16px}

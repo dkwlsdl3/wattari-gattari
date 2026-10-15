@@ -87,6 +87,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
   const inspector = $(".execution-inspector");
   $("#close-inspector").addEventListener("click", () => { inspector.hidden = true; $("#execution-panel").classList.remove("with-inspector"); });
   let flowFilter = "all", flowSearch = "", flowAgent = "", visibleCount = 80;
+  let flowComposing = false, searchFrame = 0, timelineExecution, timelineModel;
   let currentRun, workView = true, selectedTask = "", execution, selectedSpan = "", drawnEdges = [], cards = new Map();
   function drawEdges() {
     const graph = $("#execution-graph"); graph.querySelector("svg")?.remove();
@@ -195,10 +196,17 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     const viewportTop = graph.getBoundingClientRect().top;
     const anchor = keepPosition && !followLatest && [...graph.querySelectorAll(".flow-event")].find(node => node.getBoundingClientRect().bottom > viewportTop);
     const anchorOffset = anchor ? anchor.getBoundingClientRect().top - viewportTop : 0;
-    graph.replaceChildren(); calls.replaceChildren(); detail.replaceChildren();
-    if (!execution) { $("#execution-note").textContent = "세션 실행 기록을 자동으로 확인하고 있습니다."; return; }
+    let toolbar = graph.querySelector(":scope > .flow-filters");
+    for (const child of [...graph.children]) if (child !== toolbar) child.remove();
+    calls.replaceChildren(); detail.replaceChildren();
+    if (!execution) { toolbar?.remove(); flowComposing = false; $("#execution-note").textContent = "세션 실행 기록을 자동으로 확인하고 있습니다."; return; }
     graph.classList.add("execution-timeline");
-    const { nodes, edges, rows } = executionTimeline(execution.spans);
+    if (timelineExecution !== execution) {
+      timelineExecution = execution;
+      timelineModel = executionTimeline(execution.spans);
+      for (const row of timelineModel.rows) row.searchText = `${row.span.command || ""} ${row.span.file || ""} ${row.changes.map(change => change.path).join(" ")} ${tool(row.span)} ${row.agent} ${(row.span.events || []).flatMap(event => Object.values(event.content || {})).join(" ")}`.normalize("NFC").toLowerCase();
+    }
+    const { nodes, edges, rows } = timelineModel;
     if (currentRun) for (const node of nodes) {
       const nativeId = node.spans[0]?.attributes["session.id"];
       const task = currentRun.nodes.find(task => task.sessions?.some(session => session.id === nativeId) || task.attempts.some(attempt => attempt.worker.sessionId === nativeId || attempt.review.sessionId === nativeId));
@@ -211,13 +219,29 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     for (const row of changes) for (const change of row.changes) { files.delete(change.path); files.set(change.path, row); }
     const errors = rows.filter(row => row.span.state === "error");
     $("#execution-note").textContent = `${execution.title} · 파일 ${files.size}개 · 호출 ${rows.length}회 · 오류 ${errors.length}회${execution.collection?.skipped ? " · 일부 기록 읽기 제외" : ""}${execution.collection?.collectingHistory ? " · 이전 기록 수집 중" : ""}${execution.collection?.limited ? " · 최근 기록만 표시" : ""}${execution.collection?.error ? ` · 갱신 실패: ${execution.collection.error}` : ""}`;
-    const toolbar = el("div", undefined, "flow-filters");
-    for (const [value, label] of [["all", "전체"], ["changes", `파일 변경 ${changes.length}`], ["commands", "명령"], ["errors", `오류 ${errors.length}`]]) {
-      const button = el("button", label); button.setAttribute("aria-pressed", String(flowFilter === value));
-      button.addEventListener("click", () => { flowFilter = value; visibleCount = 80; render(); }); toolbar.append(button);
+    if (!toolbar) {
+      toolbar = el("div", undefined, "flow-filters");
+      for (const value of ["all", "changes", "commands", "errors"]) {
+        const button = el("button"); button.dataset.filter = value;
+        button.addEventListener("click", () => { flowFilter = value; visibleCount = 80; render(); }); toolbar.append(button);
+      }
+      const search = el("input"); search.type = "search"; search.placeholder = "파일·명령·내용 검색"; search.setAttribute("aria-label", "실행 기록 검색"); search.value = flowSearch;
+      const update = () => {
+        flowSearch = search.value; visibleCount = 80;
+        if (!searchFrame) searchFrame = requestAnimationFrame(() => { searchFrame = 0; if (search.isConnected) render(); });
+      };
+      search.addEventListener("compositionstart", () => { flowComposing = true; cancelAnimationFrame(searchFrame); searchFrame = 0; });
+      search.addEventListener("compositionend", () => { flowComposing = false; update(); });
+      search.addEventListener("input", event => { if (!flowComposing && !event.isComposing) update(); });
+      toolbar.append(search);
+      const status = el("span", undefined, "flow-search-status muted"); status.setAttribute("role", "status"); toolbar.append(status);
+      graph.append(toolbar);
     }
-    const search = el("input"); search.type = "search"; search.placeholder = "파일·명령 검색"; search.setAttribute("aria-label", "실행 기록 검색"); search.value = flowSearch;
-    search.addEventListener("input", () => { const position = search.selectionStart; flowSearch = search.value; visibleCount = 80; render(); const next = graph.querySelector("input"); next.focus(); if (position !== null) next.setSelectionRange(position, position); }); toolbar.append(search); graph.append(toolbar);
+    for (const [value, label] of [["all", "전체"], ["changes", `파일 변경 ${changes.length}`], ["commands", "명령"], ["errors", `오류 ${errors.length}`]]) {
+      const button = toolbar.querySelector(`[data-filter="${value}"]`); button.textContent = label; button.setAttribute("aria-pressed", String(flowFilter === value));
+    }
+    const search = toolbar.querySelector("input");
+    if (!flowComposing && search.value !== flowSearch) search.value = flowSearch;
     if (nodes.length > 1) {
       const agents = el("div", undefined, "flow-agents");
       for (const node of [{ id: "", label: "모든 에이전트" }, ...nodes]) {
@@ -228,7 +252,9 @@ export async function initExecutions({ api, notice, selectedSession = () => null
       }
       graph.append(agents);
     }
-    const filtered = rows.filter(row => (!flowAgent || row.owner === flowAgent) && (flowFilter === "all" || flowFilter === "changes" && row.changes.length || flowFilter === "errors" && row.span.state === "error" || flowFilter === "commands" && row.span.command) && `${row.span.command || ""} ${row.span.file || ""} ${row.changes.map(change => change.path).join(" ")} ${tool(row.span)}`.toLowerCase().includes(flowSearch.toLowerCase()));
+    const query = flowSearch.normalize("NFC").toLowerCase();
+    const filtered = rows.filter(row => (!flowAgent || row.owner === flowAgent) && (flowFilter === "all" || flowFilter === "changes" && row.changes.length || flowFilter === "errors" && row.span.state === "error" || flowFilter === "commands" && row.span.command) && row.searchText.includes(query));
+    const searchStatus = toolbar.querySelector(".flow-search-status"); searchStatus.hidden = !query; searchStatus.textContent = query ? `검색 결과 ${filtered.length}개` : "";
     graph.append(el("p", rows.some(row => !row.span.start) ? "시각 미기록 항목은 제공자 기록 순서로 표시합니다." : "시간순 기록 · 호출 관계는 실제 연결된 기록만 표시합니다.", "flow-caption muted"));
     if (filtered.length > visibleCount) {
       const more = el("button", `이전 ${Math.min(80, filtered.length - visibleCount)}개 보기 · 총 ${filtered.length}개`);
@@ -287,7 +313,6 @@ export async function initExecutions({ api, notice, selectedSession = () => null
       currentRun = null; execution = row;
     }
     if (!preserve) { flowFilter = "all"; flowSearch = ""; flowAgent = ""; visibleCount = 80; $("#execution-panel").classList.remove("with-inspector"); inspector.hidden = true; selectedSpan = ""; selectedTask = ""; selectedAttempt = -1; }
-    const searchInput = $(".flow-filters input"), searchFocused = document.activeElement === searchInput, searchPosition = searchInput?.selectionStart;
     const detailTop = $("#execution-evidence").scrollTop, filesTop = $(".changed-files")?.scrollTop || 0;
     const top = inspector.scrollTop, expanded = $("#execution-tools details")?.open;
     const outputPositions = [...$("#execution-evidence").querySelectorAll("pre")].map(node => node.scrollTop);
@@ -297,7 +322,6 @@ export async function initExecutions({ api, notice, selectedSession = () => null
       [...$("#execution-evidence").querySelectorAll("pre")].forEach((node, index) => { node.scrollTop = outputPositions[index] ?? 0; });
       inspector.scrollTop = top; $("#execution-evidence").scrollTop = detailTop;
       if ($(".changed-files")) $(".changed-files").scrollTop = filesTop;
-      if (searchFocused && $(".flow-filters input")) { const input = $(".flow-filters input"); input.focus({ preventScroll: true }); if (searchPosition !== null) input.setSelectionRange(searchPosition, searchPosition); }
     }
   }
   async function listing(preferred, preserve = false) {
