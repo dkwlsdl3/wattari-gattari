@@ -139,7 +139,7 @@ export async function runCli(args = process.argv.slice(2), {
   }
   try {
     if (options.command === "version") stdout.write(`${VERSION}\n`);
-    else if (options.command === "serve") return await web({ bridge, cwd, filterCwd: options.cwd ? cwd : undefined, port: options.port, output: stdout });
+    else if (options.command === "serve") return await web({ bridge, cwd, filterCwd: options.cwd ? cwd : undefined, port: options.port, output: stdout, orderStore });
     else if (options.command === "help") stdout.write(`${usage()}\n`);
     else if (options.command === "doctor") return (await doctor({ output: stdout, cwd })).exitCode;
     else if (options.command === "default" && stdin.isTTY && stdout.isTTY) return (await dock({

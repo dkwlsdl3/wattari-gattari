@@ -1,3 +1,6 @@
+import path from "node:path";
+import { DockOrderStore } from "./dock-order.mjs";
+import { applyOverviewOrder, reconcileOverviewOrder, moveOverviewSession } from "./overview.mjs";
 import crypto from "node:crypto";
 import http from "node:http";
 import fs from "node:fs/promises";
@@ -41,14 +44,16 @@ async function body(request, limit = 64 * 1024) {
   return value;
 }
 
+const workspaceOf = session => path.resolve(session.projectCwd || session.cwd);
+
 function publicSession(session) {
   const { id, provider, name, cwd, status, updatedAt } = session;
-  return { id, provider, name, cwd, status, updatedAt, canInstruct: provider === "codex" };
+  return { id, provider, name, cwd, workspace: workspaceOf(session), status, updatedAt, canInstruct: provider === "codex" };
 }
 
 // HTTP is a view/controller only. Native providers keep owning sessions and approval UI.
 export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, port = 4317,
-  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore() } = {}) {
+  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore(), orderStore = new DockOrderStore() } = {}) {
   if (!bridge) throw new TypeError("A session bridge is required");
   const assets = new Map(await Promise.all([...ASSETS].map(async ([route, [file, type]]) =>
     [route, { type, data: await fs.readFile(new URL(`./web/${file}`, import.meta.url)) }])));
@@ -111,12 +116,24 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
       const cookie = request.headers.cookie?.split(/;\s*/).find(value => value.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
       if (!nativeRun && !sameSecret(cookie, token)) throw fail(401, "실행 시 표시된 접속 링크를 열어 주세요.");
       if (closing) throw fail(503, "웹 서버가 종료 중입니다.");
+      const scopeId = url.searchParams.get("session");
+      const scopeSession = scopeId ? (await discover()).sessions.find(row => row.id === scopeId) : null;
+      if (scopeId && !scopeSession) throw fail(404, "세션을 찾을 수 없습니다.");
+      const scopeCwd = scopeSession ? workspaceOf(scopeSession) : cwd;
+      const scopeFolders = scopeSession ? [...new Set([scopeCwd, scopeSession.cwd])] : [cwd];
+      const belongs = row => {
+        if (!scopeSession) return true;
+        const ids = new Set([scopeSession.id, scopeSession.nativeId, scopeSession.sessionId].filter(Boolean));
+        const spans = row.spans ?? row.traceSpans ?? [];
+        return spans.some(span => [span.attributes?.["session.id"], span.attributes?.["gen_ai.conversation.id"]].some(id => ids.has(id)))
+          || row.nodes?.some(node => node.sessions?.some(session => ids.has(session.id)) || node.attempts.some(attempt => ids.has(attempt.worker?.sessionId) || ids.has(attempt.review?.sessionId)));
+      };
       if (request.method === "GET" && url.pathname === "/api/resources") { json(response, 200, sampleResources()); return; }
-      if (request.method === "GET" && url.pathname === "/api/runs") { json(response, 200, { runs: runStore.list(cwd) }); return; }
+      if (request.method === "GET" && url.pathname === "/api/runs") { json(response, 200, { runs: scopeFolders.flatMap(folder => runStore.list(folder)).filter(row => belongs(runStore.read(row.id))) }); return; }
       if (request.method === "POST" && url.pathname === "/api/runs") { json(response, 201, runStore.create(await body(request), cwd)); return; }
       if (runMatch) {
         const row = runStore.read(runMatch[1]);
-        if (row.cwd !== cwd) throw fail(404, "현재 작업 폴더의 실행이 아닙니다.");
+        if (!scopeFolders.includes(row.cwd) || !belongs(row)) throw fail(404, "현재 세션의 실행이 아닙니다.");
         if (request.method === "GET" && !runMatch[2]) { json(response, 200, row); return; }
         if (request.method === "POST") {
           if (runMatch[2] === "traces") { runStore.trace(row.id, await body(request, 4 * 1024 * 1024)); json(response, 200, {}); return; }
@@ -125,15 +142,15 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         }
       }
       if (request.method === "GET" && url.pathname === "/api/executions") {
-        json(response, 200, { executions: executionStore.list(cwd) }); return;
+        json(response, 200, { executions: scopeFolders.flatMap(folder => executionStore.list(folder)).filter(row => belongs(executionStore.read(row.id))) }); return;
       }
       if (request.method === "POST" && url.pathname === "/api/executions") {
-        json(response, 201, executionStore.import(await body(request, 4 * 1024 * 1024), cwd)); return;
+        json(response, 201, executionStore.import(await body(request, 4 * 1024 * 1024), scopeCwd)); return;
       }
       const executionMatch = /^\/api\/executions\/([^/]+)$/.exec(url.pathname);
       if (request.method === "GET" && executionMatch) {
         const row = executionStore.read(executionMatch[1]);
-        if (row.cwd !== cwd) throw fail(404, "현재 작업 폴더의 기록이 아닙니다.");
+        if (!scopeFolders.includes(row.cwd) || !belongs(row)) throw fail(404, "현재 세션의 기록이 아닙니다.");
         json(response, 200, row); return;
       }
       if (request.method === "GET" && url.pathname === "/api/workflows") {
@@ -162,7 +179,34 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
       }
       if (request.method === "GET" && url.pathname === "/api/sessions") {
         const { sessions, warnings } = await discover();
-        json(response, 200, { sessions: sessions.map(publicSession), warnings, cwd }); return;
+        json(response, 200, { sessions: applyOverviewOrder(sessions, orderStore.load()).map(publicSession), warnings, cwd }); return;
+      }
+      const actionMatch = /^\/api\/sessions\/([^/]+)\/(order|rename|archive|connection)$/.exec(url.pathname);
+      if (request.method === "POST" && actionMatch) {
+        const input = await body(request), { sessions } = await discover();
+        const selected = sessions.find(row => row.id === decodeURIComponent(actionMatch[1]));
+        if (!selected) throw fail(404, "세션을 찾을 수 없습니다.");
+        const action = actionMatch[2];
+        if (action === "order") {
+          if (!["up", "down"].includes(input.direction)) throw fail(400, "위 또는 아래 이동을 지정해 주세요.");
+          const workspace = workspaceOf(selected), order = reconcileOverviewOrder(orderStore.load(), sessions);
+          const peers = applyOverviewOrder(sessions, order).filter(row => workspaceOf(row) === workspace).map(row => row.id);
+          const visible = input.visibleIds ?? peers;
+          if (!Array.isArray(visible) || !visible.includes(selected.id) || new Set(visible).size !== visible.length || visible.some(id => !peers.includes(id))) throw fail(400, "같은 폴더의 세션만 이동할 수 있습니다.");
+          // The server's current saved order is authoritative, including during concurrent browser requests.
+          const moved = moveOverviewSession(order, workspace, selected.id, input.direction, peers.filter(id => visible.includes(id)));
+          if (moved) orderStore.saveWorkspace(workspace, moved.get(workspace));
+          json(response, 200, { moved: Boolean(moved), sessions: applyOverviewOrder(sessions, moved ?? order).map(publicSession) }); return;
+        }
+        if (action === "connection") { json(response, 200, await bridge.connection(selected.id, { cwd: filterCwd })); return; }
+        if (action === "rename") {
+          if (typeof input.name !== "string" || !input.name.trim() || input.name.length > 200 || /[\x00-\x1f]/.test(input.name)) throw fail(400, "이름은 줄바꿈 없이 1~200자로 입력해 주세요.");
+          const result = await bridge.rename(selected.id, input.name.trim(), { cwd: filterCwd });
+          snapshot = null; json(response, 200, { result }); return;
+        }
+        if (selected.status === "working" || [...jobs.values()].some(job => !job.finished && job.target === selected.id)) throw fail(409, "작업 중인 세션은 보관할 수 없습니다.");
+        const result = await bridge.archive(selected.id, { cwd: filterCwd });
+        snapshot = null; json(response, 200, { result }); return;
       }
       const match = /^\/api\/sessions\/([^/]+)\/preview$/.exec(url.pathname);
       if (request.method === "GET" && match) {
@@ -203,6 +247,11 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         if (kind === "recover") input.target = node.requests.find(row => row.requestId === input.requestId).sessionId ?? node.sessionId;
         input.commit = flow.commit;
       }
+      let createCwd = cwd;
+      if (kind === "create" && input.workspace !== undefined) {
+        if (input.workspace !== cwd && !(await discover()).sessions.some(row => workspaceOf(row) === input.workspace)) throw fail(400, "목록에 있는 프로젝트 폴더를 선택해 주세요.");
+        createCwd = input.workspace;
+      }
       const job = { operationId: input.operationId, kind, target: input.target, provider: input.provider,
         workflowId: input.workflowId, nodeId: input.nodeId,
         requestId: input.requestId, state: "starting", createdAt: now(), updatedAt: now(), events: [] };
@@ -235,7 +284,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
             cwd: filterCwd, waitTimeoutMs: 30_000, replyTimeoutMs: kind === "instruct" ? 30 * 60_000 : 180_000, onProgress: progress,
           });
           else if (kind === "create") {
-            const created = await bridge.create(input.provider, input.message, { cwd, routing: {}, onProgress: progress });
+            const created = await bridge.create(input.provider, input.message, { cwd: createCwd, routing: {}, onProgress: progress });
             job.result = { provider: created.provider, nativeId: created.nativeId, turnId: created.turnId,
               session: created.session ? publicSession(created.session) : undefined };
             job.target = created.session?.id ?? `${created.provider}:${created.nativeId}`;

@@ -1,4 +1,5 @@
 import { promptWithIssueContext } from "./issue-context.mjs";
+import { nativeSessionCommand } from "./native-launcher.mjs";
 import crypto from "node:crypto";
 
 export class BridgeError extends Error {
@@ -108,6 +109,12 @@ export class SessionBridge {
     const provider = this.#provider(session.provider);
     if (typeof provider.history !== "function") throw new BridgeError("HISTORY_UNAVAILABLE", "이 세션의 대화 기록을 읽을 수 없습니다.");
     return provider.history(session, options);
+  }
+
+  async connection(target, { cwd } = {}) {
+    const { provider, session } = await this.#resolve(target, cwd);
+    const { command, args, cwd: workspace } = await nativeSessionCommand(session, { codexProvider: provider, startDaemon: false });
+    return { command, args, cwd: workspace };
   }
 
   async archive(target, { cwd } = {}) {

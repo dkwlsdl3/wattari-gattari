@@ -311,3 +311,98 @@ test("conversation history resolves an authenticated native identity and passes 
   await f.get(`${route}?cursor=${encodeURIComponent(page.nextCursor)}`);
   assert.deepEqual(seen, [null, "opaque:older"]);
 });
+
+test("web reorders within project folders and shares durable dock ordering across server restarts", async t => {
+  const { DockOrderStore } = await import("../src/dock-order.mjs");
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "waga-proof-web-order-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const file = path.join(directory, "order.json"), orderStore = new DockOrderStore(file);
+  const a = { ...session, id: "codex:a", projectCwd: "/tmp/waga-proof-project", cwd: "/tmp/waga-proof-project/worktree-a" };
+  const b = { ...a, id: "codex:b" }, c = { ...a, id: "claude:c", provider: "claude" };
+  const other = { ...session, id: "codex:other", cwd: "/tmp/waga-proof-other" };
+  const bridge = { discover: async () => ({ sessions: [a, other, b, c], warnings: [] }) };
+  orderStore.saveWorkspace(a.projectCwd, [a.id, "codex:temporarily-absent", b.id, c.id]);
+  const f = await fixture(t, bridge, { orderStore });
+  const route = `/api/sessions/${encodeURIComponent(a.id)}/order`;
+  assert.equal((await f.post(route, { direction: "down", visibleIds: [a.id, other.id] })).status, 400);
+  assert.equal((await f.post(route, { direction: "down", visibleIds: [a.id, a.id] })).status, 400);
+  assert.equal((await f.post(route, { direction: "sideways" })).status, 400);
+  const move = await f.post(route, { direction: "down", visibleIds: [a.id, c.id] });
+  assert.equal(move.status, 200);
+  assert.deepEqual((await move.json()).sessions.map(row => row.id), [c.id, b.id, a.id, other.id]);
+  assert.deepEqual(orderStore.load().get(a.projectCwd), [c.id, "codex:temporarily-absent", b.id, a.id]);
+  const fresh = await fixture(t, bridge, { orderStore: new DockOrderStore(file) });
+  const rows = (await (await fresh.get("/api/sessions")).json()).sessions;
+  assert.deepEqual(rows.map(row => row.id), [c.id, b.id, a.id, other.id]);
+  assert.equal(rows[2].workspace, a.projectCwd);
+  assert.equal((await (await fresh.post(route, { direction: "down" })).json()).moved, false);
+  await fs.writeFile(file, "broken");
+  assert.equal((await fresh.post(route, { direction: "up" })).status, 502);
+  assert.equal(await fs.readFile(file, "utf8"), "broken");
+});
+
+test("session actions target exact identities, validate names and refuse to archive active work", async t => {
+  const calls = [];
+  const f = await fixture(t, {
+    rename: async (...args) => { calls.push(["rename", ...args]); return { name: args[1] }; },
+    archive: async (...args) => { calls.push(["archive", ...args]); return {}; },
+    connection: async (...args) => { calls.push(["connection", ...args]); return { command: "codex", args: ["resume", session.nativeId], cwd: session.cwd }; },
+  });
+  const base = `/api/sessions/${encodeURIComponent(id)}`;
+  assert.equal((await f.post(`${base}/rename`, { name: "\nwrong" })).status, 400);
+  assert.equal((await f.post(`${base}/rename`, { name: " " })).status, 400);
+  assert.equal((await f.post(`${base}/rename`, { name: "  검증 대기  " })).status, 200);
+  assert.equal(calls[0][1], id); assert.equal(calls[0][2], "검증 대기");
+  assert.equal((await f.post(`${base}/connection`, {})).status, 200);
+  assert.equal(calls[1][1], id);
+  assert.equal((await f.post(`${base}/archive`, {})).status, 200);
+  assert.equal(calls[2][1], id);
+  assert.equal((await f.post("/api/sessions/codex%3Amissing/archive", {})).status, 404);
+  const busy = await fixture(t, { discover: async () => ({ sessions: [{ ...session, status: "working" }], warnings: [] }), archive: async () => { throw new Error("must not archive"); } });
+  assert.equal((await busy.post(`${base}/archive`, {})).status, 409);
+});
+
+test("new sessions accept only discovered project folders and retain native defaults", async t => {
+  let received;
+  const f = await fixture(t, { create: async (provider, message, options) => { received = { provider, message, options }; return { provider, nativeId: "new" }; } });
+  const input = { operationId: crypto.randomUUID(), provider: "codex", message: "new work" };
+  assert.equal((await f.post("/api/create", { ...input, workspace: "/unknown" })).status, 400);
+  assert.equal((await f.post("/api/create", { ...input, workspace: session.cwd })).status, 202);
+  await tick(); assert.equal(received.options.cwd, session.cwd); assert.deepEqual(received.options.routing, {});
+});
+
+test("session execution views show only explicit native identity matches across project folders", async t => {
+  const { ExecutionStore } = await import("../src/execution-store.mjs");
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "waga-proof-web-context-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const store = new ExecutionStore(directory);
+  const document = JSON.parse(await fs.readFile(new URL("./fixtures/claude-workflow-otel.json", import.meta.url)));
+  const unlinked = store.import({ document }, session.cwd);
+  const linkedDocument = structuredClone(document);
+  for (const resource of linkedDocument.resourceSpans) for (const scope of resource.scopeSpans) for (const span of scope.spans) {
+    span.attributes = [...(span.attributes ?? []).filter(row => row.key !== "session.id"), { key: "session.id", value: { stringValue: session.nativeId } }];
+  }
+  const linked = store.import({ document: linkedDocument }, session.cwd);
+  const f = await fixture(t, { discover: async () => ({ sessions: [{ ...session, projectCwd: "/tmp/waga-proof-project-root" }], warnings: [] }) }, { cwd: "/tmp/waga-proof-server", executionStore: store });
+  const scope = `?session=${encodeURIComponent(id)}`;
+  assert.deepEqual((await (await f.get(`/api/executions${scope}`)).json()).executions.map(row => row.id), [linked.id]);
+  assert.equal((await f.get(`/api/executions/${linked.id}${scope}`)).status, 200);
+  assert.equal((await f.get(`/api/executions/${unlinked.id}${scope}`)).status, 404);
+  assert.equal((await f.get(`/api/executions/${linked.id}`)).status, 404);
+  assert.equal((await f.get("/api/executions?session=codex%3Amissing")).status, 404);
+});
+
+test("web terminal connection uses native bridge without starting or configuring provider daemons", async t => {
+  const calls = [];
+  const bridge = new SessionBridge({ providers: [{ name: "codex", list: async () => [session],
+    daemonInfo: async options => { calls.push(options); return { status: "running", socketPath: "/tmp/waga-proof.sock" }; },
+    prepareNativeSession: async () => { throw new Error("no policy changes in a command preview"); },
+  }] });
+  const f = await fixture(t, {}, { bridge });
+  const response = await f.post(`/api/sessions/${encodeURIComponent(id)}/connection`, {});
+  assert.equal(response.status, 200);
+  const command = await response.json();
+  assert.deepEqual(command.args.slice(0, 4), ["resume", session.nativeId, "--remote", "unix:///tmp/waga-proof.sock"]);
+  assert.deepEqual(calls, [{ start: false }]);
+  assert.equal((await f.get("/api/sessions")).status, 200);
+});

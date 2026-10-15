@@ -24,7 +24,7 @@ export function nativeAgentsCommand(provider, { cwd = process.cwd() } = {}) {
   return { command, args, cwd: workspace };
 }
 
-export async function nativeSessionCommand(session, { codexProvider = new CodexProvider(), codexExecutionMode = "default" } = {}) {
+export async function nativeSessionCommand(session, { codexProvider = new CodexProvider(), codexExecutionMode = "default", startDaemon = true } = {}) {
   if (!session || !["claude", "codex"].includes(session.provider)) {
     throw Object.assign(new Error("Native session requires a known provider"), { code: "PROVIDER_NOT_FOUND" });
   }
@@ -40,7 +40,7 @@ export async function nativeSessionCommand(session, { codexProvider = new CodexP
     return { command: "claude", args: ["attach", session.nativeId], cwd };
   }
 
-  const daemon = await codexProvider.daemonInfo({ start: true });
+  const daemon = await codexProvider.daemonInfo({ start: startDaemon });
   if (daemon.status !== "running" || typeof daemon.socketPath !== "string" || !path.isAbsolute(daemon.socketPath)) {
     throw Object.assign(new Error("Codex native app-server daemon is unavailable"), { code: "CODEX_DAEMON_UNAVAILABLE" });
   }

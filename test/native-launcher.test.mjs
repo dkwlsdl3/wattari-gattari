@@ -80,3 +80,14 @@ test("failed post-attach permission synchronization blocks F4 selection", async 
   const command = await nativeSessionCommand({ provider: "codex", nativeId: "thread-1", cwd: "/work" }, { codexProvider, codexExecutionMode: "yolo" });
   await assert.rejects(command.afterAttach(), /unsupported/);
 });
+
+test("connection preview never starts a daemon or synchronizes thread policy", async () => {
+  const calls = [];
+  const codexProvider = {
+    async daemonInfo(options) { calls.push(options); return { status: "running", socketPath: "/tmp/native.sock" }; },
+    async prepareNativeSession() { throw new Error("preview cannot change policy"); },
+  };
+  const spec = await nativeSessionCommand({ provider: "codex", nativeId: "proof", cwd: "/tmp/waga-proof" }, { codexProvider, startDaemon: false });
+  assert.deepEqual(calls, [{ start: false }]);
+  assert.deepEqual(spec.args.slice(0, 4), ["resume", "proof", "--remote", "unix:///tmp/native.sock"]);
+});

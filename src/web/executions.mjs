@@ -41,8 +41,11 @@ const states = { error: "오류 기록", returned: "호출 종료", unknown: "�
 const $ = selector => document.querySelector(selector);
 function el(tag, text, className) { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; }
 
-export async function initExecutions({ api, notice }) {
-  let loadVersion = 0, selectedAttempt = -1;
+export async function initExecutions({ api, notice, selectedSession = () => null }) {
+  let loadVersion = 0, listVersion = 0, selectedAttempt = -1, scope = "";
+  const scoped = route => `${route}?session=${encodeURIComponent(scope)}`;
+  const inspector = $(".execution-inspector");
+  $("#close-inspector").addEventListener("click", () => { inspector.hidden = true; });
   let currentRun, workView = true, selectedTask = "", execution, selectedGroup = "", selectedSpan = "", drawnEdges = [], cards = new Map();
   function drawEdges() {
     const graph = $("#execution-graph"); graph.querySelector("svg")?.remove();
@@ -114,7 +117,7 @@ export async function initExecutions({ api, notice }) {
     for (const node of currentRun.nodes) {
       const card = el("button", undefined, `agent-card task-${node.state}`); card.style.gridColumn = String((levels.get(node.id) ?? 0) + 1); card.setAttribute("aria-pressed", String(node === selected));
       card.append(el("small", `${({ plan: "계획", scan: "조사", edit: "수정", verify: "검증" })[node.role]} · ${currentRun.models[node.role]}`, "muted"), el("strong", node.title), el("span", taskStates[node.state]), el("small", `${node.attempts.length}회 실행${node.stalls ? ` · 무진전 ${node.stalls}회` : ""}`, "muted"));
-      cards.set(node.id, card); card.addEventListener("click", () => { selectedTask = node.id; selectedAttempt = -1; renderRun(); }); graph.append(card);
+      cards.set(node.id, card); card.addEventListener("click", () => { selectedTask = node.id; selectedAttempt = -1; inspector.hidden = false; renderRun(); }); graph.append(card);
     }
     drawEdges(); calls.append(el("h2", "실행 근거"));
     selected.attempts.forEach((attempt, index) => { const button = el("button", `시도 ${index + 1} · ${attempt.passed ? "통과" : "실패"}`, "trace-call"); button.addEventListener("click", () => { selectedAttempt = index; attemptEvidence(selected, attempt); }); calls.append(button); });
@@ -135,7 +138,7 @@ export async function initExecutions({ api, notice }) {
   function render() {
     if (currentRun && workView) { renderRun(); return; }
     const graph = $("#execution-graph"), calls = $("#execution-tools"), detail = $("#execution-evidence"); graph.replaceChildren(); calls.replaceChildren(); detail.replaceChildren();
-    if (!execution) { $("#execution-note").textContent = "실행 기록이 없습니다. Claude Code의 OTLP JSON 기록을 가져오세요."; return; }
+    if (!execution) { $("#execution-note").textContent = "이 세션에 연결된 실행 기록이 없습니다. 세션 ID가 기록된 OTLP JSON을 가져오면 호출 관계를 표시합니다."; return; }
     const { nodes, edges } = executionGraph(execution.spans);
     if (currentRun) for (const group of nodes) {
       const nativeId = group.spans[0]?.attributes["session.id"];
@@ -154,7 +157,7 @@ export async function initExecutions({ api, notice }) {
       card.style.gridColumn = String((levels.get(node.id) ?? 0) + 1); cards.set(node.id, card);
       const tools = node.spans.filter(span => tool(span));
       card.append(el("small", node.callers.length ? `${node.callers.join(", ")} → 호출` : "호출자 미기록", "muted"), el("strong", node.label), el("span", [...new Set(tools.map(tool))].join(" · ") || "모델 요청"), el("small", `${tools.length}회 도구 호출${node.spans.some(span => span.state === "error") ? " · 오류 있음" : ""}`, "muted"));
-      card.addEventListener("click", () => { selectedGroup = node.id; selectedSpan = ""; render(); }); graph.append(card);
+      card.addEventListener("click", () => { selectedGroup = node.id; selectedSpan = ""; inspector.hidden = false; render(); }); graph.append(card);
     }
     drawEdges();
     if (!group) { calls.append(el("p", "표시할 도구·모델 요청이 없습니다.")); return; }
@@ -172,28 +175,35 @@ export async function initExecutions({ api, notice }) {
   async function load(id, preserve = false) {
     const version = ++loadVersion;
     if (id?.startsWith("run:")) {
-      const row = await api(`runs/${id.slice(4)}`);
+      const row = await api(scoped(`runs/${id.slice(4)}`));
       if (version !== loadVersion) return;
       if (preserve && currentRun?.id === row.id && currentRun.revision === row.revision) return;
       currentRun = row; execution = { spans: row.traceSpans || [], title: row.title, includesContent: row.includeContent };
-    } else { const row = id ? await api(`executions/${id}`) : null; if (version !== loadVersion) return; currentRun = null; execution = row; }
-    if (!preserve) { selectedGroup = ""; selectedSpan = ""; selectedTask = ""; selectedAttempt = -1; }
+    } else { const row = id ? await api(scoped(`executions/${id}`)) : null; if (version !== loadVersion) return; currentRun = null; execution = row; }
+    if (!preserve) { inspector.hidden = true; selectedGroup = ""; selectedSpan = ""; selectedTask = ""; selectedAttempt = -1; }
     runControls(); render();
   }
   async function listing(preferred, preserve = false) {
+    const version = ++listVersion;
+    const nextScope = selectedSession()?.id || "";
+    if (scope !== nextScope) { scope = nextScope; preferred = ""; preserve = false; loadVersion++; currentRun = null; execution = null; $("#execution-select").replaceChildren(); inspector.hidden = true; runControls(); render(); }
+    if (!scope) { $("#execution-note").textContent = "왼쪽 목록에서 세션을 선택하세요."; return; }
     const picker = $("#execution-select"), startedWith = picker.value;
-    const [{ executions }, { runs }] = await Promise.all([api("executions"), api("runs")]);
-    if (preserve && picker.value !== startedWith) return;
+    const [{ executions }, { runs }] = await Promise.all([api(scoped("executions")), api(scoped("runs"))]);
+    if (version !== listVersion || (preserve && picker.value !== startedWith)) return;
     const selected = preferred || picker.value; picker.replaceChildren();
     for (const run of runs) { const option = el("option", `${run.title} · ${taskStates[run.state]}`); option.value = `run:${run.id}`; picker.append(option); }
     for (const run of executions) { const option = el("option", `${run.title} · ${new Date(run.importedAt).toLocaleString("ko-KR")}`); option.value = run.id; picker.append(option); }
     const ids = [...runs.map(row => `run:${row.id}`), ...executions.map(row => row.id)]; picker.value = ids.includes(selected) ? selected : ids[0] || "";
-    picker.disabled = !ids.length;
+    picker.disabled = !ids.length; picker.hidden = ids.length < 2;
     if (!preserve || currentRun || picker.value !== selected) await load(picker.value, preserve);
   }
   async function control(action, extra = {}) {
     if (!currentRun) return;
-    try { currentRun = await api(`runs/${currentRun.id}/control`, { action, ...extra }); runControls(); render(); }
+    const requestedScope = scope, runId = currentRun.id;
+    try { const row = await api(scoped(`runs/${runId}/control`), { action, ...extra });
+      if (scope !== requestedScope || currentRun?.id !== runId) return;
+      currentRun = row; runControls(); render(); }
     catch (error) { notice(error.message); }
   }
   for (const action of ["pause", "resume", "stop", "approve"]) $(`#run-${action}`).addEventListener("click", () => { void control(action); });
@@ -213,10 +223,10 @@ export async function initExecutions({ api, notice }) {
     try {
       const file = $("#trace-file").files[0]; if (!file || file.size > 4 * 1024 * 1024) throw new Error("4MiB 이하 JSON 파일을 선택해 주세요.");
       const document = JSON.parse(await file.text());
-      const run = await api("executions", { document, includeContent: $("#trace-content").checked });
+      const run = await api(scoped("executions"), { document, includeContent: $("#trace-content").checked });
       await listing(run.id); $("#import-dialog").close(); $("#import-form").reset(); notice();
     } catch (error) { notice(error.message); } finally { button.disabled = false; }
   });
   mode(false);
-  return () => listing(execution?.id);
+  return () => listing(currentRun ? `run:${currentRun.id}` : execution?.id);
 }
