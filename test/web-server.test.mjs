@@ -236,3 +236,27 @@ test("workflow accepts real repository commits and new sessions bind only to the
   const job = await (await f.get(`/api/operations/${operationId}`)).json();
   assert.equal(job.target, id); assert.equal(job.state, "created");
 });
+
+test("execution imports require authentication, preserve private content opt-in, and survive server restart", async t => {
+  const { ExecutionStore } = await import("../src/execution-store.mjs");
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "waga-proof-web-execution-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const executionStore = new ExecutionStore(directory), cwd = "/tmp/waga-proof-web-execution";
+  const document = JSON.parse(await fs.readFile(new URL("./fixtures/claude-workflow-otel.json", import.meta.url)));
+  const f = await fixture(t, {}, { executionStore, cwd });
+  assert.equal((await f.request("/api/executions")).status, 401);
+  assert.equal((await f.post("/api/executions", { document }, { Origin: "http://evil.test" })).status, 403);
+  const imported = await f.post("/api/executions", { document }); assert.equal(imported.status, 201);
+  const row = await imported.json(); assert.equal(row.includesContent, false);
+  assert.ok(!row.spans.some(span => span.events || span.command));
+  assert.equal((await f.get("/executions.mjs")).status, 200);
+  await f.web.close();
+  const second = await fixture(t, {}, { executionStore: new ExecutionStore(directory), cwd });
+  assert.equal((await (await second.get("/api/executions")).json()).executions[0].id, row.id);
+  assert.deepEqual(await (await second.get(`/api/executions/${row.id}`)).json(), row);
+  const other = await fixture(t, {}, { executionStore, cwd: "/tmp/waga-proof-other" });
+  assert.equal((await other.get(`/api/executions/${row.id}`)).status, 404);
+  assert.deepEqual((await (await other.get("/api/executions")).json()).executions, []);
+  assert.equal((await second.post("/api/executions", { document: {} })).status, 400);
+  assert.equal((await second.post("/api/executions", { document, includeContent: true })).status, 201);
+});

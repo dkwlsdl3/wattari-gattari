@@ -3,11 +3,13 @@ import http from "node:http";
 import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { ExecutionStore } from "./execution-store.mjs";
 import { WorkflowStore } from "./workflow-store.mjs";
 
 const ASSETS = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
   ["/conversation.mjs", ["conversation.mjs", "text/javascript; charset=utf-8"]],
+  ["/executions.mjs", ["executions.mjs", "text/javascript; charset=utf-8"]],
   ["/app.mjs", ["app.mjs", "text/javascript; charset=utf-8"]],
   ["/style.css", ["style.css", "text/css; charset=utf-8"]],
 ]);
@@ -20,13 +22,13 @@ function sameSecret(left, right) {
     && crypto.timingSafeEqual(Buffer.from(left), Buffer.from(right));
 }
 
-async function body(request) {
+async function body(request, limit = 64 * 1024) {
   if (request.headers["content-type"]?.split(";", 1)[0] !== "application/json") throw fail(415, "JSON 요청이 필요합니다.");
   const pieces = [];
   let size = 0;
   for await (const piece of request) {
     size += piece.length;
-    if (size > 64 * 1024) throw fail(413, "입력이 너무 큽니다.");
+    if (size > limit) throw fail(413, "입력이 너무 큽니다.");
     pieces.push(piece);
   }
   let value;
@@ -43,7 +45,7 @@ function publicSession(session) {
 
 // HTTP is a view/controller only. Native providers keep owning sessions and approval UI.
 export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, port = 4317,
-  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore() } = {}) {
+  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore() } = {}) {
   if (!bridge) throw new TypeError("A session bridge is required");
   const assets = new Map(await Promise.all([...ASSETS].map(async ([route, [file, type]]) =>
     [route, { type, data: await fs.readFile(new URL(`./web/${file}`, import.meta.url)) }])));
@@ -102,6 +104,18 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
       const cookie = request.headers.cookie?.split(/;\s*/).find(value => value.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
       if (!sameSecret(cookie, token)) throw fail(401, "실행 시 표시된 접속 링크를 열어 주세요.");
       if (closing) throw fail(503, "웹 서버가 종료 중입니다.");
+      if (request.method === "GET" && url.pathname === "/api/executions") {
+        json(response, 200, { executions: executionStore.list(cwd) }); return;
+      }
+      if (request.method === "POST" && url.pathname === "/api/executions") {
+        json(response, 201, executionStore.import(await body(request, 4 * 1024 * 1024), cwd)); return;
+      }
+      const executionMatch = /^\/api\/executions\/([^/]+)$/.exec(url.pathname);
+      if (request.method === "GET" && executionMatch) {
+        const row = executionStore.read(executionMatch[1]);
+        if (row.cwd !== cwd) throw fail(404, "현재 작업 폴더의 기록이 아닙니다.");
+        json(response, 200, row); return;
+      }
       if (request.method === "GET" && url.pathname === "/api/workflows") {
         json(response, 200, { workflows: workflowStore.list(cwd) }); return;
       }

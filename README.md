@@ -65,6 +65,12 @@ discovery, bounded latest-message previews, `ask`, and request recovery with the
 New work uses provider defaults in the configured directory without calling LLR.
 Existing-session queries remain untrusted peer messages, and approvals stay in the native UI.
 
+The default **실행 그래프** view imports Claude Code OTLP JSON snapshots and displays
+observed main/agent call edges, tool outputs and diffs. A returned tool call is never
+classified as a passing check. This is file import, with live collection still pending;
+see [record format and proof boundaries](docs/web-executions.md).
+The **세션 대화** view provides the stage and conversation features below.
+
 Create a work graph with **＋ 작업**, then connect native sessions to requirements,
 implementation, verification, independent review, and integration stages. Selecting a
 stage opens a wide central conversation below the compact stage graph. Native previews

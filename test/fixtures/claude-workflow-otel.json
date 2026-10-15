@@ -1,0 +1,2180 @@
+{
+  "resourceSpans": [
+    {
+      "scopeSpans": [
+        {
+          "spans": [
+            {
+              "traceId": "1326a5c18f1b61c69947aaceeddd7236",
+              "spanId": "ec822ae0c7f8c740",
+              "parentSpanId": "3731da1b9c975bb2",
+              "name": "claude_code.tool.blocked_on_user",
+              "kind": 1,
+              "startTimeUnixNano": "1792024950004000000",
+              "endTimeUnixNano": "1792024950008541984",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "1326a5c18f1b61c69947aaceeddd7236",
+              "spanId": "4cbdffc6271db791",
+              "parentSpanId": "3731da1b9c975bb2",
+              "name": "claude_code.tool.execution",
+              "kind": 1,
+              "startTimeUnixNano": "1792024950008000000",
+              "endTimeUnixNano": "1792024950026690638",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "1326a5c18f1b61c69947aaceeddd7236",
+              "spanId": "3731da1b9c975bb2",
+              "name": "claude_code.tool",
+              "kind": 1,
+              "startTimeUnixNano": "1792024950004000000",
+              "endTimeUnixNano": "1792024950027551496",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "tool_name",
+                  "value": {
+                    "stringValue": "Skill"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "Skill"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "8799194cbd7845fd8f188400d1e3cd8f",
+              "spanId": "40c30c2426bb5752",
+              "parentSpanId": "ea5a68346c80e6d7",
+              "name": "claude_code.tool.blocked_on_user",
+              "kind": 1,
+              "startTimeUnixNano": "1792024950368000000",
+              "endTimeUnixNano": "1792024950374109048",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "73eab16e94011cc547ba4f0c13747031",
+              "spanId": "0573fde4a407d284",
+              "name": "claude_code.llm_request",
+              "kind": 1,
+              "startTimeUnixNano": "1792024948866000000",
+              "endTimeUnixNano": "1792024950400185863",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": 2
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": 221
+                  }
+                },
+                {
+                  "key": "cache_read_tokens",
+                  "value": {
+                    "intValue": 0
+                  }
+                },
+                {
+                  "key": "cache_creation_tokens",
+                  "value": {
+                    "intValue": 17613
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [
+                {
+                  "attributes": [],
+                  "name": "gen_ai.request.attempt",
+                  "timeUnixNano": "1792024948921319997",
+                  "droppedAttributesCount": 0
+                }
+              ],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "8799194cbd7845fd8f188400d1e3cd8f",
+              "spanId": "72edc8e4961b4f99",
+              "parentSpanId": "ea5a68346c80e6d7",
+              "name": "claude_code.tool.execution",
+              "kind": 1,
+              "startTimeUnixNano": "1792024950374000000",
+              "endTimeUnixNano": "1792024954229903647",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "8799194cbd7845fd8f188400d1e3cd8f",
+              "spanId": "ea5a68346c80e6d7",
+              "name": "claude_code.tool",
+              "kind": 1,
+              "startTimeUnixNano": "1792024950368000000",
+              "endTimeUnixNano": "1792024954230276166",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "tool_name",
+                  "value": {
+                    "stringValue": "Bash"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "Bash"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "full_command",
+                  "value": {
+                    "stringValue": "node sum.test.mjs; echo \"EXIT=$?\""
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [
+                {
+                  "attributes": [
+                    {
+                      "key": "bash_command",
+                      "value": {
+                        "stringValue": "node sum.test.mjs; echo \"EXIT=$?\""
+                      }
+                    },
+                    {
+                      "key": "output",
+                      "value": {
+                        "stringValue": "node:internal/modules/run_main:107\n    triggerUncaughtException(\n    ^\n\nAssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n-1 !== 5\n\n    at file:///tmp/waga-proof-workflow-capture/sum.test.mjs:3:8\n    at ModuleJob.run (node:internal/modules/esm/module_job:437:25)\n    at async node:internal/modules/esm/loader:639:26\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: -1,\n  expected: 5,\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n\nNode.js v24.15.0\nEXIT=1"
+                      }
+                    }
+                  ],
+                  "name": "tool.output",
+                  "timeUnixNano": "1792024954230168678",
+                  "droppedAttributesCount": 0
+                }
+              ],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "7c80e8b93a9d6824",
+              "parentSpanId": "5b076ae4b1b4fc34",
+              "name": "claude_code.tool.blocked_on_user",
+              "kind": 1,
+              "startTimeUnixNano": "1792024959960000000",
+              "endTimeUnixNano": "1792024959961431923",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "f26f170dc8abf91b",
+              "parentSpanId": "5b076ae4b1b4fc34",
+              "name": "claude_code.tool.execution",
+              "kind": 1,
+              "startTimeUnixNano": "1792024959961000000",
+              "endTimeUnixNano": "1792024959965947666",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "5b076ae4b1b4fc34",
+              "name": "claude_code.tool",
+              "kind": 1,
+              "startTimeUnixNano": "1792024959960000000",
+              "endTimeUnixNano": "1792024959966632098",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "tool_name",
+                  "value": {
+                    "stringValue": "Workflow"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "Workflow"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "7620cbd3aeaaf26c24a51a13ae0c569f",
+              "spanId": "9ca84e0d086e6f7d",
+              "name": "claude_code.llm_request",
+              "kind": 1,
+              "startTimeUnixNano": "1792024954251000000",
+              "endTimeUnixNano": "1792024959973467040",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": 2
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": 1382
+                  }
+                },
+                {
+                  "key": "cache_read_tokens",
+                  "value": {
+                    "intValue": 17613
+                  }
+                },
+                {
+                  "key": "cache_creation_tokens",
+                  "value": {
+                    "intValue": 6755
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [
+                {
+                  "attributes": [],
+                  "name": "gen_ai.request.attempt",
+                  "timeUnixNano": "1792024954254876887",
+                  "droppedAttributesCount": 0
+                }
+              ],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "2ee022375e064981",
+              "parentSpanId": "0e81c4d6d271a1fc",
+              "name": "claude_code.tool.blocked_on_user",
+              "kind": 1,
+              "startTimeUnixNano": "1792024961317000000",
+              "endTimeUnixNano": "1792024961399335400",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "a4dcd6c56af52c9a6"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "880179556aa1ea32",
+              "parentSpanId": "0e81c4d6d271a1fc",
+              "name": "claude_code.tool.execution",
+              "kind": 1,
+              "startTimeUnixNano": "1792024961399000000",
+              "endTimeUnixNano": "1792024961406211147",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "a4dcd6c56af52c9a6"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "0e81c4d6d271a1fc",
+              "parentSpanId": "f26f170dc8abf91b",
+              "name": "claude_code.tool",
+              "kind": 1,
+              "startTimeUnixNano": "1792024961317000000",
+              "endTimeUnixNano": "1792024961407013849",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "tool_name",
+                  "value": {
+                    "stringValue": "Read"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "Read"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "a4dcd6c56af52c9a6"
+                  }
+                },
+                {
+                  "key": "file_path",
+                  "value": {
+                    "stringValue": "/tmp/waga-proof-workflow-capture/sum.mjs"
+                  }
+                },
+                {
+                  "key": "agent_id",
+                  "value": {
+                    "stringValue": "a4dcd6c56af52c9a6"
+                  }
+                },
+                {
+                  "key": "workflow.run_id",
+                  "value": {
+                    "stringValue": "wf_0d5db447-fb7"
+                  }
+                },
+                {
+                  "key": "workflow.name",
+                  "value": {
+                    "stringValue": "diagnose-fix-sum"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [
+                {
+                  "attributes": [
+                    {
+                      "key": "file_path",
+                      "value": {
+                        "stringValue": "/tmp/waga-proof-workflow-capture/sum.mjs"
+                      }
+                    },
+                    {
+                      "key": "content",
+                      "value": {
+                        "stringValue": "export const sum = (a, b) => a - b;\n"
+                      }
+                    }
+                  ],
+                  "name": "tool.output",
+                  "timeUnixNano": "1792024961406807422",
+                  "droppedAttributesCount": 0
+                }
+              ],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "e8c6a8266ec951ce7abe2255367dbd48",
+              "spanId": "75539305de63b4bb",
+              "name": "claude_code.llm_request",
+              "kind": 1,
+              "startTimeUnixNano": "1792024959987000000",
+              "endTimeUnixNano": "1792024961453142299",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": 2
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": 217
+                  }
+                },
+                {
+                  "key": "cache_read_tokens",
+                  "value": {
+                    "intValue": 24368
+                  }
+                },
+                {
+                  "key": "cache_creation_tokens",
+                  "value": {
+                    "intValue": 2035
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [
+                {
+                  "attributes": [],
+                  "name": "gen_ai.request.attempt",
+                  "timeUnixNano": "1792024959989889870",
+                  "droppedAttributesCount": 0
+                }
+              ],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "6957ed89ee4e8eac",
+              "parentSpanId": "2aa0714e3f850685",
+              "name": "claude_code.tool.blocked_on_user",
+              "kind": 1,
+              "startTimeUnixNano": "1792024961570000000",
+              "endTimeUnixNano": "1792024961588051622",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "a4dcd6c56af52c9a6"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "3ac6ab7d684dc301",
+              "parentSpanId": "f26f170dc8abf91b",
+              "name": "claude_code.llm_request",
+              "kind": 1,
+              "startTimeUnixNano": "1792024960382000000",
+              "endTimeUnixNano": "1792024961596974230",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "a4dcd6c56af52c9a6"
+                  }
+                },
+                {
+                  "key": "agent_id",
+                  "value": {
+                    "stringValue": "a4dcd6c56af52c9a6"
+                  }
+                },
+                {
+                  "key": "workflow.run_id",
+                  "value": {
+                    "stringValue": "wf_0d5db447-fb7"
+                  }
+                },
+                {
+                  "key": "workflow.name",
+                  "value": {
+                    "stringValue": "diagnose-fix-sum"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": 2
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": 141
+                  }
+                },
+                {
+                  "key": "cache_read_tokens",
+                  "value": {
+                    "intValue": 0
+                  }
+                },
+                {
+                  "key": "cache_creation_tokens",
+                  "value": {
+                    "intValue": 10058
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [
+                {
+                  "attributes": [],
+                  "name": "gen_ai.request.attempt",
+                  "timeUnixNano": "1792024960384507332",
+                  "droppedAttributesCount": 0
+                }
+              ],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "bb8264d1020af306",
+              "parentSpanId": "2aa0714e3f850685",
+              "name": "claude_code.tool.execution",
+              "kind": 1,
+              "startTimeUnixNano": "1792024961589000000",
+              "endTimeUnixNano": "1792024961600422581",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "a4dcd6c56af52c9a6"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "2aa0714e3f850685",
+              "parentSpanId": "f26f170dc8abf91b",
+              "name": "claude_code.tool",
+              "kind": 1,
+              "startTimeUnixNano": "1792024961570000000",
+              "endTimeUnixNano": "1792024961600378228",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "tool_name",
+                  "value": {
+                    "stringValue": "Read"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "Read"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "a4dcd6c56af52c9a6"
+                  }
+                },
+                {
+                  "key": "file_path",
+                  "value": {
+                    "stringValue": "/tmp/waga-proof-workflow-capture/sum.test.mjs"
+                  }
+                },
+                {
+                  "key": "agent_id",
+                  "value": {
+                    "stringValue": "a4dcd6c56af52c9a6"
+                  }
+                },
+                {
+                  "key": "workflow.run_id",
+                  "value": {
+                    "stringValue": "wf_0d5db447-fb7"
+                  }
+                },
+                {
+                  "key": "workflow.name",
+                  "value": {
+                    "stringValue": "diagnose-fix-sum"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [
+                {
+                  "attributes": [
+                    {
+                      "key": "file_path",
+                      "value": {
+                        "stringValue": "/tmp/waga-proof-workflow-capture/sum.test.mjs"
+                      }
+                    },
+                    {
+                      "key": "content",
+                      "value": {
+                        "stringValue": "import assert from \"node:assert/strict\";\nimport { sum } from \"./sum.mjs\";\nassert.equal(sum(2, 3), 5);\nconsole.log(\"SUM_CHECK_OK\");\n"
+                      }
+                    }
+                  ],
+                  "name": "tool.output",
+                  "timeUnixNano": "1792024961600316527",
+                  "droppedAttributesCount": 0
+                }
+              ],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "84adbfb40bb91fa6",
+              "parentSpanId": "0a5542f9024d2cfa",
+              "name": "claude_code.tool.blocked_on_user",
+              "kind": 1,
+              "startTimeUnixNano": "1792024962888000000",
+              "endTimeUnixNano": "1792024962889036703",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "a4dcd6c56af52c9a6"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "9f728798859879e5",
+              "parentSpanId": "0a5542f9024d2cfa",
+              "name": "claude_code.tool.execution",
+              "kind": 1,
+              "startTimeUnixNano": "1792024962889000000",
+              "endTimeUnixNano": "1792024962889416831",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "a4dcd6c56af52c9a6"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "0a5542f9024d2cfa",
+              "parentSpanId": "f26f170dc8abf91b",
+              "name": "claude_code.tool",
+              "kind": 1,
+              "startTimeUnixNano": "1792024962888000000",
+              "endTimeUnixNano": "1792024962889730407",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "tool_name",
+                  "value": {
+                    "stringValue": "StructuredOutput"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "StructuredOutput"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "a4dcd6c56af52c9a6"
+                  }
+                },
+                {
+                  "key": "agent_id",
+                  "value": {
+                    "stringValue": "a4dcd6c56af52c9a6"
+                  }
+                },
+                {
+                  "key": "workflow.run_id",
+                  "value": {
+                    "stringValue": "wf_0d5db447-fb7"
+                  }
+                },
+                {
+                  "key": "workflow.name",
+                  "value": {
+                    "stringValue": "diagnose-fix-sum"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "d1bd23ad51203a5b",
+              "parentSpanId": "f26f170dc8abf91b",
+              "name": "claude_code.llm_request",
+              "kind": 1,
+              "startTimeUnixNano": "1792024961614000000",
+              "endTimeUnixNano": "1792024962904363808",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "a4dcd6c56af52c9a6"
+                  }
+                },
+                {
+                  "key": "agent_id",
+                  "value": {
+                    "stringValue": "a4dcd6c56af52c9a6"
+                  }
+                },
+                {
+                  "key": "workflow.run_id",
+                  "value": {
+                    "stringValue": "wf_0d5db447-fb7"
+                  }
+                },
+                {
+                  "key": "workflow.name",
+                  "value": {
+                    "stringValue": "diagnose-fix-sum"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": 2
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": 201
+                  }
+                },
+                {
+                  "key": "cache_read_tokens",
+                  "value": {
+                    "intValue": 10058
+                  }
+                },
+                {
+                  "key": "cache_creation_tokens",
+                  "value": {
+                    "intValue": 340
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [
+                {
+                  "attributes": [],
+                  "name": "gen_ai.request.attempt",
+                  "timeUnixNano": "1792024961616092956",
+                  "droppedAttributesCount": 0
+                }
+              ],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "174a1b31638bc12f",
+              "parentSpanId": "fdfd18a86a2ed576",
+              "name": "claude_code.tool.blocked_on_user",
+              "kind": 1,
+              "startTimeUnixNano": "1792024964162000000",
+              "endTimeUnixNano": "1792024964165530783",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "c4bb37f5d7e7ebf4",
+              "parentSpanId": "fdfd18a86a2ed576",
+              "name": "claude_code.tool.execution",
+              "kind": 1,
+              "startTimeUnixNano": "1792024964166000000",
+              "endTimeUnixNano": "1792024964167234681",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "fdfd18a86a2ed576",
+              "parentSpanId": "f26f170dc8abf91b",
+              "name": "claude_code.tool",
+              "kind": 1,
+              "startTimeUnixNano": "1792024964162000000",
+              "endTimeUnixNano": "1792024964166992724",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "tool_name",
+                  "value": {
+                    "stringValue": "Read"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "Read"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                },
+                {
+                  "key": "file_path",
+                  "value": {
+                    "stringValue": "/tmp/waga-proof-workflow-capture/sum.mjs"
+                  }
+                },
+                {
+                  "key": "agent_id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                },
+                {
+                  "key": "workflow.run_id",
+                  "value": {
+                    "stringValue": "wf_0d5db447-fb7"
+                  }
+                },
+                {
+                  "key": "workflow.name",
+                  "value": {
+                    "stringValue": "diagnose-fix-sum"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [
+                {
+                  "attributes": [
+                    {
+                      "key": "file_path",
+                      "value": {
+                        "stringValue": "/tmp/waga-proof-workflow-capture/sum.mjs"
+                      }
+                    },
+                    {
+                      "key": "content",
+                      "value": {
+                        "stringValue": "export const sum = (a, b) => a - b;\n"
+                      }
+                    }
+                  ],
+                  "name": "tool.output",
+                  "timeUnixNano": "1792024964166947810",
+                  "droppedAttributesCount": 0
+                }
+              ],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "c6c7ccbc60639d9c",
+              "parentSpanId": "f26f170dc8abf91b",
+              "name": "claude_code.llm_request",
+              "kind": 1,
+              "startTimeUnixNano": "1792024962976000000",
+              "endTimeUnixNano": "1792024964178838165",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                },
+                {
+                  "key": "agent_id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                },
+                {
+                  "key": "workflow.run_id",
+                  "value": {
+                    "stringValue": "wf_0d5db447-fb7"
+                  }
+                },
+                {
+                  "key": "workflow.name",
+                  "value": {
+                    "stringValue": "diagnose-fix-sum"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": 2
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": 139
+                  }
+                },
+                {
+                  "key": "cache_read_tokens",
+                  "value": {
+                    "intValue": 0
+                  }
+                },
+                {
+                  "key": "cache_creation_tokens",
+                  "value": {
+                    "intValue": 10180
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [
+                {
+                  "attributes": [],
+                  "name": "gen_ai.request.attempt",
+                  "timeUnixNano": "1792024962978257343",
+                  "droppedAttributesCount": 0
+                }
+              ],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "0746aca340b4e44d",
+              "parentSpanId": "9005630924c9dd22",
+              "name": "claude_code.tool.blocked_on_user",
+              "kind": 1,
+              "startTimeUnixNano": "1792024965172000000",
+              "endTimeUnixNano": "1792024965177373955",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "c756303131403ada",
+              "parentSpanId": "f26f170dc8abf91b",
+              "name": "claude_code.llm_request",
+              "kind": 1,
+              "startTimeUnixNano": "1792024964189000000",
+              "endTimeUnixNano": "1792024965185021954",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                },
+                {
+                  "key": "agent_id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                },
+                {
+                  "key": "workflow.run_id",
+                  "value": {
+                    "stringValue": "wf_0d5db447-fb7"
+                  }
+                },
+                {
+                  "key": "workflow.name",
+                  "value": {
+                    "stringValue": "diagnose-fix-sum"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": 2
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": 146
+                  }
+                },
+                {
+                  "key": "cache_read_tokens",
+                  "value": {
+                    "intValue": 10180
+                  }
+                },
+                {
+                  "key": "cache_creation_tokens",
+                  "value": {
+                    "intValue": 214
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [
+                {
+                  "attributes": [],
+                  "name": "gen_ai.request.attempt",
+                  "timeUnixNano": "1792024964191060907",
+                  "droppedAttributesCount": 0
+                }
+              ],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "65ddf6733d583c64",
+              "parentSpanId": "9005630924c9dd22",
+              "name": "claude_code.tool.execution",
+              "kind": 1,
+              "startTimeUnixNano": "1792024965177000000",
+              "endTimeUnixNano": "1792024965203282905",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "9005630924c9dd22",
+              "parentSpanId": "f26f170dc8abf91b",
+              "name": "claude_code.tool",
+              "kind": 1,
+              "startTimeUnixNano": "1792024965172000000",
+              "endTimeUnixNano": "1792024965204137345",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "tool_name",
+                  "value": {
+                    "stringValue": "Edit"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "Edit"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                },
+                {
+                  "key": "file_path",
+                  "value": {
+                    "stringValue": "/tmp/waga-proof-workflow-capture/sum.mjs"
+                  }
+                },
+                {
+                  "key": "agent_id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                },
+                {
+                  "key": "workflow.run_id",
+                  "value": {
+                    "stringValue": "wf_0d5db447-fb7"
+                  }
+                },
+                {
+                  "key": "workflow.name",
+                  "value": {
+                    "stringValue": "diagnose-fix-sum"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [
+                {
+                  "attributes": [
+                    {
+                      "key": "file_path",
+                      "value": {
+                        "stringValue": "/tmp/waga-proof-workflow-capture/sum.mjs"
+                      }
+                    },
+                    {
+                      "key": "diff",
+                      "value": {
+                        "stringValue": "[{\"oldStart\":1,\"oldLines\":1,\"newStart\":1,\"newLines\":1,\"lines\":[\"-export const sum = (a, b) => a - b;\",\"+export const sum = (a, b) => a + b;\"]}]"
+                      }
+                    }
+                  ],
+                  "name": "tool.output",
+                  "timeUnixNano": "1792024965203943656",
+                  "droppedAttributesCount": 0
+                }
+              ],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "0af9058b3b892401",
+              "parentSpanId": "9402acb9f92a814c",
+              "name": "claude_code.tool.blocked_on_user",
+              "kind": 1,
+              "startTimeUnixNano": "1792024966253000000",
+              "endTimeUnixNano": "1792024966256530386",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "55f4a7f41c547119",
+              "parentSpanId": "9402acb9f92a814c",
+              "name": "claude_code.tool.execution",
+              "kind": 1,
+              "startTimeUnixNano": "1792024966256000000",
+              "endTimeUnixNano": "1792024966257443699",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "9402acb9f92a814c",
+              "parentSpanId": "f26f170dc8abf91b",
+              "name": "claude_code.tool",
+              "kind": 1,
+              "startTimeUnixNano": "1792024966252000000",
+              "endTimeUnixNano": "1792024966257843074",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "tool_name",
+                  "value": {
+                    "stringValue": "StructuredOutput"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "StructuredOutput"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                },
+                {
+                  "key": "agent_id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                },
+                {
+                  "key": "workflow.run_id",
+                  "value": {
+                    "stringValue": "wf_0d5db447-fb7"
+                  }
+                },
+                {
+                  "key": "workflow.name",
+                  "value": {
+                    "stringValue": "diagnose-fix-sum"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "c44e6c25706426bab98b26937b6adb90",
+              "spanId": "2d75abd4ee110ef7",
+              "parentSpanId": "f26f170dc8abf91b",
+              "name": "claude_code.llm_request",
+              "kind": 1,
+              "startTimeUnixNano": "1792024965234000000",
+              "endTimeUnixNano": "1792024966278220608",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                },
+                {
+                  "key": "agent_id",
+                  "value": {
+                    "stringValue": "ab15d6764aaf24643"
+                  }
+                },
+                {
+                  "key": "workflow.run_id",
+                  "value": {
+                    "stringValue": "wf_0d5db447-fb7"
+                  }
+                },
+                {
+                  "key": "workflow.name",
+                  "value": {
+                    "stringValue": "diagnose-fix-sum"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": 2
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": 166
+                  }
+                },
+                {
+                  "key": "cache_read_tokens",
+                  "value": {
+                    "intValue": 10394
+                  }
+                },
+                {
+                  "key": "cache_creation_tokens",
+                  "value": {
+                    "intValue": 255
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [
+                {
+                  "attributes": [],
+                  "name": "gen_ai.request.attempt",
+                  "timeUnixNano": "1792024965237903045",
+                  "droppedAttributesCount": 0
+                }
+              ],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "e03e62727ce6dae464fcff2753a85a56",
+              "spanId": "24d5cd1f8413bd8a",
+              "parentSpanId": "da00102615fc18f7",
+              "name": "claude_code.tool.blocked_on_user",
+              "kind": 1,
+              "startTimeUnixNano": "1792024967511000000",
+              "endTimeUnixNano": "1792024967527975733",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "e03e62727ce6dae464fcff2753a85a56",
+              "spanId": "0d807d2588b6aeb1",
+              "parentSpanId": "ec4758a4222bcf7f",
+              "name": "claude_code.llm_request",
+              "kind": 1,
+              "startTimeUnixNano": "1792024966337000000",
+              "endTimeUnixNano": "1792024967535193349",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": 2
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": 123
+                  }
+                },
+                {
+                  "key": "cache_read_tokens",
+                  "value": {
+                    "intValue": 26403
+                  }
+                },
+                {
+                  "key": "cache_creation_tokens",
+                  "value": {
+                    "intValue": 1387
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [
+                {
+                  "attributes": [],
+                  "name": "gen_ai.request.attempt",
+                  "timeUnixNano": "1792024966339619728",
+                  "droppedAttributesCount": 0
+                }
+              ],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "e03e62727ce6dae464fcff2753a85a56",
+              "spanId": "ec51ca5e9bcb074d",
+              "parentSpanId": "da00102615fc18f7",
+              "name": "claude_code.tool.execution",
+              "kind": 1,
+              "startTimeUnixNano": "1792024967528000000",
+              "endTimeUnixNano": "1792024967616372815",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "e03e62727ce6dae464fcff2753a85a56",
+              "spanId": "da00102615fc18f7",
+              "parentSpanId": "ec4758a4222bcf7f",
+              "name": "claude_code.tool",
+              "kind": 1,
+              "startTimeUnixNano": "1792024967510000000",
+              "endTimeUnixNano": "1792024967616084342",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "tool_name",
+                  "value": {
+                    "stringValue": "Bash"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "Bash"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "full_command",
+                  "value": {
+                    "stringValue": "node sum.test.mjs; echo \"EXIT=$?\""
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [
+                {
+                  "attributes": [
+                    {
+                      "key": "bash_command",
+                      "value": {
+                        "stringValue": "node sum.test.mjs; echo \"EXIT=$?\""
+                      }
+                    },
+                    {
+                      "key": "output",
+                      "value": {
+                        "stringValue": "SUM_CHECK_OK\nEXIT=0"
+                      }
+                    }
+                  ],
+                  "name": "tool.output",
+                  "timeUnixNano": "1792024967616023438",
+                  "droppedAttributesCount": 0
+                }
+              ],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "e03e62727ce6dae464fcff2753a85a56",
+              "spanId": "6b383143a453ffba",
+              "parentSpanId": "ec4758a4222bcf7f",
+              "name": "claude_code.llm_request",
+              "kind": 1,
+              "startTimeUnixNano": "1792024967628000000",
+              "endTimeUnixNano": "1792024969809285294",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "claude-haiku-5-5"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "input_tokens",
+                  "value": {
+                    "intValue": 2
+                  }
+                },
+                {
+                  "key": "output_tokens",
+                  "value": {
+                    "intValue": 428
+                  }
+                },
+                {
+                  "key": "cache_read_tokens",
+                  "value": {
+                    "intValue": 27790
+                  }
+                },
+                {
+                  "key": "cache_creation_tokens",
+                  "value": {
+                    "intValue": 199
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [
+                {
+                  "attributes": [],
+                  "name": "gen_ai.request.attempt",
+                  "timeUnixNano": "1792024967630592017",
+                  "droppedAttributesCount": 0
+                }
+              ],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            },
+            {
+              "traceId": "e03e62727ce6dae464fcff2753a85a56",
+              "spanId": "ec4758a4222bcf7f",
+              "name": "claude_code.interaction",
+              "kind": 1,
+              "startTimeUnixNano": "1792024966323000000",
+              "endTimeUnixNano": "1792024969814168159",
+              "attributes": [
+                {
+                  "key": "session.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                },
+                {
+                  "key": "gen_ai.conversation.id",
+                  "value": {
+                    "stringValue": "0dc2c971-8ee3-4a01-babb-94f5f145003e"
+                  }
+                }
+              ],
+              "droppedAttributesCount": 0,
+              "events": [],
+              "droppedEventsCount": 0,
+              "status": {
+                "code": 0
+              },
+              "droppedLinksCount": 0,
+              "flags": 257
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

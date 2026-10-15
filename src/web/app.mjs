@@ -1,3 +1,4 @@
+import { initExecutions } from "./executions.mjs";
 import { conversationItems } from "./conversation.mjs";
 const $ = selector => document.querySelector(selector);
 const phases = { pending: "대기", active: "진행", blocked: "막힘", passed: "통과" };
@@ -7,6 +8,7 @@ let sessions = [], workflows = [], currentId = "", nodeId = "", refreshing = fal
 let draftKey = "", previewKey = "", previewIdentity = "", warning = "";
 const previews = new Map(), sentMessages = new Map(), drafts = new Map();
 const operations = new Map();
+let refreshExecutions = async () => {};
 const flow = () => workflows.find(row => row.id === currentId);
 const node = () => flow()?.nodes.find(row => row.id === nodeId);
 const session = () => sessions.find(row => row.id === node()?.sessionId);
@@ -194,9 +196,9 @@ $("#create-form").addEventListener("submit", async event => {
   event.preventDefault(); const input = { provider: $("#create-provider").value, message: $("#create-message").value };
   $("#create-dialog").close(); await submitOperation("create", input);
 });
-$("#refresh").addEventListener("click", () => { void refresh(); });
+$("#refresh").addEventListener("click", () => { void refresh(); void refreshExecutions().catch(error => notice(error.message)); });
 async function start() {
-  try { const token = location.hash.slice(1); history.replaceState(null, "", location.pathname); if (token) await api("auth", { token }); ready = true; await refresh(); }
+  try { const token = location.hash.slice(1); history.replaceState(null, "", location.pathname); if (token) await api("auth", { token }); ready = true; await refresh(); refreshExecutions = await initExecutions({ api, notice }); }
   catch (error) { notice(error.message); $("#connection").textContent = "접속 링크 필요"; }
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); });
