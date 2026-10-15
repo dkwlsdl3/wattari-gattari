@@ -362,6 +362,33 @@ test("Codex usage failure does not fail discovery and is negatively cached", asy
   assert.equal(provider.usageSnapshot(), null);
 });
 
+test("Codex usage recovers from a failed first read without waiting for the successful usage cache window", async () => {
+  let now = 1_000, attempts = 0;
+  const { provider } = harness(method => {
+    if (method === "thread/loaded/list") return { data: [], nextCursor: null };
+    if (method === "account/rateLimits/read") {
+      if (++attempts === 1) throw new Error("temporary quota timeout");
+      return { rateLimits: { primary: { usedPercent: 19, windowDurationMins: 10080 } } };
+    }
+    throw new Error(method);
+  }, { now: () => now });
+  await provider.list({ includeUsage: true });
+  await new Promise(setImmediate);
+  assert.equal(provider.usageSnapshot(), null);
+  now += 3_000;
+  await provider.list({ includeUsage: true });
+  await new Promise(setImmediate);
+  assert.equal(attempts, 1, "failed reads must not hammer the account API every refresh");
+  now += 7_000;
+  await provider.list({ includeUsage: true });
+  await new Promise(setImmediate);
+  assert.equal(provider.usageSnapshot()?.remainingPercent, 81);
+  now += 10_000;
+  await provider.list({ includeUsage: true });
+  await new Promise(setImmediate);
+  assert.equal(attempts, 2, "successful reads keep the normal five-minute cache");
+});
+
 test("Codex provider records the first loaded-set removal", async () => {
   const snapshots = [["kept", "removed"], ["kept"], ["kept"]];
   const events = [];

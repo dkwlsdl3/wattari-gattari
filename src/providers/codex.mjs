@@ -243,7 +243,10 @@ export class CodexProvider {
 
   async #refreshUsage() {
     const checkedAt = this.#now();
-    if (this.#usageCache && checkedAt - this.#usageCache.checkedAt < this.#usageCacheMs) return;
+    // A missed first read has no useful quota to cache. Retry it without making
+    // every dock/web refresh hit the account API; retain the normal success TTL.
+    const cacheMs = this.#usageCache?.value ? this.#usageCacheMs : Math.min(this.#usageCacheMs, 10_000);
+    if (this.#usageCache && checkedAt - this.#usageCache.checkedAt < cacheMs) return;
     if (this.#usageRefresh) return this.#usageRefresh;
     this.#usageRefresh = Promise.resolve().then(async () => {
       try {
