@@ -32,7 +32,7 @@ export function nativeExecution(session, records, previous = [], agentId = "") {
         if (row.type === "assistant" && block.type === "tool_use" && block.id) {
           const input = block.input ?? {};
           put(`tool:${block.id}`, { name: clip(block.name, 200), parentSpanId: message.id ? identity(`message:${message.id}`).spanId : "",
-            ...(start ? { start } : {}), attributes: { tool_name: clip(block.name, 200) }, command: clip(input.command ?? ""), file: clip(input.file_path ?? "", 2000), events: [content("content", input)] });
+            ...(start ? { start } : {}), attributes: { tool_name: clip(block.name, 200) }, command: clip(input.command ?? ""), file: clip(input.file_path ?? "", 2000), events: [content("content", input), ...((block.name === "Edit" && typeof input.old_string === "string" && typeof input.new_string === "string") ? [content("before", input.old_string), content("after", input.new_string)] : block.name === "Write" && typeof input.content === "string" ? [content("after", input.content)] : [])] });
         }
         if (row.type === "user" && block.type === "tool_result" && block.tool_use_id) {
           put(`tool:${block.tool_use_id}`, { ...(start ? { end: start } : {}), state: block.is_error ? "error" : "returned", events: [content("output", block.content)] });
@@ -54,6 +54,8 @@ export function nativeExecution(session, records, previous = [], agentId = "") {
     const failed = ["failed", "declined", "error"].includes(item.status) || (Number.isInteger(item.exitCode) && item.exitCode !== 0);
     const state = failed ? "error" : end || item.status === "completed" ? "returned" : "unknown";
     const events = model ? [] : item.changes?.length === 1 ? [content("diff", item.changes[0].diff)] : [content("content", item.arguments ?? item.changes ?? item.action ?? item.prompt ?? "")];
+    if (item.changes?.length > 1) events.push(...item.changes.slice(0, 40).map((change, index) => ({ ...content("diff", change.diff ?? ""), name: `change:${index}`, content: { file_path: clip(change.path ?? "", 2000), diff: clip(change.diff ?? "") } })));
+    if (item.changes?.length > 40) events.push({ name: "changes-limited", content: { content: "파일 변경은 호출당 40개까지 보관합니다." }, limited: true });
     if (item.aggregatedOutput != null || item.result != null || item.error != null) events.push(content("output", item.aggregatedOutput ?? item.result ?? item.error));
     put(item.id, { name, ...(agentId && model ? { parentSpanId: identity(`agent:${agentId}`).spanId } : {}), start, end, state, durationMs: Number.isFinite(item.durationMs) ? item.durationMs : null,
       attributes: model ? {} : { tool_name: name }, command: clip(item.command ?? ""), file: clip(item.path ?? item.changes?.[0]?.path ?? "", 2000), events });

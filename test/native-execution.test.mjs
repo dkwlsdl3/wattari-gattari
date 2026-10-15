@@ -6,7 +6,7 @@ import test from 'node:test';
 import { nativeExecution, NativeExecutionCollector } from '../src/native-execution.mjs';
 import { ExecutionStore } from '../src/execution-store.mjs';
 import { ClaudeProvider } from '../src/providers/claude.mjs';
-import { executionGraph } from '../src/web/executions.mjs';
+import { executionGraph, executionTimeline, spanChanges } from '../src/web/executions.mjs';
 const fixture = name => JSON.parse(fs.readFileSync(new URL(`./fixtures/native-executions/${name}.json`, import.meta.url)));
 const claude = fixture('claude'), codex = fixture('codex');
 const session = { id: `claude:${claude.sessionId}`, sessionId: claude.sessionId, provider:'claude', name:'waga-proof-native', cwd:'/tmp/waga-proof-native' };
@@ -95,4 +95,35 @@ test('a burst beyond the latest page is backfilled through the previous head wit
  }}});
  await collector.sweep([s]);round=1;await collector.sweep([s]);await collector.sweep([s]);collector.close();
  assert.deepEqual(executionStore.native(s).spans.filter(s=>s.attributes.tool_name).map(s=>s.command),['command 0','command 1','command 2','command 3']);
+});
+
+
+test('multi-file Codex patches remain individually readable and old stored JSON still works', () => {
+ const record=structuredClone(codex.records.find(row=>row.item.type==='fileChange'));
+ const first=record.item.changes[0];
+ record.item.changes.push({...first,path:'/tmp/waga-proof-native/second.txt',diff:'@@ -1 +1 @@\n-before\n+second'});
+ const spans=nativeExecution({...session,id:'codex:proof',provider:'codex'},[record]);
+ const changes=spanChanges(spans[0]);
+ assert.deepEqual(changes.map(change=>change.path),[first.path,'/tmp/waga-proof-native/second.txt']);
+ assert.match(changes[1].diff,/\+second/);
+ const legacy={...spans[0],events:[{name:'content',content:{content:JSON.stringify(record.item.changes)}}]};
+ assert.deepEqual(spanChanges(legacy),changes);
+});
+
+test('large Claude replacements keep separately bounded before and after evidence, even on rejection', () => {
+ const record=structuredClone(claude.records.find(row=>row.type==='assistant'));
+ record.message.content=[{type:'tool_use',id:'edit-large',name:'Edit',input:{file_path:'/tmp/waga-proof-native/edit.txt',old_string:'a'.repeat(6000),new_string:'b'.repeat(6000)}}];
+ const rejection={type:'user',sessionId:session.sessionId,message:{content:[{type:'tool_result',tool_use_id:'edit-large',is_error:true,content:'rejected'}]}};
+ const span=nativeExecution(session,[record,rejection]).find(row=>row.attributes.tool_name==='Edit');
+ const [change]=spanChanges(span);
+ assert.equal(change.before,'a'.repeat(4000));assert.equal(change.after,'b'.repeat(4000));
+ assert.equal(change.requested,true);assert.equal(span.contentLimited,true);assert.equal(span.state,'error');
+});
+
+test('timeline exposes each observed call, file change and failure without turning their order into dependencies', () => {
+ const spans=nativeExecution({...session,id:'codex:proof',provider:'codex'},codex.records);
+ const {rows,edges}=executionTimeline(spans);
+ assert.equal(rows.length,2);assert.equal(rows.filter(row=>row.changes.length).length,1);
+ assert.equal(rows[0].changes[0].path,'/tmp/waga-proof-native/fixture.txt');
+ assert.equal(rows[1].span.command,'printf native-fixture');assert.deepEqual(edges,[]);
 });

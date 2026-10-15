@@ -39,6 +39,43 @@ export function eventContent(key, value) {
     return hunks.map(hunk => `@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@\n${hunk.lines.join("\n")}`).join("\n");
   } catch { return value; }
 }
+// Read recorded provider fields; never derive patches from shell command text.
+export function spanChanges(span) {
+  const events = span.events ?? [], name = tool(span), result = [];
+  const explicit = events.filter(event => typeof event.content?.diff === "string");
+  if (explicit.length) return explicit.map(event => ({ path: event.content.file_path || span.file || "경로 미기록", diff: eventContent("diff", event.content.diff) }));
+  const before = events.find(event => typeof event.content?.before === "string")?.content.before;
+  const after = events.find(event => typeof event.content?.after === "string")?.content.after;
+  if (after !== undefined) return [{ path: span.file || "경로 미기록", before, after, requested: true }];
+  // Existing stored records remain usable without recollecting older history.
+  for (const event of events) {
+    try {
+      const input = JSON.parse(event.content?.content);
+      if (name === "파일 변경" && Array.isArray(input)) for (const change of input) {
+        if (typeof change.path === "string" && typeof change.diff === "string") result.push({ path: change.path, diff: eventContent("diff", change.diff) });
+      }
+      if (name === "Edit" && typeof input?.old_string === "string" && typeof input?.new_string === "string") result.push({ path: input.file_path || span.file, before: input.old_string, after: input.new_string, requested: true });
+      if (name === "Write" && typeof input?.content === "string") result.push({ path: input.file_path || span.file, after: input.content, requested: true });
+    } catch { /* A clipped input remains available as raw evidence. */ }
+  }
+  if (!result.length && ["Edit", "Write", "파일 변경"].includes(name)) result.push({ path: span.file || "경로 미기록", unavailable: true });
+  return result;
+}
+export function executionTimeline(spans) {
+  const graph = executionGraph(spans), labels = new Map(graph.nodes.map(node => [node.id, node.label]));
+  const rows = spans.filter(span => tool(span)).map(span => ({ span, agent: labels.get(owner(span)) || "메인 세션", owner: owner(span), changes: spanChanges(span) }));
+  rows.sort((a, b) => a.span.start.length - b.span.start.length || a.span.start.localeCompare(b.span.start));
+  return { ...graph, rows };
+}
+function diffBlock(change) {
+  const box = el("div", undefined, "file-diff"); box.append(el("h3", change.path));
+  if (change.unavailable) { box.append(el("p", "변경 본문이 이 기록에 없습니다.", "muted")); return box; }
+  if (change.requested) box.append(el("p", change.before === undefined ? "작성 요청 내용 · 이전 파일 내용은 미기록" : "도구에 전달된 교체 전·후 내용", "muted"));
+  const pre = el("pre", undefined, "diff-code");
+  const lines = change.diff !== undefined ? change.diff.split("\n") : [...(change.before === undefined ? [] : change.before.split("\n").map(line => `-${line}`)), ...(change.after ?? "").split("\n").map(line => `+${line}`)];
+  for (const line of lines) pre.append(el("span", line, line.startsWith("+") && !line.startsWith("+++") ? "diff-add" : line.startsWith("-") && !line.startsWith("---") ? "diff-remove" : line.startsWith("@@") ? "diff-hunk" : ""));
+  box.append(pre); return box;
+}
 const taskStates = { pending: "대기", working: "작업 중", checking: "검사 중", verifying: "독립 검증 중", passed: "통과", failed: "수정 대기", "needs-replan": "재계획 필요", "waiting-resource": "자원 대기", paused: "일시정지", interrupted: "실행 중단", planned: "실행 준비", running: "실행 중", review_required: "최종 검토 대기", approved: "검토 완료", stopped: "중단" };
 const states = { error: "오류 기록", returned: "호출 종료", unknown: "종료 미확인" };
 const $ = selector => document.querySelector(selector);
@@ -48,8 +85,9 @@ export async function initExecutions({ api, notice, selectedSession = () => null
   let loadVersion = 0, listVersion = 0, selectedAttempt = -1, scope = "";
   const scoped = route => `${route}?session=${encodeURIComponent(scope)}`;
   const inspector = $(".execution-inspector");
-  $("#close-inspector").addEventListener("click", () => { inspector.hidden = true; });
-  let currentRun, workView = true, selectedTask = "", execution, selectedGroup = "", selectedSpan = "", drawnEdges = [], cards = new Map();
+  $("#close-inspector").addEventListener("click", () => { inspector.hidden = true; $("#execution-panel").classList.remove("with-inspector"); });
+  let flowFilter = "all", flowSearch = "", flowAgent = "", visibleCount = 80;
+  let currentRun, workView = true, selectedTask = "", execution, selectedSpan = "", drawnEdges = [], cards = new Map();
   function drawEdges() {
     const graph = $("#execution-graph"); graph.querySelector("svg")?.remove();
     if (!graph.clientWidth || !drawnEdges.length) return;
@@ -71,25 +109,31 @@ export async function initExecutions({ api, notice, selectedSession = () => null
   }
   $("#show-executions").addEventListener("click", () => { mode(true); void listing(execution?.id).catch(error => notice(error.message)); });
   $("#show-conversation").addEventListener("click", () => mode(false));
+  const displayPath = path => execution?.cwd && path?.startsWith(`${execution.cwd}/`) ? path.slice(execution.cwd.length + 1) : path;
   function evidence(span) {
     selectedSpan = span.id;
     const panel = $("#execution-evidence"); panel.replaceChildren(el("h2", tool(span) || (execution.source === "native" ? "모델 응답" : "모델 요청")));
-    panel.append(el("p", `${states[span.state]} · ${span.durationMs === null ? "소요 시간 미확인" : `${(span.durationMs / 1000).toFixed(2)}초`}`, span.state === "error" ? "trace-error" : "muted"));
+    panel.append(el("p", `${states[span.state]}${span.durationMs === null ? "" : ` · ${(span.durationMs / 1000).toFixed(2)}초`}`, span.state === "error" ? "trace-error" : "muted"));
     const model = span.attributes.model || span.attributes["gen_ai.request.model"];
     if (model) panel.append(el("p", model, "muted"));
     const tokenKeys = ["input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"];
     if (tokenKeys.some(key => span.attributes[key] !== undefined)) panel.append(el("p", tokenKeys.filter(key => span.attributes[key] !== undefined).map(key => `${({ input_tokens: "입력", output_tokens: "출력", cache_read_tokens: "캐시 읽기", cache_creation_tokens: "캐시 생성" })[key]} ${span.attributes[key]}`).join(" · "), "muted"));
+    const changes = spanChanges(span);
+    for (const change of changes) panel.append(diffBlock({ ...change, path: displayPath(change.path) }));
     if (span.command) panel.append(el("pre", span.command));
-    if (span.file) panel.append(el("p", span.file, "muted"));
+    if (span.file && !changes.length) panel.append(el("p", displayPath(span.file), "muted"));
     for (const event of span.events ?? []) for (const [key, value] of Object.entries(event.content)) {
+      if (changes.some(change => !change.unavailable) && ["diff", "before", "after", "file_path", "content"].includes(key)) continue;
       if ((key === "bash_command" && value === span.command) || (key === "file_path" && value === span.file)) continue;
       panel.append(el("h3", ({ output: "출력", content: "내용", diff: "변경", file_path: "파일", bash_command: "명령" })[key]), el("pre", eventContent(key, value)));
     }
     if (span.contentLimited) panel.append(el("p", execution.source === "native" ? "긴 입력·출력은 각각 4,000자까지 표시합니다." : "입력·출력 일부만 표시합니다. 내용당 16,000자·이벤트 20개 제한입니다.", "muted"));
     if (!execution.includesContent) panel.append(el("p", "입력·출력은 가져오지 않았습니다.", "muted"));
-    panel.append(el("p", "호출 종료는 테스트 통과를 뜻하지 않습니다.", "muted"));
+
     const identity = el("details"); identity.append(el("summary", "추적 식별자"), el("pre", `trace ${span.traceId}\nspan ${span.spanId}\nsession ${span.attributes["session.id"] || "미기록"}\nworkflow ${span.attributes["workflow.run_id"] || "미기록"}`)); panel.append(identity);
-    for (const button of $("#execution-tools").querySelectorAll("button")) button.setAttribute("aria-pressed", String(button.dataset.span === selectedSpan));
+    for (const button of document.querySelectorAll("[data-span]")) button.setAttribute("aria-pressed", String(button.dataset.span === selectedSpan));
+    inspector.hidden = false; $("#execution-panel").classList.add("with-inspector");
+    panel.scrollTop = 0;
   }
   function layoutGraph(nodes, edges) {
     drawnEdges = edges; cards = new Map();
@@ -108,11 +152,11 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     panel.append(el("p", `${attempt.passed ? "검사·독립 검증 통과" : "통과하지 못함"} · 작업 모델 ${attempt.worker.model} · 검증 모델 ${attempt.review.model || "미실행"}`, "muted"));
     panel.append(el("h3", "검사"), el("pre", `${JSON.stringify(node.check)}\n종료 코드: ${attempt.check.exitCode ?? "미확인"}${attempt.check.signal ? ` · ${attempt.check.signal}` : ""}\n${attempt.check.stdout}\n${attempt.check.stderr}`));
     panel.append(el("h3", "독립 검증"), el("p", `${attempt.review.verdict || "미확인"} · ${attempt.review.reason || attempt.review.summary || "미실행"}`));
-    if (attempt.diff) panel.append(el("h3", "변경"), el("pre", attempt.diff));
+    if (attempt.diff) panel.append(diffBlock({ path: "변경", diff: attempt.diff }));
     const more = el("details"); more.append(el("summary", "세션·산출물 근거"), el("pre", JSON.stringify({ worker: attempt.worker.sessionId, verifier: attempt.review.sessionId, artifacts: attempt.artifacts, workspace: node.workspace, costUsd: attempt.costUsd }, null, 2))); panel.append(more);
   }
   function renderRun() {
-    const graph = $("#execution-graph"), calls = $("#execution-tools"), detail = $("#execution-evidence"); graph.replaceChildren(); calls.replaceChildren(); detail.replaceChildren();
+    const graph = $("#execution-graph"), calls = $("#execution-tools"), detail = $("#execution-evidence"); graph.classList.remove("execution-timeline"); graph.replaceChildren(); calls.replaceChildren(); detail.replaceChildren();
     const edges = currentRun.nodes.flatMap(node => node.dependsOn.map(id => ({ from: id, to: node.id })));
     const levels = layoutGraph(currentRun.nodes, edges);
     const selected = currentRun.nodes.find(node => node.id === selectedTask) || currentRun.nodes.find(node => node.state !== "passed") || currentRun.nodes[0]; selectedTask = selected.id;
@@ -139,42 +183,71 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     $("#run-resource").textContent = resource ? `여유 ${resource.availableGiB.toFixed(1)}GiB · CPU ${resource.cpuPercent === null ? "측정 중" : `${resource.cpuPercent.toFixed(0)}%`}${currentRun.control === "pause" ? " · 다음 단계 대기" : ""}` : "";
   }
   function render() {
+    $("#execution-panel").classList.toggle("native-flow", !(currentRun && workView));
     if (currentRun && workView) { renderRun(); return; }
     const graph = $("#execution-graph"), calls = $("#execution-tools"), detail = $("#execution-evidence"); graph.replaceChildren(); calls.replaceChildren(); detail.replaceChildren();
     if (!execution) { $("#execution-note").textContent = "세션 실행 기록을 자동으로 확인하고 있습니다."; return; }
-    const { nodes, edges } = executionGraph(execution.spans);
-    if (currentRun) for (const group of nodes) {
-      const nativeId = group.spans[0]?.attributes["session.id"];
-      const task = currentRun.nodes.find(node => node.sessions?.some(session => session.id === nativeId) || node.attempts.some(attempt => attempt.worker.sessionId === nativeId || attempt.review.sessionId === nativeId));
-      if (task) {
-        const session = task.sessions?.find(session => session.id === nativeId);
-        const review = session?.role === "review" || task.attempts.some(attempt => attempt.review.sessionId === nativeId);
-        group.label = `${task.title} · ${review ? "독립 검증" : "작업"}`;
+    graph.classList.add("execution-timeline");
+    const { nodes, edges, rows } = executionTimeline(execution.spans);
+    if (currentRun) for (const node of nodes) {
+      const nativeId = node.spans[0]?.attributes["session.id"];
+      const task = currentRun.nodes.find(task => task.sessions?.some(session => session.id === nativeId) || task.attempts.some(attempt => attempt.worker.sessionId === nativeId || attempt.review.sessionId === nativeId));
+      if (!task) continue;
+      const review = task.sessions?.some(session => session.id === nativeId && session.role === "review") || task.attempts.some(attempt => attempt.review.sessionId === nativeId);
+      node.label = `${task.title} · ${review ? "독립 검증" : "작업"}`;
+      for (const row of rows) if (row.owner === node.id) row.agent = node.label;
+    }
+    const changes = rows.filter(row => row.changes.length), files = new Map();
+    for (const row of changes) for (const change of row.changes) { files.delete(change.path); files.set(change.path, row); }
+    const errors = rows.filter(row => row.span.state === "error");
+    $("#execution-note").textContent = `${execution.title} · 파일 ${files.size}개 · 호출 ${rows.length}회 · 오류 ${errors.length}회${execution.collection?.skipped ? " · 일부 기록 읽기 제외" : ""}${execution.collection?.collectingHistory ? " · 이전 기록 수집 중" : ""}${execution.collection?.limited ? " · 최근 기록만 표시" : ""}${execution.collection?.error ? ` · 갱신 실패: ${execution.collection.error}` : ""}`;
+    const toolbar = el("div", undefined, "flow-filters");
+    for (const [value, label] of [["all", "전체"], ["changes", `파일 변경 ${changes.length}`], ["commands", "명령"], ["errors", `오류 ${errors.length}`]]) {
+      const button = el("button", label); button.setAttribute("aria-pressed", String(flowFilter === value));
+      button.addEventListener("click", () => { flowFilter = value; visibleCount = 80; render(); }); toolbar.append(button);
+    }
+    const search = el("input"); search.type = "search"; search.placeholder = "파일·명령 검색"; search.setAttribute("aria-label", "실행 기록 검색"); search.value = flowSearch;
+    search.addEventListener("input", () => { const position = search.selectionStart; flowSearch = search.value; visibleCount = 80; render(); const next = graph.querySelector("input"); next.focus(); if (position !== null) next.setSelectionRange(position, position); }); toolbar.append(search); graph.append(toolbar);
+    if (nodes.length > 1) {
+      const agents = el("div", undefined, "flow-agents");
+      for (const node of [{ id: "", label: "모든 에이전트" }, ...nodes]) {
+        const button = el("button", node.label); button.setAttribute("aria-pressed", String(flowAgent === node.id));
+        const caller = edges.filter(edge => edge.to === node.id).map(edge => nodes.find(parent => parent.id === edge.from)?.label).join(", ");
+        if (caller) button.append(el("small", ` ← ${caller} 호출`));
+        button.addEventListener("click", () => { flowAgent = node.id; visibleCount = 80; render(); }); agents.append(button);
       }
+      graph.append(agents);
     }
-    const levels = layoutGraph(nodes, edges);
-    const group = nodes.find(row => row.id === selectedGroup) || nodes[0]; selectedGroup = group?.id || "";
-    $("#execution-note").textContent = currentRun ? `${currentRun.title} · 실시간 호출 · 작업 연결은 native 세션 ID 기준` : execution.source === "native" ? `${execution.title} · 자동 수집 · 도구 ${execution.spans.filter(tool).length}회${execution.collection?.collectingHistory ? " · 이전 기록 수집 중" : ""}${execution.collection?.limited ? " · 최근 기록만 표시" : ""}${execution.collection?.skipped ? " · 일부 기록 읽기 제외" : ""}${execution.collection?.error ? ` · 갱신 실패: ${execution.collection.error}` : ""}` : `${execution.title} · 가져온 기록 · 호출 관계 ${edges.length}개 · 작업 의존성·검증 판정은 미수집`;
-    for (const node of nodes) {
-      const card = el("button", undefined, `agent-card${node.callers.length ? " called-agent" : ""}`); card.setAttribute("aria-pressed", String(node === group));
-      card.style.gridColumn = String((levels.get(node.id) ?? 0) + 1); cards.set(node.id, card);
-      const tools = node.spans.filter(span => tool(span));
-      card.append(el("small", node.callers.length ? `${node.callers.join(", ")} → 호출` : "호출자 미기록", "muted"), el("strong", node.label), el("span", [...new Set(tools.map(tool))].join(" · ") || "모델 요청"), el("small", `${tools.length}회 도구 호출${node.spans.some(span => span.state === "error") ? " · 오류 있음" : ""}`, "muted"));
-      card.addEventListener("click", () => { selectedGroup = node.id; selectedSpan = ""; inspector.hidden = false; render(); }); graph.append(card);
+    const filtered = rows.filter(row => (!flowAgent || row.owner === flowAgent) && (flowFilter === "all" || flowFilter === "changes" && row.changes.length || flowFilter === "errors" && row.span.state === "error" || flowFilter === "commands" && row.span.command) && `${row.span.command || ""} ${row.span.file || ""} ${row.changes.map(change => change.path).join(" ")} ${tool(row.span)}`.toLowerCase().includes(flowSearch.toLowerCase()));
+    graph.append(el("p", rows.some(row => !row.span.start) ? "시각 미기록 항목은 제공자 기록 순서로 표시합니다." : "시간순 기록 · 호출 관계는 실제 연결된 기록만 표시합니다.", "flow-caption muted"));
+    if (filtered.length > visibleCount) {
+      const more = el("button", `이전 ${Math.min(80, filtered.length - visibleCount)}개 보기 · 총 ${filtered.length}개`);
+      more.addEventListener("click", () => { visibleCount += 80; render(); }); graph.append(more);
     }
-    drawEdges();
-    if (!group) { calls.append(el("p", "표시할 도구·모델 요청이 없습니다.")); return; }
-    calls.append(el("h2", group.label));
-    const tools = group.spans.filter(span => tool(span)), llms = group.spans.filter(span => span.name.endsWith("llm_request"));
-    function callButton(span) {
-      const button = el("button", undefined, "trace-call"); button.dataset.span = span.id;
-      button.append(el("strong", tool(span) ? (span.command || span.file || tool(span)).slice(0, 120) : span.attributes.model || (execution.source === "native" ? "모델 응답" : "모델 요청")), el("small", [tool(span), states[span.state]].filter(Boolean).join(" · "), span.state === "error" ? "trace-error" : "muted"));
-      button.addEventListener("click", () => evidence(span)); return button;
+    const timeline = el("div", undefined, "flow-events");
+    for (const row of filtered.slice(-visibleCount)) {
+      const span = row.span, button = el("button", undefined, `flow-event${row.changes.length ? " flow-change" : ""}${span.state === "error" ? " flow-error" : ""}`);
+      button.dataset.span = span.id; button.setAttribute("aria-pressed", String(selectedSpan === span.id));
+      const ms = span.start ? Number(BigInt(span.start) / 1000000n) : NaN;
+      const time = el("time", Number.isFinite(ms) ? new Date(ms).toLocaleTimeString("ko-KR", { hour12: false }) : "시각 미기록");
+      if (Number.isFinite(ms)) { time.dateTime = new Date(ms).toISOString(); time.title = new Date(ms).toLocaleString("ko-KR"); }
+      const body = el("span", undefined, "flow-body");
+      body.append(el("small", `${row.agent} · ${row.changes.length ? "파일 변경" : tool(span)} · ${states[span.state]}`), el("strong", (row.changes.length ? row.changes.map(change => displayPath(change.path)).join(" · ") : span.command || span.file || tool(span))));
+      button.append(time, body); button.addEventListener("click", () => { evidence(span); }); timeline.append(button);
     }
-    for (const span of tools) calls.append(callButton(span));
-    if (llms.length) { const more = el("details"); more.append(el("summary", execution.source === "native" ? `모델 응답 ${llms.length}건` : `모델 요청 ${llms.length}회`)); for (const span of llms) more.append(callButton(span)); calls.append(more); }
-    const selected = group.spans.find(span => span.id === selectedSpan) || tools.find(span => tool(span) === "Edit") || tools.at(-1) || llms[0]; if (selected) evidence(selected);
+    if (!filtered.length) timeline.append(el("p", "조건에 맞는 실행 기록이 없습니다.", "muted"));
+    graph.append(timeline);
+    calls.append(el("h2", `변경 파일 ${files.size}`));
+    const fileList = el("div", undefined, "changed-files");
+    for (const [path, row] of [...files].reverse()) {
+      const button = el("button", displayPath(path), "changed-file"); button.title = path; button.dataset.span = row.span.id;
+      button.addEventListener("click", () => evidence(row.span)); fileList.append(button);
+    }
+    if (!files.size) fileList.append(el("p", "기록된 파일 변경이 없습니다.", "muted")); calls.append(fileList);
+    const selected = rows.find(row => row.span.id === selectedSpan) || changes.at(-1) || rows.at(-1);
+    if (selected) evidence(selected.span);
   }
+
   async function load(id, preserve = false) {
     const version = ++loadVersion;
     if (id?.startsWith("run:")) {
@@ -188,14 +261,18 @@ export async function initExecutions({ api, notice, selectedSession = () => null
       if (preserve && row?.id === execution?.id && row?.importedAt === execution?.importedAt) return;
       currentRun = null; execution = row;
     }
-    if (!preserve) { inspector.hidden = true; selectedGroup = ""; selectedSpan = ""; selectedTask = ""; selectedAttempt = -1; }
+    if (!preserve) { flowFilter = "all"; flowSearch = ""; flowAgent = ""; visibleCount = 80; $("#execution-panel").classList.remove("with-inspector"); inspector.hidden = true; selectedSpan = ""; selectedTask = ""; selectedAttempt = -1; }
+    const searchInput = $(".flow-filters input"), searchFocused = document.activeElement === searchInput, searchPosition = searchInput?.selectionStart;
+    const graphTop = $("#execution-graph").scrollTop, detailTop = $("#execution-evidence").scrollTop, filesTop = $(".changed-files")?.scrollTop || 0;
     const top = inspector.scrollTop, expanded = $("#execution-tools details")?.open;
     const outputPositions = [...$("#execution-evidence").querySelectorAll("pre")].map(node => node.scrollTop);
     runControls(); render();
     if (preserve) {
       const more = $("#execution-tools details"); if (more) more.open = Boolean(expanded);
       [...$("#execution-evidence").querySelectorAll("pre")].forEach((node, index) => { node.scrollTop = outputPositions[index] ?? 0; });
-      inspector.scrollTop = top;
+      inspector.scrollTop = top; $("#execution-graph").scrollTop = graphTop; $("#execution-evidence").scrollTop = detailTop;
+      if ($(".changed-files")) $(".changed-files").scrollTop = filesTop;
+      if (searchFocused && $(".flow-filters input")) { const input = $(".flow-filters input"); input.focus({ preventScroll: true }); if (searchPosition !== null) input.setSelectionRange(searchPosition, searchPosition); }
     }
   }
   async function listing(preferred, preserve = false) {
