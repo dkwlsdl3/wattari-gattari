@@ -12,11 +12,13 @@ import { sampleResources } from "./resource-gate.mjs";
 import { ExecutionStore } from "./execution-store.mjs";
 import { WorkflowStore } from "./workflow-store.mjs";
 import { installWebTerminal } from "./web-terminal.mjs";
+import { historyStreams } from "./history-stream.mjs";
 
 const ASSETS = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
   ["/drafts.mjs", ["drafts.mjs", "text/javascript; charset=utf-8"]],
   ["/conversation.mjs", ["conversation.mjs", "text/javascript; charset=utf-8"]],
+  ["/history-stream.mjs", ["history-stream.mjs", "text/javascript; charset=utf-8"]],
   ["/executions.mjs", ["executions.mjs", "text/javascript; charset=utf-8"]],
   ["/sortable.mjs", [new URL(import.meta.resolve("sortablejs/modular/sortable.esm.js")), "text/javascript; charset=utf-8"]],
   ["/app.mjs", ["app.mjs", "text/javascript; charset=utf-8"]],
@@ -75,6 +77,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
   let snapshot = null, discovering = null, readingRequests = null, requestsSnapshot = null;
   let active = 0, closing = false, closed = null;
   const collector = new NativeExecutionCollector({ bridge, store: executionStore });
+  const streams = historyStreams(bridge);
   const discover = async () => {
     if (snapshot && now() - snapshot.at < 5_000) return snapshot.value;
     if (!discovering) discovering = Promise.resolve().then(() => bridge.discover({ cwd: filterCwd, includeUsage: true }))
@@ -241,13 +244,19 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         if (!session) throw fail(404, "세션을 찾을 수 없습니다.");
         json(response, 200, await preview(session)); return;
       }
+      const eventsMatch = /^\/api\/sessions\/([^/]+)\/events$/.exec(url.pathname);
+      if (request.method === "GET" && eventsMatch) {
+        const session = (await discover()).sessions.find(row => row.id === decodeURIComponent(eventsMatch[1]));
+        if (!session) throw fail(404, "세션을 찾을 수 없습니다.");
+        await streams.open(session, response); return;
+      }
       const historyMatch = /^\/api\/sessions\/([^/]+)\/messages$/.exec(url.pathname);
       if (request.method === "GET" && historyMatch) {
         const session = (await discover()).sessions.find(row => row.id === decodeURIComponent(historyMatch[1]));
         if (!session) throw fail(404, "세션을 찾을 수 없습니다.");
         const cursor = url.searchParams.get("cursor");
         if (cursor !== null && (!cursor || cursor.length > 4096)) throw fail(400, "잘못된 대화 페이지입니다.");
-        json(response, 200, await bridge.history(session, { cursor })); return;
+        json(response, 200, await bridge.history(session, { cursor, activities: true })); return;
       }
       if (request.method === "GET" && url.pathname === "/api/requests") {
         const listing = await recent();
@@ -357,7 +366,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
   return { server, origin, url: `${origin}/#${token}`, close() {
     closing = true;
     clearInterval(collectionTimer); collector.close();
-    terminals.close();
+    streams.close(); terminals.close();
     closed ??= new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     return closed;
   } };

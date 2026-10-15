@@ -758,3 +758,19 @@ test('Codex native execution pages preserve real tool entries, read cursors and 
  assert.deepEqual(result.records,page.records);assert.equal(result.nextCursor,null);
  assert.ok(!calls.some(([method,args])=>method.includes('resume')||(method==='run'&&args.includes('start'))));
 });
+
+test("Codex observes the existing native transcript without resume or settings changes", { timeout: 5_000 }, async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-codex-watch-"));
+  const filename = path.join(directory, "rollout.jsonl"); fs.writeFileSync(filename, "");
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const { provider, calls } = harness((method, params) => {
+    assert.equal(method, "thread/read"); assert.equal(params.includeTurns, false);
+    return { thread: { path: filename } };
+  });
+  let changed;
+  const stop = await provider.watchHistory({ nativeId: "proof" }, { onChange: () => changed?.(), onError: error => { throw error; } });
+  t.after(stop);
+  const event = new Promise(resolve => { changed = resolve; });
+  fs.appendFileSync(filename, "native update\n"); await event;
+  assert.ok(!calls.some(([method, params]) => method === "thread/resume" || method === "turn/start" || method === "thread/settings/update" || (method === "run" && params.includes("start"))));
+});

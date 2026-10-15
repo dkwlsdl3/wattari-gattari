@@ -356,3 +356,22 @@ test("Claude history does not lose a complete message crossing the page I/O boun
   assert.equal(older.messages[0]?.id, "before-boundary");
   assert.equal(older.messages[0]?.text, first.message.content);
 });
+
+test("Claude watches real transcript appends and replacement, showing tool activity before any answer", { timeout: 5_000 }, async t => {
+  const recorded = JSON.parse(await fs.readFile(new URL("./fixtures/native-executions/claude.json", import.meta.url), "utf8"));
+  const call = recorded.records.find(row => row.message?.content?.some(block => block.type === "tool_use"));
+  const setup = await transcript(t, "");
+  const provider = new ClaudeProvider({ homeDirectory: setup.homeDirectory, run: () => { throw Error("No provider process may be launched"); } });
+  let changed;
+  const stop = provider.watchHistory(session, { onChange: () => changed?.(), onError: error => { throw error; } });
+  t.after(stop);
+  let event = new Promise(resolve => { changed = resolve; });
+  const row = { ...call, sessionId: session.sessionId };
+  await fs.appendFile(setup.filename, JSON.stringify(row) + "\n"); await event;
+  const before = await provider.history(session, { activities: true });
+  assert.equal(before.messages[0].role, "activity"); assert.equal(before.messages[0].state, "running");
+  event = new Promise(resolve => { changed = resolve; });
+  await fs.writeFile(setup.filename + ".replacement", JSON.stringify({ type: "assistant", uuid: "answer", sessionId: session.sessionId, message: { content: [{ type: "text", text: "new answer" }] } }) + "\n");
+  await fs.rename(setup.filename + ".replacement", setup.filename); await event;
+  assert.equal((await provider.history(session, { activities: true })).messages[0].text, "new answer");
+});

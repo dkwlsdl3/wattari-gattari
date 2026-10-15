@@ -111,6 +111,12 @@ export class SessionBridge {
     return provider.history(session, options);
   }
 
+  async watchHistory(session, options) {
+    const provider = this.#provider(session.provider);
+    if (typeof provider.watchHistory !== "function") throw new BridgeError("HISTORY_UNAVAILABLE", "실시간 기록을 구독할 수 없습니다.");
+    return provider.watchHistory(session, options);
+  }
+
   async execution(session, options) {
     const provider = this.#provider(session.provider);
     if (typeof provider.execution !== "function") throw new BridgeError("EXECUTION_UNAVAILABLE", "이 제공자의 실행 기록을 읽을 수 없습니다.");

@@ -2,12 +2,13 @@ import Sortable from "/sortable.mjs";
 import { initTerminal } from "./terminal.mjs";
 import { DraftStore } from "./drafts.mjs";
 import { initExecutions } from "./executions.mjs";
-import { conversationItems } from "./conversation.mjs";
+import { conversationItems, mergeMessages } from "./conversation.mjs";
+import { initHistoryStream } from "./history-stream.mjs";
 const $ = selector => document.querySelector(selector);
 const nativeStates = { idle: "대기 중", working: "작업 중", "needs-input": "입력 대기", done: "완료", error: "오류", unavailable: "연결 불가" };
 const transport = { starting: "접수 중", "waiting-local": "앞선 요청 대기", waiting: "전송 대기", submitting: "전송 중", submitted: "답변 대기", accepted: "답변 대기", "reply-received": "답변 수신", replied: "답변 수신", error: "질의 실패", created: "세션 생성됨", "not-sent": "미전송", "result-unknown": "결과 미확정" };
 let sessions = [], refreshing = false, ready = false;
-let sending = false, activityTimer;
+let sending = false, activityTimer, streamWarning = "";
 let directSessionId = "", composerRecipient = "", previewKey = "", previewIdentity = "", warning = "";
 let browserStorage; try { browserStorage = localStorage; } catch { browserStorage = { getItem() {}, setItem() {} }; }
 const histories = new Map(), sentMessages = new Map(), drafts = new DraftStore(browserStorage);
@@ -20,6 +21,7 @@ const collapsed = new Set(), scrollPositions = new Map();
 try { directSessionId = browserStorage.getItem("waga:selected-session") || ""; } catch {}
 function openControls() {
   const id = session()?.id;
+  historyStream.sync(document.hidden ? null : session());
   void controls.open().catch(error => { if (session()?.id === id) notice(error.message); });
 }
 function visibleSessions() {
@@ -126,6 +128,7 @@ function renderSessionStatus() {
 }
 function renderDetail() {
   controls.sync(directSessionId);
+  historyStream.sync(ready && !document.hidden ? session() : null);
   if (composerRecipient !== recipientKey()) {
     if (composerRecipient) drafts.set(composerRecipient, $("#message").value);
     composerRecipient = recipientKey(); $("#message").value = drafts.get(composerRecipient) ?? "";
@@ -160,15 +163,39 @@ function renderConversation() {
   const scrollTop = messages.scrollTop;
   const changed = identity !== previewIdentity;
   const follow = changed || messages.scrollHeight - messages.scrollTop - messages.clientHeight < 80;
-  previewIdentity = identity; previewKey = key; messages.replaceChildren();
-  if (history?.nextCursor) { const older = el("button", history.loading ? "이전 대화 불러오는 중…" : "이전 대화 불러오기", "older-messages"); older.disabled = history.loading; older.addEventListener("click", () => { void loadHistory(true); }); messages.append(older); }
-  for (const item of items) {
-    const bubble = el("article", undefined, `bubble ${item.role}`);
-    bubble.append(el("small", item.label), el("p", item.text));
-    if (item.limited) bubble.append(el("small", "일부만 표시 · 전체 내용은 네이티브 세션에서 확인할 수 있습니다."));
-    messages.append(bubble);
+  previewIdentity = identity; previewKey = key;
+  if (changed) messages.replaceChildren();
+  const existing = new Map([...messages.children].map(node => [node.dataset.messageId, node]));
+  const ordered = [];
+  if (history?.nextCursor) {
+    const older = existing.get("older") || el("button", undefined, "older-messages");
+    older.dataset.messageId = "older"; older.textContent = history.loading ? "이전 대화 불러오는 중…" : "이전 대화 불러오기";
+    older.disabled = history.loading; older.onclick = () => { void loadHistory(true); }; ordered.push(older);
   }
-  if (!items.length) messages.append(el("p", selected ? (history?.loading ? "대화 불러오는 중…" : "대화 기록이 없습니다.") : "세션을 선택하거나 새 세션을 만드세요.", "conversation-empty"));
+  for (const [index, item] of items.entries()) {
+    const id = item.id || `${item.role}:${index}`;
+    let bubble = existing.get(id);
+    if (!bubble) {
+      bubble = el("article", undefined, `bubble ${item.role}`); bubble.dataset.messageId = id;
+      if (item.role === "activity") {
+        const details = el("details"), summary = el("summary"), output = el("pre");
+        details.append(summary, output); bubble.append(details);
+      } else bubble.append(el("small", item.label), el("p", ""));
+    }
+    if (item.role === "activity") {
+      const label = `${item.state === "running" ? "실행 중" : item.state === "error" ? "오류" : "완료"} · ${item.label} · ${item.text.slice(0, 160)}`;
+      const summary = bubble.querySelector("summary"), output = bubble.querySelector("pre");
+      if (summary.textContent !== label) summary.textContent = label;
+      const body = `${item.text}${item.output ? `\n\n${item.output}` : ""}`;
+      if (output.textContent !== body) output.textContent = body;
+      bubble.dataset.state = item.state;
+    } else if (bubble.querySelector("p").textContent !== item.text) bubble.querySelector("p").textContent = item.text;
+    ordered.push(bubble);
+  }
+  if (!items.length) ordered.push(el("p", selected ? (history?.loading ? "대화 불러오는 중…" : "대화 기록이 없습니다.") : "세션을 선택하거나 새 세션을 만드세요.", "conversation-empty"));
+  const retained = new Set(ordered);
+  for (const child of [...messages.children]) if (!retained.has(child)) child.remove();
+  for (const [index, node] of ordered.entries()) if (messages.children[index] !== node) messages.insertBefore(node, messages.children[index] || null);
   messages.scrollTop = changed && scrollPositions.has(identity) ? scrollPositions.get(identity) : follow ? messages.scrollHeight : scrollTop;
 }
 async function loadHistory(older = false) {
@@ -178,18 +205,19 @@ async function loadHistory(older = false) {
   if (current.loading || (older && !current.nextCursor) || (!older && Date.now() - (current.lastReadAt ?? 0) < 750)) return;
   current.lastReadAt = Date.now();
   current.loading = true; histories.set(identity, current); if (!current.loaded || older) renderConversation();
+  const revision = current.revision ?? 0;
   const container = $("#messages"), oldHeight = container.scrollHeight, oldTop = container.scrollTop;
   try {
     const page = await api(`sessions/${encodeURIComponent(selected.id)}/messages${older ? `?cursor=${encodeURIComponent(current.nextCursor)}` : ""}`);
-    const rows = older ? [...page.messages, ...current.messages] : [...current.messages, ...page.messages];
-    const messages = [...new Map(rows.map(row => [row.id, row])).values()];
-    histories.set(identity, { messages, nextCursor: older || !current.loaded ? page.nextCursor : current.nextCursor, loaded: true, loading: false, lastReadAt: current.lastReadAt });
+    const latest = histories.get(identity) ?? current;
+    const messages = older ? mergeMessages(page.messages, latest.messages) : latest.revision !== undefined && latest.revision !== revision ? latest.messages : mergeMessages(latest.messages, page.messages);
+    histories.set(identity, { ...latest, messages, nextCursor: older || !latest.loaded ? page.nextCursor : latest.nextCursor, loaded: true, loading: false, lastReadAt: current.lastReadAt });
     if (histories.size > 20) histories.delete(histories.keys().next().value);
     if (session()?.id !== selected.id || session()?.cwd !== selected.cwd) return;
     renderConversation();
     if (older) container.scrollTop = oldTop + container.scrollHeight - oldHeight;
     if (page.skipped) notice("일부 로그 항목을 읽지 못했습니다.");
-  } catch (error) { current.loading = false; if (session()?.id === selected.id) { notice(`대화 조회 실패: ${error.message}`); renderConversation(); } }
+  } catch (error) { const latest = histories.get(identity); if (latest) latest.loading = false; if (session()?.id === selected.id) { notice(`대화 조회 실패: ${error.message}`); renderConversation(); } }
 }
 
 async function refresh() {
@@ -258,8 +286,17 @@ $("#session-list").addEventListener("keydown", event => {
   if (event.shiftKey && ["ArrowUp", "ArrowDown"].includes(event.key)) { const id = event.target.dataset.sessionId; if (id) { event.preventDefault(); void moveSession(id, event.key === "ArrowUp" ? "up" : "down"); } }
 });
 $("#toggle-sessions").addEventListener("click", () => { const open = document.body.classList.toggle("sessions-open"); $("#toggle-sessions").setAttribute("aria-expanded", String(open)); });
+const historyStream = initHistoryStream({ onPage(identity, page) {
+  if (streamWarning && $("#notice").textContent === streamWarning) notice();
+  streamWarning = "";
+  const current = histories.get(identity) ?? { messages: [], loaded: false };
+  histories.set(identity, { ...current, messages: mergeMessages(current.messages, page.messages), nextCursor: current.loaded ? current.nextCursor : page.nextCursor,
+    loaded: true, revision: (current.revision ?? 0) + 1 });
+  if (histories.size > 20) histories.delete(histories.keys().next().value);
+  if (`${session()?.id}:${session()?.cwd}` === identity) renderConversation();
+}, onError: message => { streamWarning = message; notice(message); } });
 const controls = initTerminal({ api, selected: session, onChange: renderDetail, onProgress: renderSessionStatus, onActivity: () => {
-  if (!activityTimer) activityTimer = setTimeout(() => { activityTimer = null; void loadHistory(); }, 250);
+  if (!document.hidden && !historyStream.live() && !activityTimer) activityTimer = setTimeout(() => { activityTimer = null; if (!document.hidden && !historyStream.live()) void loadHistory(); }, 250);
 } });
 $("#connect-session").addEventListener("click", async () => {
   try {
@@ -319,5 +356,7 @@ async function start() {
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); });
 setInterval(() => { if (!document.hidden) void refresh(); }, 5000);
-setInterval(() => { if (ready && !document.hidden) void loadHistory(); }, 1000);
+setInterval(() => { if (ready && !document.hidden && !historyStream.live()) void loadHistory(); }, 1000);
+document.addEventListener("visibilitychange", () => { historyStream.sync(document.hidden ? null : session()); });
+window.addEventListener("pagehide", () => historyStream.close());
 void start();

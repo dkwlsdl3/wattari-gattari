@@ -12,7 +12,7 @@ import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
 import { defaultClaudeAliasPath, SessionAliasCatalog } from "../session-alias-catalog.mjs";
 import { ClaudePeerEndpoint } from "./claude-peer.mjs";
 import { claudeReplyOffset, readClaudeReply, readClaudeReceipt, waitForClaudeReply } from "./claude-reply.mjs";
-import { ClaudePreviewReader, readClaudeHistory } from "../session-preview.mjs";
+import { ClaudePreviewReader, readClaudeHistory, watchClaudeHistory } from "../session-preview.mjs";
 import { applyClaudeExecutionSettings } from "../provider-execution.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -141,6 +141,10 @@ export class ClaudeProvider {
 
   history(session, options = {}) {
     return readClaudeHistory(session, { ...options, homeDirectory: this.#home });
+  }
+
+  watchHistory(session, options = {}) {
+    return watchClaudeHistory(session, { ...options, homeDirectory: this.#home });
   }
 
   async execution(session, options = {}) {

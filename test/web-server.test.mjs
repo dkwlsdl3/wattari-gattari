@@ -15,6 +15,28 @@ const session = { id, provider: "codex", nativeId: id.slice(6), sessionId: id.sl
   name: "waga-proof-web", cwd: "/tmp/waga-proof-web", status: "idle", socketPath: "/private/native.sock" };
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
+test("conversation stream pushes native updates without a poll and releases its watcher on disconnect", async t => {
+  let changed, stopped = 0, text = "first";
+  const f = await fixture(t, { watchHistory: async (row, options) => {
+    assert.equal(row.id, id); changed = options.onChange; return () => { stopped++; };
+  }, history: async (row, options) => {
+    assert.equal(options.activities, true);
+    return { messages: [{ id: "live", role: "assistant", text }], nextCursor: null };
+  } });
+  const abort = new AbortController(); t.after(() => abort.abort());
+  const response = await fetch(`${f.web.origin}/api/sessions/${encodeURIComponent(id)}/events`, { headers: { Cookie: f.cookie }, signal: abort.signal });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type"), /text\/event-stream/);
+  const reader = response.body.getReader();
+  const read = async () => new TextDecoder().decode((await reader.read()).value);
+  assert.match(await read(), /first/);
+  text = "second"; changed();
+  assert.match(await read(), /second/);
+  abort.abort(); await reader.cancel().catch(() => {});
+  for (let i = 0; i < 20 && !stopped; i++) await new Promise(resolve => setTimeout(resolve, 10));
+  assert.equal(stopped, 1);
+});
+
 async function fixture(t, overrides = {}, options = {}) {
   const bridge = { discover: async () => ({ sessions: [session], warnings: [] }),
     preview: async () => ({ input: "<script>alert(1)</script>", output: "답변", limited: true }),

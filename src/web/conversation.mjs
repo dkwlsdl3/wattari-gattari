@@ -19,7 +19,7 @@ export function conversationItems({ history, preview, records = [], inputs = new
   const items = [];
   const tracked = [...exchanges.values()];
   if (history) {
-    for (const row of history) items.push({ ...row, label: row.role === "user" ? "나" : "응답", text: row.role === "assistant" ? readableReply(row.text) : row.text });
+    for (const row of history) items.push({ ...row, label: row.role === "activity" ? row.tool || "도구 실행" : row.role === "user" ? "나" : "응답", text: row.role === "assistant" ? readableReply(row.text) : row.text || row.tool || "도구 실행" });
     for (const record of tracked) {
       const represented = (role, text) => history.some(row => row.role === role && (record.turnId ? row.turnId === record.turnId : row.text.trim() === text.trim()));
       if (record.input && !represented("user", record.input)) items.push({ role: "user", text: record.input, label: "나" });
@@ -42,4 +42,10 @@ export function conversationItems({ history, preview, records = [], inputs = new
   }
   if (output && !duplicated) items.push({ role: "assistant", text: output, label: tracked.length ? "세션의 최근 응답" : "최근 응답", limited: preview?.limited });
   return items;
+}
+
+export function mergeMessages(...pages) {
+  const rows = new Map();
+  for (const page of pages) for (const row of page) rows.set(row.id, { ...rows.get(row.id), ...row });
+  return [...rows.values()];
 }

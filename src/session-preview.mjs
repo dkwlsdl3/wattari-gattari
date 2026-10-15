@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import { claudeHistoryMessage } from "./session-history.mjs";
+import { claudeHistoryMessage, claudeConversationRecord, mergeHistoryMessages } from "./session-history.mjs";
+import { watchHistoryFile } from "./history-stream.mjs";
 
 const TEXT_LIMIT = 4_000;
 const CHUNK_BYTES = 256 * 1024;
@@ -64,7 +65,8 @@ async function scanClaudeRange(file, start, end, session, signal, history = fals
     else if (history) {
       try {
         const row = mapRecord(JSON.parse(carry.toString("utf8")), session, offset);
-        if (row) result.messages.push(row);
+        if (Array.isArray(row)) result.messages.push(...row.toReversed());
+        else if (row) result.messages.push(row);
       } catch { result.skipped = true; }
     } else acceptClaudeLine(carry.toString("utf8"), session, result);
     if (history && offset !== undefined) result.cursor = offset;
@@ -105,7 +107,11 @@ async function scanClaudeRange(file, start, end, session, signal, history = fals
   return result;
 }
 
-export async function readClaudeHistory(session, { homeDirectory, cursor, signal, mapRecord, agentId } = {}) {
+export function watchClaudeHistory(session, { homeDirectory, ...options }) {
+  return watchHistoryFile(claudePreviewPath(session, homeDirectory), options);
+}
+
+export async function readClaudeHistory(session, { homeDirectory, cursor, signal, mapRecord, agentId, activities = false } = {}) {
   let filename = claudePreviewPath(session, homeDirectory);
   if (agentId !== undefined) {
     if (!/^[a-zA-Z0-9_-]{1,128}$/.test(agentId)) throw new Error("Invalid Claude agent identity");
@@ -121,8 +127,9 @@ export async function readClaudeHistory(session, { homeDirectory, cursor, signal
       if (!parts || Number(parts[1]) !== stat.dev || Number(parts[2]) !== stat.ino || Number(parts[3]) > stat.size) throw Object.assign(new Error("대화 기록이 변경되었습니다. 다시 불러와 주세요."), { status: 409 });
       end = Number(parts[3]);
     }
-    const result = await scanClaudeRange(file, Math.max(0, end - 4 * 1024 * 1024), end, session, signal, true, mapRecord);
-    return { messages: result.messages.reverse(), nextCursor: result.cursor > 0 ? `${stat.dev}:${stat.ino}:${result.cursor}` : null, skipped: result.skipped };
+    const result = await scanClaudeRange(file, Math.max(0, end - 4 * 1024 * 1024), end, session, signal, true, mapRecord ?? (activities ? claudeConversationRecord : claudeHistoryMessage));
+    const messages = result.messages.reverse();
+    return { messages: activities && !mapRecord ? mergeHistoryMessages(messages) : messages, nextCursor: result.cursor > 0 ? `${stat.dev}:${stat.ino}:${result.cursor}` : null, skipped: result.skipped };
   } finally { await file.close(); }
 }
 
