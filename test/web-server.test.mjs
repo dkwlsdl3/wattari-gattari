@@ -455,3 +455,28 @@ test('ordinary active sessions collect automatically before opening their execut
  const native=await(await f.get('/api/executions/'+listing.executions[0].id+scope)).json();assert.ok(native.spans.some(s=>s.command==='printf native-fixture'));
  assert.equal((await f.get('/api/executions/'+executionStore.native(second).id+scope)).status,404);
 });
+
+
+test("web exposes dock usage labels and observation time without provider credentials", async t => {
+  const observedAt = Date.now();
+  const f = await fixture(t, { discover: async options => {
+    assert.equal(options.includeUsage, true);
+    return { sessions: [session], warnings: [], providerUsage: {
+      claude: { fiveHour: { remainingPercent: 65 }, weekly: { remainingPercent: 94 }, observedAt, secret: "must-not-leak" },
+      codex: { remainingPercent: 81, windowDurationMins: 10080, observedAt },
+    } };
+  } });
+  assert.equal((await f.request("/api/sessions")).status, 401);
+  const data = await (await f.get("/api/sessions")).json();
+  assert.deepEqual(data.usage, [
+    { provider: "claude", label: "Claude 5시간 65% 남음 · 주간 94% 남음", observedAt },
+    { provider: "codex", label: "Codex 주간 81% 남음", observedAt },
+  ]);
+  assert.ok(!JSON.stringify(data).includes("must-not-leak"));
+});
+
+test("missing usage remains unknown instead of displaying an invented allowance", async t => {
+  const f = await fixture(t);
+  const data = await (await f.get("/api/sessions")).json();
+  assert.deepEqual(data.usage.map(row => row.label), [null, null]);
+});

@@ -12,6 +12,7 @@
   <header>
     <a class="brand" href="/">waga</a>
     <button id="toggle-sessions" aria-expanded="false">세션 목록</button>
+    <div id="provider-usage" aria-label="제공자 사용량"></div>
     <span id="connection" role="status">연결 중</span>
     <button id="refresh" aria-label="새로고침">↻</button>
   </header>
@@ -37,6 +38,7 @@
     <div id="conversation-workspace">
     <section id="detail" aria-label="세션 대화" hidden>
       <div id="messages" class="messages" role="log" aria-label="대화 내역"></div>
+      <section id="live-output" aria-label="실시간 네이티브 출력" hidden><small>실시간 출력</small><pre id="live-output-text"></pre></section>
       <div id="operation-status" class="operation-status" role="status" hidden></div>
       <section id="session-question" aria-label="승인 요청" hidden><pre id="question-text"></pre><div id="question-choices"></div></section>
       <div id="native-fallback" hidden><p class="muted">세션에서 추가 입력을 기다리고 있습니다.</p><div id="terminal-screen"></div></div>

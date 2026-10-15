@@ -170,14 +170,15 @@ async function loadHistory(older = false) {
   const selected = session(), identity = selected ? `${selected.id}:${selected.cwd}` : "";
   if (!selected) return;
   const current = histories.get(identity) ?? { messages: [], nextCursor: null, loading: false };
-  if (current.loading || (older && !current.nextCursor)) return;
+  if (current.loading || (older && !current.nextCursor) || (!older && Date.now() - (current.lastReadAt ?? 0) < 750)) return;
+  current.lastReadAt = Date.now();
   current.loading = true; histories.set(identity, current); if (!current.loaded || older) renderConversation();
   const container = $("#messages"), oldHeight = container.scrollHeight, oldTop = container.scrollTop;
   try {
     const page = await api(`sessions/${encodeURIComponent(selected.id)}/messages${older ? `?cursor=${encodeURIComponent(current.nextCursor)}` : ""}`);
     const rows = older ? [...page.messages, ...current.messages] : [...current.messages, ...page.messages];
     const messages = [...new Map(rows.map(row => [row.id, row])).values()];
-    histories.set(identity, { messages, nextCursor: older || !current.loaded ? page.nextCursor : current.nextCursor, loaded: true, loading: false });
+    histories.set(identity, { messages, nextCursor: older || !current.loaded ? page.nextCursor : current.nextCursor, loaded: true, loading: false, lastReadAt: current.lastReadAt });
     if (histories.size > 20) histories.delete(histories.keys().next().value);
     if (session()?.id !== selected.id || session()?.cwd !== selected.cwd) return;
     renderConversation();
@@ -191,6 +192,15 @@ async function refresh() {
   try {
     const version = orderVersion, discovery = await api("sessions");
     if (version === orderVersion && !moving) sessions = discovery.sessions;
+    const usage = $("#provider-usage"); usage.replaceChildren();
+    for (const row of discovery.usage ?? []) {
+      const stale = row.observedAt && Date.now() - row.observedAt > 5 * 60_000;
+      const item = el("span", row.label ? `${row.label}${stale ? " · 이전 조회" : ""}` : `${row.provider === "claude" ? "Claude" : "Codex"} 사용량 미확인`);
+      item.dataset.provider = row.provider;
+      item.title = row.observedAt ? `마지막 조회: ${new Date(row.observedAt).toLocaleString()}` : "아직 사용량을 받지 못했습니다.";
+      usage.append(item);
+    }
+    controls.update();
     warning = discovery.warnings.map(row => `${row.provider}: ${row.message}`).join(" · ");
     for (const [key, operation] of operations) {
       let job;
@@ -245,7 +255,7 @@ $("#session-list").addEventListener("keydown", event => {
 });
 $("#toggle-sessions").addEventListener("click", () => { const open = document.body.classList.toggle("sessions-open"); $("#toggle-sessions").setAttribute("aria-expanded", String(open)); });
 const controls = initTerminal({ api, selected: session, onChange: renderDetail, onActivity: () => {
-  if (!activityTimer) activityTimer = setTimeout(() => { activityTimer = null; void loadHistory(); }, 1000);
+  if (!activityTimer) activityTimer = setTimeout(() => { activityTimer = null; void loadHistory(); }, 250);
 } });
 $("#connect-session").addEventListener("click", async () => {
   try {
@@ -305,4 +315,5 @@ async function start() {
 }
 document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); });
 setInterval(() => { if (!document.hidden) void refresh(); }, 5000);
+setInterval(() => { if (ready && !document.hidden) void loadHistory(); }, 1000);
 void start();

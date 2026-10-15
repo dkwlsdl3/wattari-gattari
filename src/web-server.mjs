@@ -1,6 +1,6 @@
 import path from "node:path";
 import { DockOrderStore } from "./dock-order.mjs";
-import { applyOverviewOrder, reconcileOverviewOrder, moveOverviewSession } from "./overview.mjs";
+import { applyOverviewOrder, reconcileOverviewOrder, moveOverviewSession, formatClaudeUsage, formatCodexUsage } from "./overview.mjs";
 import crypto from "node:crypto";
 import { NativeExecutionCollector } from "./native-execution.mjs";
 import http from "node:http";
@@ -77,7 +77,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
   const collector = new NativeExecutionCollector({ bridge, store: executionStore });
   const discover = async () => {
     if (snapshot && now() - snapshot.at < 5_000) return snapshot.value;
-    if (!discovering) discovering = Promise.resolve().then(() => bridge.discover({ cwd: filterCwd }))
+    if (!discovering) discovering = Promise.resolve().then(() => bridge.discover({ cwd: filterCwd, includeUsage: true }))
       .then(value => { snapshot = { at: now(), value }; return value; }).finally(() => { discovering = null; });
     return discovering;
   };
@@ -193,8 +193,11 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         json(response, 200, job); return;
       }
       if (request.method === "GET" && url.pathname === "/api/sessions") {
-        const { sessions, warnings } = await discover();
-        json(response, 200, { sessions: orderedSessions(sessions).map(publicSession), warnings, cwd }); return;
+        const { sessions, warnings, providerUsage = {} } = await discover();
+        const usage = [["claude", formatClaudeUsage], ["codex", formatCodexUsage]].map(([provider, format]) => ({
+          provider, label: format(providerUsage[provider]), observedAt: providerUsage[provider]?.observedAt ?? null,
+        }));
+        json(response, 200, { sessions: orderedSessions(sessions).map(publicSession), warnings, cwd, usage }); return;
       }
       const actionMatch = /^\/api\/sessions\/([^/]+)\/(order|rename|archive|connection|terminal)$/.exec(url.pathname);
       if (request.method === "POST" && actionMatch) {

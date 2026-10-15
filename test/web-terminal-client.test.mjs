@@ -45,3 +45,15 @@ test('an actual connection failure retains its original reason', async t => {
   const { controls } = fixture(t, async () => { throw Error('permission denied from provider'); });
   await assert.rejects(controls.open(), /permission denied from provider/);
 });
+
+
+test('changing session immediately clears the previous native output', async t => {
+  const { controls, select } = fixture(t);
+  const pending = controls.open();
+  const panel = document.querySelector('#live-output'), output = document.querySelector('#live-output-text');
+  panel.hidden = false; output.textContent = 'previous session tool output';
+  select('waga-proof-b');
+  await pending;
+  assert.equal(panel.hidden, true);
+  assert.equal(output.textContent, '');
+});
