@@ -182,10 +182,16 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     const resource = currentRun.resource;
     $("#run-resource").textContent = resource ? `여유 ${resource.availableGiB.toFixed(1)}GiB · CPU ${resource.cpuPercent === null ? "측정 중" : `${resource.cpuPercent.toFixed(0)}%`}${currentRun.control === "pause" ? " · 다음 단계 대기" : ""}` : "";
   }
-  function render() {
+  function render({ keepPosition = false } = {}) {
     $("#execution-panel").classList.toggle("native-flow", !(currentRun && workView));
     if (currentRun && workView) { renderRun(); return; }
-    const graph = $("#execution-graph"), calls = $("#execution-tools"), detail = $("#execution-evidence"); graph.replaceChildren(); calls.replaceChildren(); detail.replaceChildren();
+    const graph = $("#execution-graph"), calls = $("#execution-tools"), detail = $("#execution-evidence");
+    const graphTop = graph.scrollTop;
+    const followLatest = !keepPosition || graph.scrollHeight - graph.clientHeight - graphTop <= 32;
+    const viewportTop = graph.getBoundingClientRect().top;
+    const anchor = keepPosition && !followLatest && [...graph.querySelectorAll(".flow-event")].find(node => node.getBoundingClientRect().bottom > viewportTop);
+    const anchorOffset = anchor ? anchor.getBoundingClientRect().top - viewportTop : 0;
+    graph.replaceChildren(); calls.replaceChildren(); detail.replaceChildren();
     if (!execution) { $("#execution-note").textContent = "세션 실행 기록을 자동으로 확인하고 있습니다."; return; }
     graph.classList.add("execution-timeline");
     const { nodes, edges, rows } = executionTimeline(execution.spans);
@@ -222,7 +228,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     graph.append(el("p", rows.some(row => !row.span.start) ? "시각 미기록 항목은 제공자 기록 순서로 표시합니다." : "시간순 기록 · 호출 관계는 실제 연결된 기록만 표시합니다.", "flow-caption muted"));
     if (filtered.length > visibleCount) {
       const more = el("button", `이전 ${Math.min(80, filtered.length - visibleCount)}개 보기 · 총 ${filtered.length}개`);
-      more.addEventListener("click", () => { visibleCount += 80; render(); }); graph.append(more);
+      more.addEventListener("click", () => { visibleCount += 80; render({ keepPosition: true }); }); graph.append(more);
     }
     const timeline = el("div", undefined, "flow-events");
     for (const row of filtered.slice(-visibleCount)) {
@@ -246,6 +252,11 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     if (!files.size) fileList.append(el("p", "기록된 파일 변경이 없습니다.", "muted")); calls.append(fileList);
     const selected = rows.find(row => row.span.id === selectedSpan) || changes.at(-1) || rows.at(-1);
     if (selected) evidence(selected.span);
+    if (followLatest) graph.scrollTop = graph.scrollHeight;
+    else {
+      const nextAnchor = anchor && [...timeline.children].find(node => node.dataset.span === anchor.dataset.span);
+      graph.scrollTop = nextAnchor ? graph.scrollTop + nextAnchor.getBoundingClientRect().top - graph.getBoundingClientRect().top - anchorOffset : graphTop;
+    }
   }
 
   async function load(id, preserve = false) {
@@ -263,14 +274,14 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     }
     if (!preserve) { flowFilter = "all"; flowSearch = ""; flowAgent = ""; visibleCount = 80; $("#execution-panel").classList.remove("with-inspector"); inspector.hidden = true; selectedSpan = ""; selectedTask = ""; selectedAttempt = -1; }
     const searchInput = $(".flow-filters input"), searchFocused = document.activeElement === searchInput, searchPosition = searchInput?.selectionStart;
-    const graphTop = $("#execution-graph").scrollTop, detailTop = $("#execution-evidence").scrollTop, filesTop = $(".changed-files")?.scrollTop || 0;
+    const detailTop = $("#execution-evidence").scrollTop, filesTop = $(".changed-files")?.scrollTop || 0;
     const top = inspector.scrollTop, expanded = $("#execution-tools details")?.open;
     const outputPositions = [...$("#execution-evidence").querySelectorAll("pre")].map(node => node.scrollTop);
-    runControls(); render();
+    runControls(); render({ keepPosition: preserve });
     if (preserve) {
       const more = $("#execution-tools details"); if (more) more.open = Boolean(expanded);
       [...$("#execution-evidence").querySelectorAll("pre")].forEach((node, index) => { node.scrollTop = outputPositions[index] ?? 0; });
-      inspector.scrollTop = top; $("#execution-graph").scrollTop = graphTop; $("#execution-evidence").scrollTop = detailTop;
+      inspector.scrollTop = top; $("#execution-evidence").scrollTop = detailTop;
       if ($(".changed-files")) $(".changed-files").scrollTop = filesTop;
       if (searchFocused && $(".flow-filters input")) { const input = $(".flow-filters input"); input.focus({ preventScroll: true }); if (searchPosition !== null) input.setSelectionRange(searchPosition, searchPosition); }
     }
