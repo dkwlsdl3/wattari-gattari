@@ -63,12 +63,14 @@ The server binds only to `127.0.0.1`, authenticates with a fresh secret link and
 HttpOnly, SameSite cookie, and rejects cross-origin mutations. It shares native
 discovery, bounded latest-message previews, `ask`, and request recovery with the CLI.
 New work uses provider defaults in the configured directory without calling LLR.
-For Codex sessions, **작업 지시** sends real native user input for file edits and commands
-without overriding the session's approval or sandbox settings. **에이전트 질의** keeps the
-untrusted peer contract. Existing Claude connections support peer queries only;
+The default conversation view lets users select a session and send instructions without
+registering a workflow. Every browser message is native user input for file edits and commands
+without overriding the session's approval or sandbox settings. Only inter-session messages
+use the untrusted peer contract; there is no transport selector. Existing Claude connections
+do not support user input, so their composer is disabled;
 native approvals stay in the provider UI.
 
-The default **실행 그래프** view imports Claude Code OTLP JSON snapshots and displays
+The separate **실행 기록** view imports Claude Code OTLP JSON snapshots and displays
 observed main/agent call edges, tool outputs and diffs. A returned tool call is never
 classified as a passing check. Runs explicitly started by `waga run workflow.json` also stream
 live spans and display declared dependencies, machine checks, independent reviews and retries;

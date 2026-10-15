@@ -64,7 +64,7 @@ export async function initExecutions({ api, notice }) {
     $("#workflow").hidden = graph; $("#new-workflow").hidden = graph;
     $("#show-executions").setAttribute("aria-pressed", String(graph)); $("#show-conversation").setAttribute("aria-pressed", String(!graph));
   }
-  $("#show-executions").addEventListener("click", () => mode(true));
+  $("#show-executions").addEventListener("click", () => { mode(true); void listing(execution?.id).catch(error => notice(error.message)); });
   $("#show-conversation").addEventListener("click", () => mode(false));
   function evidence(span) {
     selectedSpan = span.id;
@@ -218,6 +218,6 @@ export async function initExecutions({ api, notice }) {
       await listing(run.id); $("#import-dialog").close(); $("#import-form").reset(); notice();
     } catch (error) { notice(error.message); } finally { button.disabled = false; }
   });
-  mode(true); await listing();
+  mode(false);
   return () => listing(execution?.id);
 }
