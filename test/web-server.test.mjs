@@ -35,7 +35,7 @@ test("web requires local authentication and same-origin JSON for mutations", asy
   let submitted = 0;
   const f = await fixture(t, { ask: async () => { submitted++; return { reply: "ok" }; } });
   const page = await f.request("/");
-  assert.equal(page.status, 200); assert.match(await page.text(), /작업 그래프/);
+  assert.equal(page.status, 200); assert.match(await page.text(), /세션 대화/);
   assert.match(page.headers.get("content-security-policy"), /frame-ancestors 'none'/);
   assert.equal((await f.request("/api/sessions")).status, 401);
   assert.equal((await f.request("/api/auth", { token: "wrong" })).status, 401);
@@ -294,4 +294,20 @@ test("web instructions cannot switch away from the session assigned to the selec
   assert.equal((await f.post("/api/instruct", { ...input, target: id })).status, 202);
   await tick();
   assert.equal(calls, 1);
+});
+
+test("conversation history resolves an authenticated native identity and passes opaque pagination cursors", async t => {
+  const seen = [];
+  const f = await fixture(t, { history: async (target, options) => {
+    assert.equal(target, session); seen.push(options.cursor);
+    return { messages: [{ id: "one", role: "user", text: "이전 질문" }], nextCursor: "opaque:older" };
+  } });
+  const route = `/api/sessions/${encodeURIComponent(id)}/messages`;
+  assert.equal((await f.request(route)).status, 401);
+  assert.equal((await f.get('/api/sessions/codex%3Amissing/messages')).status, 404);
+  assert.equal((await f.get(route + '?cursor=')).status, 400);
+  const page = await (await f.get(route)).json();
+  assert.equal(page.messages[0].text, "이전 질문");
+  await f.get(`${route}?cursor=${encodeURIComponent(page.nextCursor)}`);
+  assert.deepEqual(seen, [null, "opaque:older"]);
 });

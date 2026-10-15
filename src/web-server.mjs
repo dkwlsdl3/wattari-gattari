@@ -170,6 +170,14 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         if (!session) throw fail(404, "세션을 찾을 수 없습니다.");
         json(response, 200, await preview(session)); return;
       }
+      const historyMatch = /^\/api\/sessions\/([^/]+)\/messages$/.exec(url.pathname);
+      if (request.method === "GET" && historyMatch) {
+        const session = (await discover()).sessions.find(row => row.id === decodeURIComponent(historyMatch[1]));
+        if (!session) throw fail(404, "세션을 찾을 수 없습니다.");
+        const cursor = url.searchParams.get("cursor");
+        if (cursor !== null && (!cursor || cursor.length > 4096)) throw fail(400, "잘못된 대화 페이지입니다.");
+        json(response, 200, await bridge.history(session, { cursor })); return;
+      }
       if (request.method === "GET" && url.pathname === "/api/requests") {
         const listing = await recent();
         json(response, 200, { ...listing, jobs: [...jobs.values()] }); return;

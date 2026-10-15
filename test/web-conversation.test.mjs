@@ -33,3 +33,14 @@ test("a pending user instruction is shown before any native answer arrives", () 
   const items = conversationItems({ pending, inputs: new Map([[pending.operationId, "파일을 수정해 주세요"]]) });
   assert.deepEqual(items.map(row => [row.role, row.text]), [["user", "파일을 수정해 주세요"]]);
 });
+
+test("native history keeps repeated turns and merges only the matching completed web exchange", () => {
+  const history = [
+    { id: "u1", turnId: "t1", role: "user", text: "같은 질문" },
+    { id: "a1", turnId: "t1", role: "assistant", text: "답변 1" },
+    { id: "u2", turnId: "t2", role: "user", text: "같은 질문" },
+    { id: "a2", turnId: "t2", role: "assistant", text: "답변 2" },
+  ];
+  const items = conversationItems({ history, records: [{ operationId: "web", turnId: "t2", reply: "답변 2" }], inputs: new Map([["web", "같은 질문"]]) });
+  assert.deepEqual(items.map(row => row.text), history.map(row => row.text));
+});

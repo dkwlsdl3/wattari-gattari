@@ -325,3 +325,34 @@ test("preview cache evicts older entries beyond twenty sessions", async (t) => {
   assert.equal(cache.snapshot({ id: "0" }).state, "loading");
   assert.equal(cache.snapshot({ id: "20" }).state, "ready");
 });
+
+test("Claude full conversation pages preserve chronological messages and text beyond the preview limit", async t => {
+  const { readClaudeHistory } = await import("../src/session-preview.mjs");
+  const templates = fixture.trim().split("\n").map(line => JSON.parse(line));
+  const rows = Array.from({ length: 75 }, (_, index) => ({ ...templates[index % 2], uuid: `message-${index}` }));
+  rows[0].message = { role: "user", content: "긴 이전 대화\n".repeat(1000) };
+  const setup = await transcript(t, rows.map(row => JSON.stringify(row)).join("\n") + "\n");
+  const newest = await readClaudeHistory(session, setup);
+  assert.equal(newest.messages[0].id, "message-25");
+  await fs.appendFile(setup.filename, JSON.stringify({ ...templates[0], uuid: "appended" }) + "\n");
+  const older = await readClaudeHistory(session, { ...setup, cursor: newest.nextCursor });
+  const all = [...older.messages, ...newest.messages];
+  assert.deepEqual(all.map(row => row.id), rows.map(row => row.uuid));
+  assert.equal(all[0].text, rows[0].message.content);
+  assert.equal(older.nextCursor, null);
+  await assert.rejects(readClaudeHistory(session, { ...setup, cursor: "0:0:100" }), { status: 409 });
+});
+
+test("Claude history does not lose a complete message crossing the page I/O boundary", async t => {
+  const { readClaudeHistory } = await import("../src/session-preview.mjs");
+  const [user, assistant] = fixture.trim().split("\n").map(line => JSON.parse(line));
+  const first = { ...user, uuid: "before-boundary", message: { role: "user", content: "가".repeat(70000) } };
+  const tool = JSON.stringify({ ...assistant, message: { role: "assistant", content: [{ type: "tool_use", name: "fixture", input: { value: "x".repeat(1000) } }] } }) + "\n";
+  const count = Math.floor((4 * 1024 * 1024 - 100000) / Buffer.byteLength(tool));
+  const text = JSON.stringify(first) + "\n" + tool.repeat(count) + JSON.stringify({ ...assistant, uuid: "last-answer" }) + "\n";
+  const setup = await transcript(t, text);
+  const latest = await readClaudeHistory(session, setup);
+  const older = await readClaudeHistory(session, { ...setup, cursor: latest.nextCursor });
+  assert.equal(older.messages[0]?.id, "before-boundary");
+  assert.equal(older.messages[0]?.text, first.message.content);
+});

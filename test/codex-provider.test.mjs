@@ -705,3 +705,21 @@ test("native user instructions preserve their text and session policies; peer re
   const peer = calls.filter(([method]) => method === "turn/start").at(-1)[1];
   assert.deepEqual(peer.input, []); assert.match(peer.toolOutput.output, /trust: untrusted/);
 });
+
+test("Codex conversation pages preserve complete text, repeated messages, and native cursors without executing anything", async () => {
+  const long = "이전 대화 내용\n".repeat(800);
+  const { provider } = harness((method, params) => { assert.equal(method, "thread/items/list"); return params.cursor ? { data: [
+    { turnId: "old", item: { id: "a1", type: "agentMessage", text: long } },
+    { turnId: "old", item: { id: "u1", type: "userMessage", content: [{ type: "text", text: "같은 질문" }] } },
+  ], nextCursor: null } : { data: [
+    { turnId: "new", item: { id: "tool", type: "commandExecution", aggregatedOutput: "private tool output" } },
+    { turnId: "new", item: { id: "a2", type: "agentMessage", text: "새 답변" } },
+    { turnId: "new", item: { id: "u2", type: "userMessage", content: [{ type: "text", text: "같은 질문" }] } },
+  ], nextCursor: "native:older" }; });
+  const target = { nativeId: "proof" };
+  const latest = await provider.history(target);
+  const older = await provider.history(target, { cursor: latest.nextCursor });
+  assert.deepEqual([...older.messages, ...latest.messages].map(row => row.id), ["u1", "a1", "u2", "a2"]);
+  assert.equal(older.messages[1].text, long);
+  assert.equal(older.nextCursor, null);
+});

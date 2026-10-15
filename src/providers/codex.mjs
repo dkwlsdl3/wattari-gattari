@@ -10,6 +10,7 @@ import { applyCodexExecutionSettings } from "../provider-execution.mjs";
 import { EventLog } from "../event-log.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
 import { messageText, previewText } from "../session-preview.mjs";
+import { historyText } from "../session-history.mjs";
 
 const execFileAsync = promisify(execFile);
 const THREAD_READ_CONCURRENCY = 8;
@@ -205,6 +206,25 @@ export class CodexProvider {
         if (++count === 3) { result.limited = true; break; }
       }
       return result;
+    } finally { await client.close(); }
+  }
+
+  async history(session, { cursor, signal } = {}) {
+    const daemon = await this.daemonInfo();
+    this.#assertDaemonAvailable(daemon);
+    const client = await this.#clientFactory(daemon.socketPath);
+    try {
+      const boundedSignal = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(5_000)]);
+      await client.initialize({ signal: boundedSignal });
+      const page = await client.request("thread/items/list", { threadId: session.nativeId, limit: 50, sortDirection: "desc", ...(cursor == null ? {} : { cursor }) }, { signal: boundedSignal });
+      if (!Array.isArray(page?.data) || (page.nextCursor != null && typeof page.nextCursor !== "string")) throw new Error("Invalid Codex conversation page");
+      const messages = page.data.flatMap((entry, index) => {
+        const item = entry.item;
+        if (!["userMessage", "agentMessage"].includes(item?.type)) return [];
+        const text = historyText(item.type === "userMessage" ? item.content : item.text);
+        return text ? [{ id: item.id ?? entry.id ?? `${cursor ?? "latest"}:${index}`, turnId: entry.turnId, role: item.type === "userMessage" ? "user" : "assistant", text }] : [];
+      }).reverse();
+      return { messages, nextCursor: page.nextCursor ?? null };
     } finally { await client.close(); }
   }
 

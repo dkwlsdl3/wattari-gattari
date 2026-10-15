@@ -104,6 +104,12 @@ export class SessionBridge {
     return provider.preview(session, options);
   }
 
+  async history(session, options) {
+    const provider = this.#provider(session.provider);
+    if (typeof provider.history !== "function") throw new BridgeError("HISTORY_UNAVAILABLE", "이 세션의 대화 기록을 읽을 수 없습니다.");
+    return provider.history(session, options);
+  }
+
   async archive(target, { cwd } = {}) {
     const { provider, session } = await this.#resolve(target, cwd);
     return provider.archive(session);

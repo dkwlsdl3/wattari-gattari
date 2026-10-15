@@ -77,25 +77,18 @@ live spans and display declared dependencies, machine checks, independent review
 see [record format and proof boundaries](docs/web-executions.md).
 The **세션 대화** view provides the stage and conversation features below.
 
-Create a work graph with **＋ 작업**, then connect native sessions to requirements,
-implementation, verification, independent review, and integration stages. Selecting a
-stage opens a wide central conversation below the compact stage graph. Native previews
-and recovered answers are displayed without repeating the same response. Enter sends;
-Shift+Enter inserts a newline. Drafts persist in browser localStorage, isolated by stage
-and native recipient. Temporary sent-message displays remain page-local. Phase status and evidence are
-explicit user records, never inferred from session idle or an answer saying “done”.
-Passing requires evidence; verification/review/integration also require a full commit
-SHA that exists in the configured repository. Independent review cannot use the
-implementer's session. Rework invalidates downstream proofs, and a changed SHA resets
-verification, review and integration. This is a fixed workflow observer, not an
-automatic scheduler or arbitrary DAG editor.
+Select a native session once and send user instructions. Manual work-group selectors,
+stage assignment, and fixed five-stage forms are not part of the web UI.
+The conversation reads native history in chronological pages; scrolling upward loads older
+messages while preserving the viewport. It does not replace history with a latest-reply preview
+or truncate normal messages to 4,000 characters. Codex uses native item cursors; Claude uses
+bounded read-only JSONL scanning. Tool results and reasoning are excluded from the conversation.
+Native history is not copied into Waga storage. Drafts persist per native recipient in localStorage.
+Enter sends; Shift+Enter inserts a newline. Hidden tabs do not refresh.
 
-Graphs, assignments, evidence and the last five exchanges per stage (up to 4,000
-characters per answer) persist privately in `$XDG_STATE_HOME/wattari-gattari/workflows`.
-There is no global request timeline in the UI. Closing the browser does not cancel work.
-A failed network request is never automatically resent; inspect the stage's answer
-recovery or `waga result` before submitting again. Duplicate operation IDs are
-deduplicated within the running server's latest 100 jobs, not across restarts.
+Closing the browser does not cancel work. A failed network request is never automatically
+resent; inspect answer recovery or "waga result" before submitting again. Duplicate operation IDs
+are deduplicated within the running server's latest 100 jobs, not across restarts.
 
 See the [user service template](integrations/waga-web.service.example) for optional
 background operation. Replace its paths before manual installation. Waga does not

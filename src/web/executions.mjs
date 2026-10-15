@@ -61,7 +61,6 @@ export async function initExecutions({ api, notice }) {
   new ResizeObserver(drawEdges).observe($("#execution-graph"));
   function mode(graph) {
     $("#execution-panel").hidden = !graph; $("#conversation-workspace").hidden = graph;
-    $("#workflow").hidden = graph; $("#new-workflow").hidden = graph;
     $("#show-executions").setAttribute("aria-pressed", String(graph)); $("#show-conversation").setAttribute("aria-pressed", String(!graph));
   }
   $("#show-executions").addEventListener("click", () => { mode(true); void listing(execution?.id).catch(error => notice(error.message)); });

@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { stripVTControlCharacters } from "node:util";
+import { claudeHistoryMessage } from "./session-history.mjs";
 
 const TEXT_LIMIT = 4_000;
 const CHUNK_BYTES = 256 * 1024;
@@ -50,16 +51,23 @@ function acceptClaudeLine(line, session, result) {
 
 // Scan complete records backwards, stopping as soon as both latest messages are found.
 // I/O yields between chunks; neither the entire file nor unbounded records enter memory.
-async function scanClaudeRange(file, start, end, session, signal) {
+async function scanClaudeRange(file, start, end, session, signal, history = false) {
   const result = { input: "", output: "", skipped: false, offset: start };
+  if (history) { result.messages = []; result.cursor = start; }
   let position = end, carry = Buffer.alloc(0), oversized = false, trailing = true;
-  const accept = (piece, boundary) => {
+  const accept = (piece, boundary, offset) => {
     if (carry.length + piece.length > MAX_RECORD_BYTES) { oversized = true; carry = Buffer.alloc(0); }
     if (!oversized) carry = Buffer.concat([piece, carry]);
     if (!boundary) return;
     if (trailing) trailing = false; // Ignore the unfinished final record (possibly empty).
     else if (oversized) result.skipped = true;
-    else acceptClaudeLine(carry.toString("utf8"), session, result);
+    else if (history) {
+      try {
+        const row = claudeHistoryMessage(JSON.parse(carry.toString("utf8")), session, offset);
+        if (row) result.messages.push(row);
+      } catch { result.skipped = true; }
+    } else acceptClaudeLine(carry.toString("utf8"), session, result);
+    if (history && offset !== undefined) result.cursor = offset;
     carry = Buffer.alloc(0); oversized = false;
   };
   while (position > start) {
@@ -77,14 +85,40 @@ async function scanClaudeRange(file, start, end, session, signal) {
     let right = size;
     for (let newline = buffer.lastIndexOf(10); newline >= 0; newline = newline ? buffer.lastIndexOf(10, newline - 1) : -1) {
       if (trailing) result.offset = position + newline + 1;
-      accept(buffer.subarray(newline + 1, right), true);
-      if (result.input && result.output) return result;
+      accept(buffer.subarray(newline + 1, right), true, position + newline + 1);
+      if (history ? result.messages.length >= 50 : result.input && result.output) return result;
       right = newline;
     }
     accept(buffer.subarray(0, right), false);
   }
-  accept(Buffer.alloc(0), true);
+  if (history && start > 0) {
+    const preceding = Buffer.alloc(1);
+    await file.read(preceding, 0, 1, start - 1);
+    if (preceding[0] !== 10) {
+      // Leave the partial leading record for the next page, whose end is the
+      // earliest complete record boundary. Only oversized records are skipped.
+      if (result.cursor === start) result.skipped = true;
+      return result;
+    }
+  }
+  accept(Buffer.alloc(0), true, start);
   return result;
+}
+
+export async function readClaudeHistory(session, { homeDirectory, cursor, signal } = {}) {
+  const file = await fs.open(claudePreviewPath(session, homeDirectory), "r");
+  try {
+    const stat = await file.stat();
+    if (!stat.isFile()) throw new Error("Claude transcript is not a file");
+    let end = stat.size;
+    if (cursor != null) {
+      const parts = /^(\d+):(\d+):(\d+)$/.exec(cursor);
+      if (!parts || Number(parts[1]) !== stat.dev || Number(parts[2]) !== stat.ino || Number(parts[3]) > stat.size) throw Object.assign(new Error("대화 기록이 변경되었습니다. 다시 불러와 주세요."), { status: 409 });
+      end = Number(parts[3]);
+    }
+    const result = await scanClaudeRange(file, Math.max(0, end - 4 * 1024 * 1024), end, session, signal, true);
+    return { messages: result.messages.reverse(), nextCursor: result.cursor > 0 ? `${stat.dev}:${stat.ino}:${result.cursor}` : null, skipped: result.skipped };
+  } finally { await file.close(); }
 }
 
 export class ClaudePreviewReader {

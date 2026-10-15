@@ -4,7 +4,7 @@ export function readableReply(value = "") {
   return value.replace(replyPrefix, "").trim();
 }
 
-export function conversationItems({ preview, records = [], inputs = new Map(), pending } = {}) {
+export function conversationItems({ history, preview, records = [], inputs = new Map(), pending } = {}) {
   const exchanges = new Map();
   for (const record of [...records].sort((a, b) => (a.at ?? 0) - (b.at ?? 0))) {
     if (record.state === "created") continue;
@@ -18,6 +18,15 @@ export function conversationItems({ preview, records = [], inputs = new Map(), p
   }
   const items = [];
   const tracked = [...exchanges.values()];
+  if (history) {
+    for (const row of history) items.push({ ...row, label: row.role === "user" ? "나" : "응답", text: row.role === "assistant" ? readableReply(row.text) : row.text });
+    for (const record of tracked) {
+      const represented = (role, text) => history.some(row => row.role === role && (record.turnId ? row.turnId === record.turnId : row.text.trim() === text.trim()));
+      if (record.input && !represented("user", record.input)) items.push({ role: "user", text: record.input, label: "나" });
+      if (record.reply !== undefined && !represented("assistant", record.reply)) items.push({ role: "assistant", text: readableReply(record.reply), label: "응답" });
+    }
+    return items;
+  }
   const output = readableReply(preview?.output);
   const previewId = preview?.output?.match(replyPrefix)?.[1];
   const duplicated = tracked.some(row => {

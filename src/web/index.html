@@ -12,8 +12,6 @@
     <a class="brand" href="/">waga</a>
     <button id="show-conversation" aria-pressed="true">세션 대화</button>
     <button id="show-executions" aria-pressed="false">실행 기록</button>
-    <select id="workflow" aria-label="작업 선택"><option value="">전체 세션</option></select>
-    <button id="new-workflow">＋ 작업</button>
     <span id="connection" role="status">연결 중</span>
     <button id="refresh" aria-label="새로고침">↻</button>
   </header>
@@ -27,11 +25,8 @@
       <div class="execution-inspector"><section id="execution-tools" aria-label="선택한 에이전트의 도구 호출"></section><section id="execution-evidence" aria-label="선택한 호출의 근거"></section></div>
     </section>
     <div id="conversation-workspace">
-    <section class="canvas" aria-label="작업 그래프" hidden>
-      <div id="graph" class="graph" hidden></div>
-    </section>
     <section id="detail" aria-label="세션 대화" hidden>
-      <div class="detail-heading"><div><span id="flow-title"></span><h1 id="node-title"></h1></div><button id="edit-evidence">단계 상태·근거</button></div>
+      <div class="detail-heading"><h1 id="node-title">세션 대화</h1></div>
       <div class="inline session-picker"><label for="session">세션</label><select id="session"><option value="">세션 연결</option></select><button id="new-session">새 세션</button></div>
       <p id="session-status" class="muted"></p>
       <div id="messages" class="messages" role="log" aria-label="대화 내역"></div>
@@ -51,28 +46,6 @@
     <label class="content-choice"><input id="trace-content" type="checkbox">도구 입력·출력·diff도 저장</label>
     <p class="muted">내용을 포함하면 코드나 비밀 값이 저장될 수 있습니다. 계정 식별 속성은 제외합니다.</p>
     <div class="actions"><button type="button" data-close="import-dialog">취소</button><button id="import-submit">가져오기</button></div>
-  </form></dialog>
-      <dialog id="evidence-dialog"><div class="detail-heading"><h2>단계 상태·완료 근거</h2><button type="button" data-close="evidence-dialog" aria-label="닫기">✕</button></div>
-        <form id="state-form">
-          <label for="phase-state">단계 상태 <small class="muted">직접 기록</small></label>
-          <select id="phase-state"><option value="pending">대기</option><option value="active">진행</option><option value="blocked">막힘</option><option value="passed">통과</option></select>
-          <label for="phase-note">막힌 이유 / 메모</label><textarea id="phase-note" rows="2" maxlength="2000"></textarea>
-          <label for="phase-evidence">완료 근거</label><textarea id="phase-evidence" rows="3" maxlength="4000" placeholder="검증 결과, 리뷰 결론, CI 링크 등"></textarea>
-          <label for="commit">검증 대상 Git SHA</label><input id="commit" maxlength="40" placeholder="전체 커밋 SHA (검증·리뷰·통합에 필요)">
-          <p id="evidence-commit" class="muted"></p>
-          <button type="submit">저장</button>
-        </form>
-        <form id="rework-form">
-          <label for="return-to">되돌릴 단계</label><select id="return-to"></select>
-          <label for="return-reason">되돌리는 이유</label><input id="return-reason" maxlength="2000" required>
-          <button id="return-submit">되돌리기</button>
-        </form>
-      </dialog>
-
-  <dialog id="workflow-dialog"><form id="workflow-form">
-    <h2>작업 만들기</h2>
-    <label for="workflow-title">작업명 / 이슈</label><input id="workflow-title" maxlength="160" required placeholder="예: Keeper #263">
-    <div class="actions"><button type="button" data-close="workflow-dialog">취소</button><button class="primary">만들기</button></div>
   </form></dialog>
   <dialog id="create-dialog"><form id="create-form">
     <h2>새 세션</h2>
