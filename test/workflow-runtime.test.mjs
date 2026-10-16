@@ -10,6 +10,7 @@ import { RunStore, validateRun } from "../src/run-store.mjs";
 import { guardedProcess, runWorkflow } from "../src/workflow-runtime.mjs";
 import { startWebServer } from "../src/web-server.mjs";
 import { WorkStore } from "../src/work-store.mjs";
+import { taskGraph } from '../src/web/task-graph.mjs';
 const exec = promisify(execFile), wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const manifest = { title: "독립 작업과 의존 작업", includeContent: true, models: { edit: "haiku", verify: "haiku" }, nodes: [
   { id: "a", title: "A 수정", role: "edit", prompt: "A returns 2", outputs: ["a.mjs"], check: [process.execPath, "check.mjs", "a", "2"] },
@@ -212,4 +213,45 @@ test('a check which changes its own target cannot certify the changed result', a
   const f = await fixture(t, spec), native = fakeAgents();
   const run = await runWorkflow(f.file, { ...f.options, sample: capacity, processRunner: native.run });
   assert.equal(run.state, 'needs-replan'); assert.match(run.nodes[0].attempts[0].check.stderr, /검사 실행 중/); assert.equal(run.nodes[0].attempts[0].passed, false);
+});
+
+test('verified JSON selects a branch, independent work overlaps, failed checks loop locally and selected paths join', async t => {
+  const spec = { ...manifest, maxParallel: 2, nodes: [
+    { ...manifest.nodes[0], outputs: ['a.mjs', 'scope.json'] },
+    manifest.nodes[1],
+    { id: 'selected', title: '선택된 수정', role: 'edit', prompt: 'Selected output returns 2', outputs: ['selected.mjs'], inputs: [{ from: 'a', path: 'a.mjs' }], when: { from: 'a', path: 'scope.json', field: 'target', equals: 'web' }, check: [process.execPath, 'check.mjs', 'selected', '2'] },
+    { id: 'unused', title: '불필요한 경로', role: 'edit', outputs: ['unused.json'], prompt: 'Must never run', when: { from: 'a', path: 'scope.json', field: 'target', equals: 'cli' }, check: [process.execPath, '-e', 'process.exit(99)'] },
+    { id: 'unused-condition', title: '제외된 조건 자료', role: 'scan', join: 'selected', dependsOn: ['a'], prompt: 'Must never run', when: { from: 'unused', path: 'unused.json', field: 'target', equals: 'web' }, check: [process.execPath, '-e', 'process.exit(99)'] },
+    { id: 'unused-child', title: '제외 경로 후속', role: 'scan', prompt: 'Must never run', dependsOn: ['unused'], check: [process.execPath, '-e', 'process.exit(99)'] },
+    { id: 'join', title: '선택 경로 합류', role: 'scan', prompt: 'Verify both selected results', join: 'selected', dependsOn: ['unused-child'], inputs: [{ from: 'b', path: 'b.mjs' }, { from: 'selected', path: 'selected.mjs' }], check: [process.execPath, '-e', "const a=await import('./selected.mjs');const b=await import('./b.mjs');if(a.default!==2||b.default!==3)process.exit(1)"] },
+  ] };
+  const f = await fixture(t, spec), native = fakeAgents(); let active = 0, peak = 0;
+  const processRunner = async (argv, options) => {
+    if (argv[0] !== 'claude') return native.run(argv, options);
+    active++; peak = Math.max(peak, active);
+    try {
+      await wait(30);
+      const result = await native.run(argv, options);
+      if (!argv.includes('--json-schema')) {
+        const id = path.basename(options.cwd).slice('waga-proof-'.length);
+        if (id === 'a') await fs.writeFile(path.join(options.cwd, 'scope.json'), JSON.stringify({ target: 'web' }));
+        if (id === 'selected') await fs.writeFile(path.join(options.cwd, 'selected.mjs'), 'export default 2;\n');
+      }
+      return result;
+    } finally { active--; }
+  };
+  const run = await runWorkflow(f.file, { ...f.options, sample: capacity, processRunner });
+  assert.equal(run.state, 'review_required', JSON.stringify(run.nodes.map(n=>({id:n.id,state:n.state,reason:n.attempts.at(-1)?.failure})))); assert.equal(peak, 2);
+  assert.equal(run.nodes.find(node => node.id === 'b').attempts.length, 2);
+  for (const id of ['unused','unused-child','unused-condition']) { assert.equal(run.nodes.find(node => node.id === id).state, 'skipped'); assert.equal(native.calls.has(id), false); }
+  const selected = run.nodes.find(node => node.id === 'selected');
+  assert.equal(selected.decision.value, 'web'); assert.equal(selected.decision.selected, true);
+  assert.equal(run.nodes.find(node => node.id === 'unused').decision.selected, false);
+  assert.equal(selected.decision.sha256, run.nodes[0].attempts[0].artifacts.find(row => row.path === 'scope.json').sha256);
+  assert.equal(run.nodes.find(node => node.id === 'join').attempts[0].check.exitCode, 0);
+  const graph=taskGraph(run);
+  assert.ok(graph.edges.some(edge=>edge.from==='b'&&edge.to==='b'&&edge.kind==='retry'&&edge.basis==='observed'));
+  assert.ok(graph.edges.some(edge=>edge.to==='unused'&&edge.kind==='condition'&&edge.inactive));
+  const resumed = await runWorkflow(f.file, { ...f.options, resume: run.id, sample: capacity, processRunner });
+  assert.equal(resumed.id, run.id); assert.equal(native.calls.get('b'), 2);
 });

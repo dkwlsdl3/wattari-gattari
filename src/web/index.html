@@ -29,7 +29,7 @@
       <div class="session-heading"><div><h1 id="node-title">세션 선택</h1><p id="session-status" class="muted"></p></div><div class="session-actions"><button id="connect-session" disabled>터미널 연결</button><button id="rename-session" disabled>이름 변경</button><button id="archive-session" disabled>보관</button></div></div>
       <div class="view-tabs"><button id="show-conversation" aria-pressed="true">대화</button><button id="show-executions" aria-pressed="false">실행 흐름</button></div>
     <section id="execution-panel" aria-label="실제 실행 기록" hidden>
-      <div class="execution-toolbar"><select id="execution-select" aria-label="실행 선택" hidden></select><button id="run-work-view" hidden>작업</button><button id="run-call-view" hidden>호출</button></div>
+      <div class="execution-toolbar"><select id="execution-select" aria-label="실행 선택" hidden></select><details id="execution-history" hidden><summary>이전 작업·호출 기록</summary><div id="execution-history-list"></div></details><button id="run-work-view" hidden>작업</button><button id="run-call-view" hidden>호출</button></div>
       <div id="run-controls" hidden><button id="run-pause">일시정지</button><button id="run-resume">재개</button><button id="run-stop">중단</button><button id="run-approve" hidden>최종 검토 완료</button><button id="run-resource-settings">자원 설정</button><span id="run-resource" class="muted"></span></div>
       <p id="execution-note" class="muted" role="status"></p>
       <div class="execution-body"><div id="execution-graph" aria-label="시간순 실행 기록과 호출 관계"></div>

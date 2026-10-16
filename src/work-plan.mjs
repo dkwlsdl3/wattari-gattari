@@ -1,3 +1,4 @@
+import { validateRun } from './run-store.mjs';
 const fail = (status, message) => Object.assign(new Error(message), { status });
 const text = (value, max) => {
   if (typeof value !== 'string' || !value.trim() || value.length > max || /[\x00-\x1f\x7f]/.test(value)) throw fail(400, '계획의 문자열 길이·내용을 확인해 주세요.');
@@ -26,5 +27,14 @@ export function validateWorkPlan(input) {
     visiting.delete(node.id); visited.add(node.id);
   }
   nodes.forEach(visit);
-  return { title: text(input.title, 160), skill: text(input.skill, 160), nodes };
+  const result = { title: text(input.title, 160), skill: text(input.skill, 160), nodes };
+  if (input.execution !== undefined) {
+    const execution = validateRun({ ...input.execution, title: result.title });
+    if (execution.workId || execution.sourceCwd || execution.nodes.length !== nodes.length || execution.nodes.some(node => {
+      const planned = byId.get(node.id);
+      return !planned || node.title !== planned.title || JSON.stringify([...node.dependsOn].sort()) !== JSON.stringify([...planned.dependsOn].sort());
+    })) throw fail(400, '실행 명세는 같은 계획의 단계·선행 관계와 일치해야 합니다.');
+    result.execution = execution;
+  }
+  return result;
 }

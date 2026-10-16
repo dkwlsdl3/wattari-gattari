@@ -25,6 +25,7 @@ export function parseCliArgs(args) {
     if (arg === "--help" || arg === "-h") { options.command = "help"; commandSeen = true; continue; }
     if (arg === "--version" || arg === "-v") { options.command = "version"; commandSeen = true; continue; }
     if (arg === "--json") { options.json = true; continue; }
+    if (arg === '--execute') { options.execute = true; continue; }
     if (arg === "--until-idle") { options.untilIdle = true; continue; }
     if (arg === "--notify-origin") { options.notifyOrigin = true; continue; }
     if (["--resume", "--port", "--cwd", "--provider", "--backend", "--timeout", "--wait-timeout", "--reply-timeout"].includes(arg)) {
@@ -64,9 +65,11 @@ export function parseCliArgs(args) {
   if (options.untilIdle && options.command !== "ask") throw invalid("--until-idle is only valid for ask");
   if (options.notifyOrigin && options.command !== "ask") throw invalid("--notify-origin is only valid for ask");
   if (options.resume && options.command !== "run") throw invalid("--resume is only valid for run");
+  if (options.execute && options.command !== 'plan') throw invalid('--execute is only valid for plan');
   if (options.command === 'plan') {
     options.target = positional.shift(); options.manifest = positional.shift();
     if (!/^(claude|codex):.+$/.test(options.target ?? '') || positional.length) throw invalid('plan requires a full provider-prefixed session ID and an optional plan JSON file');
+    if (options.execute && !options.manifest) throw invalid('--execute requires a plan JSON file');
   } else if (options.command === "run") {
     options.manifest = positional.shift();
     if (!options.manifest || positional.length) throw invalid("run requires one workflow JSON file");

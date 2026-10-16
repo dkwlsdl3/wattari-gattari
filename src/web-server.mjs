@@ -73,7 +73,7 @@ function publicSession(session) {
 
 // Native providers own sessions and decisions; the web attaches their frontend.
 export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, port = 4317,
-  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore(), workStore = new WorkStore(), orderStore = new DockOrderStore(), launch = launchWorkflow, assistant = new WorkAssistant({ store: workStore }), terminalFactory } = {}) {
+  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore(), workStore = new WorkStore(), orderStore = new DockOrderStore(), launch = launchWorkflow, running = workflowRunning, assistant = new WorkAssistant({ store: workStore }), terminalFactory } = {}) {
   if (!bridge) throw new TypeError("A session bridge is required");
   const assets = new Map(await Promise.all([...ASSETS].map(async ([route, [file, type]]) =>
     [route, { type, data: await fs.readFile(file instanceof URL ? file : new URL(`./web/${file}`, import.meta.url)) }])));
@@ -194,11 +194,23 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
             const bundle = await workSources(bridge, scopeSession, work.messageId, executionStore.native(scopeSession), work.instruction, work.context);
             json(response, 202, assistant.start(work, bundle, { refresh: input.refresh === true })); return;
           }
-          if (input.launch || input.analysisId) {
+          if (input.launch || input.analysisId || input.executePlan !== undefined) {
+            if ([input.launch !== undefined, input.analysisId !== undefined, input.executePlan !== undefined].filter(Boolean).length !== 1) throw fail(400, '실행할 계획은 하나의 경로로 지정해 주세요.');
             if (!UUID.test(input.launchId ?? '')) throw fail(400, '실행 요청 ID가 필요합니다.');
-            const previous = workStore.read(work.id).launches?.find(item => item.id === input.launchId || input.analysisId && item.analysisId === input.analysisId);
+            const previous = workStore.read(work.id).launches?.find(item => item.id === input.launchId || input.analysisId && item.analysisId === input.analysisId || input.executePlan && item.planRevision === input.executePlan);
             if (previous) { json(response, 200, previous); return; }
             let definition = input.launch;
+            if (input.executePlan !== undefined) {
+              if (!Number.isInteger(input.executePlan) || input.executePlan !== work.plan?.revision || !work.plan.execution) throw fail(409, '현재 실행 가능한 계획 revision이 아닙니다.');
+              const fresh = (await bridge.discover()).sessions.find(session => session.id === scopeSession.id);
+              if (!fresh || fresh.cwd !== work.session.cwd || fresh.provider !== work.session.provider) throw fail(409, '작업을 계획한 세션 연결이 변경됐습니다.');
+              const bundle = await workSources(bridge, scopeSession, work.messageId, executionStore.native(scopeSession), work.instruction, work.context);
+              if (!bundle.message) throw fail(409, '원래 사용자 지시를 확인할 수 없습니다.');
+              if (!work.plan.execution.nodes.every(node => bundle.checks.some(check => JSON.stringify(check.argv) === JSON.stringify(node.check)))) throw fail(400, '실행 검사 명령은 프로젝트에 등록된 test·check·lint 또는 cargo test --jobs 1을 사용해 주세요.');
+              const version = await sourceVersion(work.session.cwd);
+              if (!version.clean) throw fail(409, '격리 실행의 기준 저장소를 먼저 커밋해 주세요.');
+              definition = work.plan.execution;
+            }
             if (input.analysisId) {
               const analysis = work.analysis;
               if (!analysis || analysis.id !== input.analysisId || analysis.state !== 'ready' || !analysis.manifest) throw fail(409, '현재 실행 가능한 계획이 아닙니다.');
@@ -212,12 +224,13 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
               definition = analysis.manifest;
             }
             const latest = workStore.read(work.id);
-            const concurrent = latest.launches?.find(item => item.id === input.launchId || input.analysisId && item.analysisId === input.analysisId);
+            const concurrent = latest.launches?.find(item => item.id === input.launchId || input.analysisId && item.analysisId === input.analysisId || input.executePlan && item.planRevision === input.executePlan);
             if (concurrent) { json(response, 200, concurrent); return; }
             if (input.analysisId && (latest.analysis?.id !== input.analysisId || JSON.stringify(latest.context) !== JSON.stringify(work.context))) throw fail(409, '계획·인계가 변경됐습니다. 최신 작업을 확인해 주세요.');
+            if (input.executePlan && (latest.plan?.revision !== input.executePlan || JSON.stringify(latest.context) !== JSON.stringify(work.context))) throw fail(409, '실행 전에 계획·인계가 변경됐습니다. 최신 계획을 확인해 주세요.');
             const created = runStore.create({ ...definition, workId: work.id, sourceCwd: work.session.cwd }, cwd);
             runStore.context(created.id, { workId: work.id, snapshot: work.context ?? null, text: handoffText(work) });
-            const saved = workStore.launched(work.id, input.launchId, created.id, input.analysisId);
+            const saved = workStore.launched(work.id, input.launchId, created.id, input.analysisId, input.executePlan);
             try { await launch(runStore.read(created.id), created.secret, origin); }
             catch (error) { workStore.launchState(work.id, input.launchId, 'uncertain', error.message); throw error; }
             workStore.launchState(work.id, input.launchId, 'started');
@@ -249,7 +262,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         if (request.method === "GET" && !runMatch[2]) {
           let current = row;
           if (['review_required', 'approved'].includes(row.state)) { const stale = await staleNodes(row); if (stale.length) current = runStore.event(row.id, { type: 'invalidate', eventId: crypto.randomUUID(), nodes: stale }); }
-          else if (row.workId && workStore.read(row.workId).launches?.some(item => item.runId === row.id && item.state === 'started') && !await workflowRunning(row.id) && runStore.read(row.id).revision === row.revision) {
+          else if (row.workId && workStore.read(row.workId).launches?.some(item => item.runId === row.id && item.state === 'started') && !await running(row.id) && runStore.read(row.id).revision === row.revision) {
             for (const node of row.nodes.filter(node => ['working', 'checking', 'verifying', 'waiting-resource', 'paused'].includes(node.state))) runStore.event(row.id, { type: 'phase', nodeId: node.id, state: 'interrupted', eventId: crypto.randomUUID() });
             current = runStore.event(row.id, { type: 'end', reason: '실행기가 종료됐습니다. 재개하면 기존 명령 결과를 먼저 회수합니다.', kind: 'interrupted', eventId: crypto.randomUUID() });
           }

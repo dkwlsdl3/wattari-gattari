@@ -3,10 +3,15 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { WorkStore } from '../src/work-store.mjs';
 import { runCli } from '../src/cli.mjs';
 import { startWebServer } from '../src/web-server.mjs';
 import { taskGraph } from '../src/web/task-graph.mjs';
+import { RunStore } from '../src/run-store.mjs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const exec = promisify(execFile);
 
 const output = () => { let value = ''; return { write(text) { value += text; }, get value() { return value; } }; };
 const plan = () => ({ messageId: 'original-user', revision: 0, title: '순서 동기화 수정', skill: 'issue-loop', nodes: [
@@ -78,4 +83,32 @@ test('web reads the same skill plan as CLI and plan updates cannot escape the se
   const graph = taskGraph({ declaration: true, nodes: row.plan.nodes.map(node => ({ ...node, inputs: [], attempts: [] })) });
   assert.equal(graph.edges.length, 2); assert.equal(graph.edges[0].label, '계획한 선행 관계');
   assert.equal(graph.nodes[1].blockedReason, ''); // A declared dependency is not an enforced verification gate.
+});
+
+test('plan --execute hands the exact registered graph to one durable launch and repeated or concurrent requests do not duplicate it', async t => {
+  const f = await fixture(t), repo = path.join(f.root, 'repo'); await fs.mkdir(repo); f.session.cwd = repo;
+  await fs.writeFile(path.join(repo, 'package.json'), JSON.stringify({ scripts: { test: 'node --test' } }));
+  await exec('git', ['init', '-q', repo]); await exec('git', ['-C',repo,'add','.']);
+  await exec('git', ['-C',repo,'-c','user.name=waga-proof','-c','user.email=proof@example.invalid','commit','-qm','fixture']);
+  const runStore = new RunStore(path.join(f.root, 'runs')); let launches = 0;
+  const web = await startWebServer({ bridge: f.bridge, workStore: f.store, runStore, cwd: repo, port: 0, launch: async run => { launches++; assert.equal(run.nodes.length, 3); } });
+  t.after(() => web.close());
+  const input = plan();
+  input.execution = { models: { scan: 'haiku', verify: 'haiku' }, nodes: input.nodes.map(node => ({ id: node.id, title: node.title, dependsOn: node.dependsOn, role: 'scan', prompt: node.title, check: ['npm','test'] })) };
+  const file = path.join(f.root,'execute.json'); await fs.writeFile(file, JSON.stringify(input));
+  const options = { bridge: f.bridge, workStore: f.store, planUrl: web.url, stdout: output(), stderr: output() };
+  assert.equal(await runCli(['plan',f.session.id,file,'--execute'],options),0,options.stderr.value);
+  const result = JSON.parse(options.stdout.value); assert.equal(result.launch.state,'started'); assert.equal(launches,1);
+  assert.equal(runStore.read(result.launch.runId).workId,result.workId);
+  assert.equal(f.store.read(result.workId).launches[0].planRevision,1);
+  for (let n=0;n<2;n++) assert.equal(await runCli(['plan',f.session.id,file,'--execute'],{...options,stdout:output()}),0);
+  const headers={Cookie:`waga_web=${web.url.split('#')[1]}`,Origin:web.origin,'Content-Type':'application/json'};
+  const route=`${web.origin}/api/works/${result.workId}?session=${f.session.id}`;
+  const mixed=await fetch(route,{method:'POST',headers,body:JSON.stringify({executePlan:1,analysisId:'other-plan',launchId:crypto.randomUUID()})});
+  assert.equal(mixed.status,400); assert.equal(launches,1);
+  const responses=await Promise.all([1,2].map(()=>fetch(route,{method:'POST',headers,body:JSON.stringify({executePlan:1,launchId:crypto.randomUUID()})})));
+  assert.ok(responses.every(r=>r.status===200)); assert.equal(launches,1); assert.equal(runStore.list(repo).length,1); assert.equal(f.writes(),0);
+  const changed=structuredClone(input); changed.revision=1; changed.title='실행 중 교체';
+  assert.throws(()=>f.store.plan(result.workId,changed),{status:409});
+  const read=output(); assert.equal(await runCli(['plan',f.session.id],{...options,stdout:read}),0); assert.equal(JSON.parse(read.value).plans[0].runs[0].id,result.launch.runId);
 });

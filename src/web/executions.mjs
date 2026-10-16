@@ -77,7 +77,7 @@ function diffBlock(change) {
   for (const line of lines) pre.append(el("span", line, line.startsWith("+") && !line.startsWith("+++") ? "diff-add" : line.startsWith("-") && !line.startsWith("---") ? "diff-remove" : line.startsWith("@@") ? "diff-hunk" : ""));
   box.append(pre); return box;
 }
-const taskStates = { "waiting-user": "사용자 판단 대기", "permission-wait": "권한 판단 대기", stale: "검증 무효·재계획", pending: "대기", working: "작업 중", checking: "검사 중", verifying: "독립 검증 중", passed: "통과", failed: "수정 대기", "needs-replan": "재계획 필요", "waiting-resource": "자원 대기", paused: "일시정지", interrupted: "실행 중단", planned: "실행 준비", running: "실행 중", review_required: "최종 검토 대기", approved: "검토 완료", stopped: "중단" };
+const taskStates = { skipped: '조건 제외', "waiting-user": "사용자 판단 대기", "permission-wait": "권한 판단 대기", stale: "검증 무효·재계획", pending: "대기", working: "작업 중", checking: "검사 중", verifying: "독립 검증 중", passed: "통과", failed: "수정 대기", "needs-replan": "재계획 필요", "waiting-resource": "자원 대기", paused: "일시정지", interrupted: "실행 중단", planned: "실행 준비", running: "실행 중", review_required: "최종 검토 대기", approved: "검토 완료", stopped: "중단" };
 const states = { error: "오류 기록", returned: "호출 종료", unknown: "종료 미확인" };
 const $ = selector => document.querySelector(selector);
 function el(tag, text, className) { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; }
@@ -95,12 +95,17 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     if (!graph.clientWidth || !drawnEdges.length) return;
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"), bounds = graph.getBoundingClientRect();
     svg.setAttribute("width", graph.scrollWidth); svg.setAttribute("height", graph.scrollHeight); svg.setAttribute("aria-hidden", "true");
+    const defs = document.createElementNS(svg.namespaceURI, 'defs'), marker = document.createElementNS(svg.namespaceURI, 'marker'), arrow = document.createElementNS(svg.namespaceURI, 'path');
+    marker.id = 'flow-arrow'; marker.setAttribute('viewBox', '0 0 10 10'); marker.setAttribute('refX','9'); marker.setAttribute('refY','5'); marker.setAttribute('markerWidth','6'); marker.setAttribute('markerHeight','6'); marker.setAttribute('orient','auto'); arrow.setAttribute('d','M 0 0 L 10 5 L 0 10 z'); marker.append(arrow); defs.append(marker); svg.append(defs);
     for (const edge of drawnEdges) {
       const from = cards.get(edge.from)?.getBoundingClientRect(), to = cards.get(edge.to)?.getBoundingClientRect(); if (!from || !to) continue;
       const x1 = from.right - bounds.left + graph.scrollLeft, y1 = from.top + from.height / 2 - bounds.top;
       const x2 = to.left - bounds.left + graph.scrollLeft, y2 = to.top + to.height / 2 - bounds.top;
       const path = document.createElementNS(svg.namespaceURI, "path");
-      path.setAttribute("d", `M ${x1} ${y1} C ${x1 + 20} ${y1}, ${x2 - 20} ${y2}, ${x2} ${y2}`); if (edge.label) { const title = document.createElementNS(svg.namespaceURI, 'title'); title.textContent = edge.label; path.append(title); path.setAttribute('data-relation', edge.kind); }
+      const bottom = from.bottom - bounds.top;
+      path.setAttribute("d", edge.kind === 'retry' ? `M ${x1 - 25} ${bottom} C ${x1 - 25} ${bottom + 28}, ${from.left - bounds.left + 25} ${bottom + 28}, ${from.left - bounds.left + 25} ${bottom}` : `M ${x1} ${y1} C ${x1 + 20} ${y1}, ${x2 - 20} ${y2}, ${x2} ${y2}`);
+      path.setAttribute('marker-end','url(#flow-arrow)'); if (edge.inactive) path.classList.add('inactive-edge');
+      if (edge.label) { const title = document.createElementNS(svg.namespaceURI, 'title'); title.textContent = edge.label; path.append(title); path.setAttribute('data-relation', edge.kind); }
       svg.append(path);
     }
     graph.prepend(svg);
@@ -145,8 +150,9 @@ export async function initExecutions({ api, notice, selectedSession = () => null
   function layoutGraph(nodes, edges) {
     drawnEdges = edges; cards = new Map();
     const levels = new Map(), outgoing = new Map();
-    for (const edge of edges) { if (!outgoing.has(edge.from)) outgoing.set(edge.from, []); outgoing.get(edge.from).push(edge.to); }
-    const queue = nodes.filter(node => !edges.some(edge => edge.to === node.id)).map(node => node.id);
+    const forward = edges.filter(edge => edge.kind !== 'retry');
+    for (const edge of forward) { if (!outgoing.has(edge.from)) outgoing.set(edge.from, []); outgoing.get(edge.from).push(edge.to); }
+    const queue = nodes.filter(node => !forward.some(edge => edge.to === node.id)).map(node => node.id);
     for (const id of queue) levels.set(id, 0);
     for (let index = 0; index < queue.length; index++) for (const child of outgoing.get(queue[index]) ?? []) {
       const depth = levels.get(queue[index]) + 1;
@@ -184,7 +190,8 @@ export async function initExecutions({ api, notice, selectedSession = () => null
       }
       return;
     }
-    if (!attempt) { panel.append(el("p", "아직 실행 근거가 없습니다.", "muted")); return; }
+    if (node.decision) panel.append(el('h3', '분기 판단 근거'), el('pre', JSON.stringify(node.decision, null, 2)));
+    if (!attempt) { panel.append(el("p", node.blockedReason || "아직 실행 근거가 없습니다.", "muted")); return; }
     panel.append(el("p", `${attempt.passed ? "검사·독립 검증 통과" : "통과하지 못함"} · 작업 모델 ${attempt.worker.model} · 검증 모델 ${attempt.review.model || "미실행"}`, "muted"));
     if (node.state === 'stale') panel.append(el('p', '검증 후 파일이 변경됐습니다. 아래는 당시 검사 기록입니다.', 'task-blocked'));
     if (attempt.evidence) panel.append(el('p', `검사 대상 커밋 ${attempt.evidence.revision} · ${attempt.evidence.fingerprint}`, 'muted'));
@@ -198,15 +205,22 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     const graph = $("#execution-graph"), calls = $("#execution-tools"), detail = $("#execution-evidence"); graph.classList.remove("execution-timeline"); graph.replaceChildren(); calls.replaceChildren(); detail.replaceChildren();
     const { nodes, edges } = taskGraph(currentRun);
     const levels = layoutGraph(currentRun.nodes, edges);
-    graph.classList.toggle('declared-plan', Boolean(currentRun.declaration));
+    graph.classList.add('task-layout');
     graph.style.setProperty('--plan-columns', String(Math.max(0, ...levels.values()) + 1));
-    const selected = currentRun.nodes.find(node => node.id === selectedTask) || currentRun.nodes.find(node => node.state !== "passed") || currentRun.nodes[0]; selectedTask = selected.id;
+    const groups = new Map();
+    for (const node of nodes) { const level = levels.get(node.id) ?? 0; if (!groups.has(level)) groups.set(level, []); groups.get(level).push(node.id); }
+    const rows = Math.max(...[...groups.values()].map(group => group.length));
+    const selected = currentRun.nodes.find(node => node.id === selectedTask) || currentRun.nodes.find(node => !['passed', 'skipped'].includes(node.state)) || currentRun.nodes[0]; selectedTask = selected.id;
     $("#execution-note").textContent = `${currentRun.title} · ${currentRun.declaration ? `${currentRun.skill} · 작업 계획 · 에이전트 진행 보고` : currentRun.proposal ? 'LLM 제안 관계 · 실행 전' : `${taskStates[currentRun.state]} · 명세에 선언된 작업 의존성`}${currentRun.blockedReason ? ` · ${currentRun.blockedReason}` : ""}`;
     for (const node of nodes) {
       const card = el("button", undefined, `agent-card task-${node.state}`); card.style.gridColumn = String((levels.get(node.id) ?? 0) + 1); card.setAttribute("aria-pressed", String(node.id === selected.id));
+      const group = groups.get(levels.get(node.id) ?? 0); card.style.gridRow = group.length === 1 ? `1 / span ${rows}` : String(group.indexOf(node.id) + 1);
       const role = ({ plan: "계획", scan: "조사", edit: "수정", verify: "검증" })[node.role];
       card.append(el("small", currentRun.declaration ? currentRun.skill : currentRun.proposal ? `${role} · LLM 제안` : `${currentRun.providers?.[node.role] ?? "claude"} · ${role} · ${currentRun.models[node.role]}`, "muted"), el("strong", node.title), el("span", currentRun.declaration ? ({ pending: '대기', working: '진행 중', failed: '막힘', reported: '단계 종료 보고' })[node.state] : currentRun.proposal ? '제안 · 실행 전' : taskStates[node.state]), el("small", currentRun.declaration ? `연결한 근거 ${node.evidence.length}개` : currentRun.proposal ? `원문 근거 ${node.evidenceIds.length}개` : `${node.attempts.length}회 실행${node.stalls ? ` · 무진전 ${node.stalls}회` : ""}`, "muted"));
-      if (node.blockedReason) card.append(el('small', node.blockedReason.slice(0, 180), 'task-blocked'));
+      if (node.blockedReason && node.state !== 'skipped') card.append(el('small', node.blockedReason.slice(0, 180), 'task-blocked'));
+      if (node.when) card.append(el('small', `${node.when.field} = ${JSON.stringify(node.when.equals)}${node.decision ? node.decision.selected ? ' · 선택' : ' · 제외' : ' · 판단 대기'}`, 'muted'));
+      if (node.join === 'selected') card.append(el('small', '선택된 경로 합류', 'muted'));
+      if (node.attempts.length > 1) card.append(el('small', `실패 근거로 수정 ${node.attempts.length - 1}회`, 'task-blocked'));
       if (node.inputs.length) card.append(el('small', `받는 파일: ${node.inputs.map(input => input.path).join(', ')}`, 'muted'));
       if (node.state === 'passed') card.append(el('small', '동작 검사 → 독립 검토 통과', 'muted'));
       cards.set(node.id, card); card.addEventListener("click", () => { selectedTask = node.id; selectedAttempt = -1; inspector.hidden = false; renderRun(); }); graph.append(card);
@@ -237,7 +251,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     $("#execution-panel").classList.toggle("native-flow", !(currentRun && workView));
     if (currentRun && workView) { renderRun(); return; }
     const graph = $("#execution-graph"), calls = $("#execution-tools"), detail = $("#execution-evidence");
-    graph.classList.remove('declared-plan');
+    graph.classList.remove('task-layout');
     const graphTop = graph.scrollTop;
     const followLatest = !keepPosition || graph.scrollHeight - graph.clientHeight - graphTop <= 32;
     const viewportTop = graph.getBoundingClientRect().top;
@@ -390,18 +404,26 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     const picker = $("#execution-select"), startedWith = picker.value;
     const [{ executions }, { runs }, { works }] = await Promise.all([api(scoped("executions")), api(scoped("runs")), api(scoped('works'))]);
     if (version !== listVersion || (preserve && picker.value !== startedWith)) return;
-    const selected = preferred || picker.value;
+    let selected = preferred || picker.value;
     executions.sort((a, b) => Number(b.source === "native") - Number(a.source === "native")); picker.replaceChildren();
     for (const run of runs) { const option = el("option", `${run.title} · ${taskStates[run.state]}`); option.value = `run:${run.id}`; picker.append(option); }
-    const proposals = works.filter(work => work.analysis?.nodes);
+    const proposals = works.filter(work => work.analysis?.nodes && selected === `proposal:${work.id}`);
     const plans = works.filter(work => work.plan).sort((a, b) => b.plan.updatedAt - a.plan.updatedAt);
-    for (const work of plans) { const option = el('option', `${work.plan.title} · ${work.plan.skill}`); option.value = `plan:${work.id}`; picker.append(option); }
+    for (const work of plans) {
+      const linked = runs.find(run => run.workId === work.id && work.launches?.some(launch => launch.runId === run.id && launch.planRevision === work.plan.revision));
+      if (linked) { if (selected === `plan:${work.id}`) selected = `run:${linked.id}`; continue; }
+      const option = el('option', `${work.plan.title} · ${work.plan.skill}`); option.value = `plan:${work.id}`; picker.append(option);
+    }
     for (const work of proposals) { const option = el('option', `${work.analysis.summary} · LLM 제안`); option.value = `proposal:${work.id}`; picker.append(option); }
     for (const run of executions) { const option = el("option", run.source === "native" ? "세션 실행 기록 · 자동 수집" : `${run.title} · ${new Date(run.importedAt).toLocaleString("ko-KR")}`); option.value = run.id; picker.append(option); }
-    const latest = works.at(-1), latestRun = latest && runs.findLast(run => run.workId === latest.id);
-    const first = plans[0] ? `plan:${plans[0].id}` : latestRun ? `run:${latestRun.id}` : latest?.analysis?.nodes ? `proposal:${latest.id}` : null;
-    const ids = [...new Set([...(first ? [first] : []), ...plans.map(work => `plan:${work.id}`), ...executions.filter(row => row.source === "native").map(row => row.id), ...runs.map(row => `run:${row.id}`), ...proposals.map(work => `proposal:${work.id}`), ...executions.filter(row => row.source !== "native").map(row => row.id)])]; picker.value = ids.includes(selected) ? selected : ids[0] || "";
-    picker.disabled = !ids.length; picker.hidden = ids.length < 2;
+    const latestRun = plans[0] && runs.find(run => run.workId === plans[0].id);
+    const first = latestRun ? `run:${latestRun.id}` : plans[0] ? `plan:${plans[0].id}` : runs[0] ? `run:${runs[0].id}` : null;
+    const ids = [...picker.options].map(option => option.value); picker.value = ids.includes(selected) ? selected : ids.includes(first) ? first : ids[0] || '';
+    picker.disabled = !ids.length; picker.hidden = true;
+    const history = $('#execution-history'), list = $('#execution-history-list'); list.replaceChildren(); history.hidden = ids.length < 2;
+    for (const option of [...picker.options].filter(option => option.value !== picker.value)) {
+      const button = el('button', option.textContent); button.onclick = () => { history.open = false; void listing(option.value).catch(error => notice(error.message)); }; list.append(button);
+    }
     await load(picker.value, preserve);
   }
   async function control(action, extra = {}) {

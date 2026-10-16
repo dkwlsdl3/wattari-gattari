@@ -35,8 +35,17 @@ export function validateRun(input) {
     if (!Array.isArray(node.check) || !node.check.length || node.check.length > 30 || node.check.some(arg => typeof arg !== "string" || arg.length > 2000 || arg.includes("\0"))) throw fail(400, "검사 명령은 실행 파일과 인자 배열이 필요합니다.");
     const outputs = (node.outputs ?? []).map(artifactPath), inputs = (node.inputs ?? []).map(item => ({ from: text(item.from, 64), path: artifactPath(item.path) }));
     if (outputs.length > 30 || inputs.length > 60 || (node.role !== "edit" && outputs.length)) throw fail(400, "읽기 역할에는 변경 산출물을 지정할 수 없습니다.");
+    let when;
+    if (node.when !== undefined) {
+      const value = node.when;
+      if (!value || typeof value !== 'object' || !['string', 'number', 'boolean'].includes(typeof value.equals) && value.equals !== null || typeof value.equals === 'number' && !Number.isFinite(value.equals)) throw fail(400, '분기 조건에는 JSON의 단일 필드와 비교 값이 필요합니다.');
+      when = { from: text(value.from, 64), path: artifactPath(value.path), field: text(value.field, 100), equals: value.equals };
+      if (!inputs.some(item => item.from === when.from && item.path === when.path)) inputs.push({ from: when.from, path: when.path });
+    }
+    const join = node.join ?? 'all';
+    if (!['all', 'selected'].includes(join)) throw fail(400, '합류 조건은 all 또는 selected입니다.');
     return { id, title: text(node.title), role: node.role, prompt: text(node.prompt, 12000), check: node.check,
-      dependsOn: [...new Set([...(node.dependsOn ?? []).map(value => text(value, 64)), ...inputs.map(item => item.from)])], inputs, outputs };
+      dependsOn: [...new Set([...(node.dependsOn ?? []).map(value => text(value, 64)), ...inputs.map(item => item.from)])], inputs, outputs, ...(when ? { when } : {}), ...(join === 'selected' ? { join } : {}) };
   });
   const byId = new Map(nodes.map(node => [node.id, node]));
   if (byId.size !== nodes.length) throw fail(400, "작업 ID가 중복됐습니다.");
@@ -58,6 +67,12 @@ export function validateRun(input) {
   return { ...(input.workId ? { workId: input.workId } : {}), ...(input.sourceCwd ? { sourceCwd: input.sourceCwd } : {}), title: text(input.title), nodes, models: roles, providers, maxParallel, includeContent: input.includeContent === true, resources: { reserveGiB, maxCpuPercent }, maxAttempts };
 }
 const digest = value => crypto.createHash("sha256").update(value).digest("hex");
+export function dependenciesReady(node, nodes) {
+  const dependencies = node.dependsOn.map(id => nodes.find(other => other.id === id));
+  return dependencies.every(other => other?.state === 'passed' || node.join === 'selected' && other?.state === 'skipped')
+    && (!node.when || nodes.find(other => other.id === node.when.from)?.state === 'passed')
+    && (!dependencies.length || dependencies.some(other => other?.state === 'passed'));
+}
 export class RunStore {
   constructor(directory = path.join(process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state"), APP_ID, "runs")) { this.directory = directory; }
   #file(id) { if (!validId(id)) throw fail(400, "잘못된 실행 ID입니다."); return path.join(this.directory, `${id}.json`); }
@@ -85,7 +100,7 @@ export class RunStore {
   list(cwd) {
     let files; try { files = fs.readdirSync(this.directory); } catch (error) { if (error.code === "ENOENT") return []; throw error; }
     return files.filter(file => /^[0-9a-f-]{36}\.json$/.test(file)).map(file => this.read(file.slice(0, -5))).filter(row => row.cwd === cwd)
-      .sort((a, b) => b.updatedAt - a.updatedAt).map(({ id, title, state, revision, updatedAt, nodes }) => ({ id, title, state, revision, updatedAt, passed: nodes.filter(node => node.state === "passed").length, total: nodes.length }));
+      .sort((a, b) => b.updatedAt - a.updatedAt).map(({ id, title, state, revision, updatedAt, nodes, workId }) => ({ id, title, state, revision, updatedAt, ...(workId ? { workId } : {}), passed: nodes.filter(node => node.state === "passed").length, skipped: nodes.filter(node => node.state === 'skipped').length, total: nodes.length }));
   }
   create(input, cwd) {
     if (this.list(cwd).length >= 100) throw fail(409, "실행은 100개까지 보관합니다.");
@@ -102,7 +117,7 @@ export class RunStore {
   control(id, input) {
     const row = this.read(id, true);
     if (input.action === "approve") {
-      if (row.state !== "review_required") throw fail(409, "모든 작업의 검사·독립 검증이 통과해야 최종 확인할 수 있습니다.");
+      if (row.state !== "review_required") throw fail(409, "선택된 작업의 검사·독립 검증이 통과해야 최종 확인할 수 있습니다.");
       row.state = "approved"; row.approvedAt = Date.now();
     } else if (["pause", "resume", "stop"].includes(input.action)) {
       if (["approved", "review_required"].includes(row.state)) throw fail(409, "종료된 실행입니다.");
@@ -126,15 +141,27 @@ export class RunStore {
       row.metrics.minAvailableGiB = Math.min(row.metrics.minAvailableGiB, input.sample.availableGiB); row.metrics.maxCpuPercent = Math.max(row.metrics.maxCpuPercent, input.sample.cpuPercent ?? 0); row.metrics.samples++;
       row.resource = input.sample; row.state = input.waiting ? "waiting-resource" : "running"; }
     else if (input.type === "start") { delete row.blockedReason; row.startedAt ??= Date.now(); row.state = "running"; row.sourceCommit = text(input.sourceCommit, 40); }
-    else if (input.type === "phase") {
-      if (!node || node.state === "passed" || !["waiting-resource", "paused", "working", "checking", "verifying", "interrupted"].includes(input.state)) throw fail(409, "작업 상태를 바꿀 수 없습니다.");
+    else if (input.type === 'decision') {
+      const source = node?.when && row.nodes.find(other => other.id === node.when.from);
+      const artifact = source?.attempts.at(-1)?.artifacts?.find(item => item.path === node.when.path);
+      if (!node || ['passed', 'skipped'].includes(node.state) || source?.state !== 'passed' || !artifact?.sha256 || input.sha256 !== artifact.sha256 || !Object.hasOwn(input, 'value') || !['string','number','boolean'].includes(typeof input.value) && input.value !== null) throw fail(409, '검증된 선행 JSON 산출물로 분기해야 합니다.');
+      const selected = input.value === node.when.equals;
+      node.decision = { ...node.when, value: input.value, sha256: input.sha256, selected, at: Date.now() };
+      if (!selected) { node.state = 'skipped'; node.blockedReason = `조건 제외: ${node.when.path}의 ${node.when.field} = ${JSON.stringify(input.value)} (필요: ${JSON.stringify(node.when.equals)})`; }
+    } else if (input.type === 'skip') {
+      const dependencies = node?.dependsOn.map(id => row.nodes.find(other => other.id === id));
+      if (!node || ['passed','skipped'].includes(node.state) || !dependencies.length || !dependencies.every(other => ['passed','skipped'].includes(other.state)) || !dependencies.some(other => other.state === 'skipped') || dependenciesReady(node, row.nodes)) throw fail(409, '선행 경로 제외로 실행하지 않는 단계만 건너뛸 수 있습니다.');
+      node.state = 'skipped'; node.blockedReason = '선행 경로가 선택되지 않아 실행하지 않았습니다.';
+    } else if (input.type === "phase") {
+      if (!node || ['passed','skipped'].includes(node.state) || !["waiting-resource", "paused", "working", "checking", "verifying", "interrupted"].includes(input.state)) throw fail(409, "작업 상태를 바꿀 수 없습니다.");
+      if (['working','checking','verifying'].includes(input.state) && (!dependenciesReady(node, row.nodes) || node.when && !node.decision?.selected)) throw fail(409, '선행 검사·분기 선택을 확인한 뒤 실행해야 합니다.');
       node.state = input.state; if (input.workspace) node.workspace = text(input.workspace, 2000);
     } else if (input.type === "session") {
       if (!node || node.state === "passed" || !validId(input.sessionId) || !["worker", "review"].includes(input.role)) throw fail(400, "native 세션 연결을 확인해 주세요.");
       node.sessions ??= []; node.sessions.push({ id: input.sessionId, role: input.role, attempt: node.attempts.length + 1 });
       if (node.sessions.length > row.maxAttempts * 4) throw fail(409, "세션 연결 한도입니다.");
     } else if (input.type === "attempt") {
-      if (!node || node.state === "passed" || node.dependsOn.some(id => row.nodes.find(other => other.id === id).state !== "passed")) throw fail(409, "선행 작업이 통과해야 실행할 수 있습니다.");
+      if (!node || ['passed','skipped'].includes(node.state) || !dependenciesReady(node, row.nodes) || node.when && !node.decision?.selected) throw fail(409, "선행 작업이 통과해야 실행할 수 있습니다.");
       if (node.attempts.length >= row.maxAttempts || node.stalls >= 2) throw fail(409, "수정 한도에 도달했습니다. 재계획이 필요합니다.");
       const result = input.result;
       if (!result || !/^[a-f0-9]{64}$/.test(result.fingerprint ?? "") || !result.check || !Number.isInteger(result.check.exitCode) && result.check.exitCode !== null) throw fail(400, "구조화된 검사 결과와 산출물 지문이 필요합니다.");
@@ -153,7 +180,8 @@ export class RunStore {
     } else if (input.type === "end") {
       if (input.reason) { row.blockedReason = text(input.reason, 2000); row.errors ??= []; row.errors.push({ at: Date.now(), kind: input.kind ?? 'environment', reason: row.blockedReason }); row.errors = row.errors.slice(-30); }
       row.elapsedMs = Date.now() - (row.startedAt ?? row.createdAt);
-      row.state = row.control === "stop" ? "stopped" : row.nodes.some(node => node.state === "permission-wait") ? "waiting-user" : row.nodes.some(node => node.state === "interrupted") ? "interrupted" : row.nodes.every(node => node.state === "passed") ? "review_required" : "needs-replan";
+      row.state = row.control === "stop" ? "stopped" : row.nodes.some(node => node.state === "permission-wait") ? "waiting-user" : row.nodes.some(node => node.state === "interrupted") ? "interrupted" : row.nodes.some(node => node.state === 'passed') && row.nodes.every(node => ['passed','skipped'].includes(node.state)) ? "review_required" : "needs-replan";
+      if (row.state === 'review_required' && !input.reason) delete row.blockedReason;
     } else throw fail(400, "지원하지 않는 실행 이벤트입니다.");
     row.processed.push(input.eventId); row.updatedAt = Date.now(); row.revision++; return this.#write(row);
   }

@@ -78,7 +78,8 @@ export class WorkStore {
   analysis(id, value) { const row = this.read(id); row.analysis = value; return this.#write(row); }
   plan(id, input) {
     const row = this.read(id), value = validateWorkPlan(input);
-    if (row.plan && JSON.stringify(value) === JSON.stringify({ title: row.plan.title, skill: row.plan.skill, nodes: row.plan.nodes })) return row;
+    if (row.plan && JSON.stringify(value) === JSON.stringify({ title: row.plan.title, skill: row.plan.skill, nodes: row.plan.nodes, ...(row.plan.execution ? { execution: row.plan.execution } : {}) })) return row;
+    if (row.plan && row.launches?.some(launch => launch.planRevision === row.plan.revision)) throw fail(409, '실행으로 넘긴 계획은 실행 기록으로 관리합니다. 변경 지시는 후속 작업에 연결해 주세요.');
     if (input.revision !== (row.plan?.revision ?? 0)) throw fail(409, '계획이 변경됐습니다. 현재 revision을 읽은 뒤 갱신해 주세요.');
     row.plan = { ...value, revision: input.revision + 1, updatedAt: Date.now(), basis: 'agent-declared' };
     return this.#write(row);
@@ -92,12 +93,12 @@ export class WorkStore {
     row.context = { ...normalizeContext(input, row.context), origin: 'llm', analysisId };
     return this.#write(row);
   }
-  launched(id, launchId, runId, analysisId) {
+  launched(id, launchId, runId, analysisId, planRevision) {
     this.#file(launchId); const row = this.read(id); row.launches ??= [];
     const previous = row.launches.find(item => item.id === launchId);
     if (previous) return previous;
     if (row.launches.length >= 30) throw fail(409, '작업별 실행 한도입니다.');
-    const launch = { id: launchId, runId, ...(analysisId ? { analysisId } : {}), state: "prepared", at: Date.now() }; row.launches.push(launch); this.#write(row); return launch;
+    const launch = { id: launchId, runId, ...(analysisId ? { analysisId } : {}), ...(planRevision ? { planRevision } : {}), state: "prepared", at: Date.now() }; row.launches.push(launch); this.#write(row); return launch;
   }
   launchState(id, launchId, state, reason) { const row = this.read(id), entry = row.launches?.find(item => item.id === launchId); if (!entry) throw fail(404, '실행 요청이 없습니다.'); entry.state = state; if (reason) entry.reason = String(reason).slice(0, 2000); return this.#write(row); }
   context(id, input) { const row = this.read(id); row.context = normalizeContext(input, row.context); return this.#write(row); }
