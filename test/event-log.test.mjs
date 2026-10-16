@@ -34,11 +34,12 @@ test("event logger never follows a symlink or lets details replace provenance", 
   const victim = path.join(root, "keep");
   const file = path.join(root, "events.jsonl");
   fs.writeFileSync(victim, "unchanged", { mode: 0o644 });
+  const originalMode = fs.statSync(victim).mode & 0o777;
   fs.symlinkSync(victim, file);
   const log = new EventLog(file, { processId: 42, now: () => 0 });
   assert.equal(log.record("event", {}), false);
   assert.equal(fs.readFileSync(victim, "utf8"), "unchanged");
-  assert.equal(fs.statSync(victim).mode & 0o777, 0o644);
+  assert.equal(fs.statSync(victim).mode & 0o777, originalMode);
   fs.unlinkSync(file);
   assert.equal(log.record("actual", { event: "forged", timestamp: "forged", pid: 99, sessionId: "proof" }), true);
   assert.deepEqual(JSON.parse(fs.readFileSync(file)), { event: "actual", timestamp: "1970-01-01T00:00:00.000Z", pid: 42, sessionId: "proof" });

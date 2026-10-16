@@ -119,4 +119,10 @@ test('plan --execute hands the exact registered graph to one durable launch and 
   assert.equal(await runCli(['plan',f.session.id,revisedFile,'--execute'],{...options,stdout:output()}),0);assert.equal(launches,2);
   assert.equal(await runCli(['plan',f.session.id,revisedFile,'--execute'],{...options,stdout:output()}),0);assert.equal(launches,2);
   assert.equal(runStore.read(result.launch.runId).state,'needs-replan');assert.equal(f.store.read(result.workId).launches.length,2);
+  const second = f.store.read(result.workId).launches[1].runId;
+  runStore.event(second,{type:'phase',eventId:crypto.randomUUID(),nodeId:runStore.read(second).nodes[0].id,state:'interrupted'});
+  runStore.event(second,{type:'end',eventId:crypto.randomUUID(),reason:'작업 후 환경 변경',kind:'environment'});
+  const retry = {...replan,revision:2,replanFrom:second,title:'중단된 실행 재계획'};
+  assert.throws(()=>f.store.plan(result.workId,{...retry,revision:1},runStore.read(second)),{status:409});
+  assert.equal(f.store.plan(result.workId,retry,runStore.read(second)).plan.revision,3);
 });

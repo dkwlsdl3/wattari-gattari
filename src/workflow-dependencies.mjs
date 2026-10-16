@@ -8,6 +8,19 @@ const exec = promisify(execFile);
 const fail = message => Object.assign(Error(`실행 환경 준비 필요: ${message}`), { kind: 'environment' });
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');
 const optional = async file => { try { return await fs.readFile(file); } catch (error) { if (error.code === 'ENOENT') return null; throw error; } };
+async function fingerprint(root) {
+  const digest = crypto.createHash('sha256'); let entries = 0, bytes = 0;
+  async function visit(relative = '') {
+    const file = path.join(root, relative), stat = await fs.lstat(file);
+    if (++entries > 100000 || (bytes += stat.isFile() ? stat.size : 0) > 256 * 1024 * 1024) throw fail('의존성 검사 한도를 초과했습니다.');
+    digest.update(JSON.stringify([relative, stat.mode & 0o777, stat.isSymbolicLink() ? 'link' : stat.isDirectory() ? 'directory' : 'file']));
+    if (stat.isSymbolicLink()) digest.update(await fs.readlink(file));
+    else if (stat.isDirectory()) { for (const name of (await fs.readdir(file)).sort()) if (relative || name !== '.waga-snapshot.json') await visit(path.join(relative, name)); }
+    else if (stat.isFile()) digest.update(await fs.readFile(file));
+    else throw fail('지원하지 않는 의존성 파일 형식입니다.');
+  }
+  await visit(); return digest.digest('hex');
+}
 
 // Reuse installed dependencies as a separate copy, never a writable link to the source.
 // Installation scripts/network access belong to explicit project setup, not model retries.
@@ -28,6 +41,7 @@ export async function prepareDependencies(source, workspace) {
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw fail('격리 의존성 경로가 디렉터리가 아닙니다.');
     const previous = await optional(marker);
     if (!previous || JSON.parse(previous).basis !== basis) throw fail('기존 의존성 사본을 확인할 수 없습니다.');
+    if (await fingerprint(from) !== await fingerprint(target)) throw fail('격리 의존성 내용이 원본과 달라졌습니다.');
     return;
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
   let stat; try { stat = await fs.lstat(from); } catch (error) { if (error.code === 'ENOENT') throw fail('원본 프로젝트에 설치된 node_modules가 없습니다.'); throw error; }

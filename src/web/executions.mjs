@@ -402,7 +402,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
   async function listing(preserve = false) {
     const version = ++listVersion;
     const nextScope = selectedSession()?.id || "";
-    if (scope !== nextScope) { scope = nextScope; pinned = null; preserve = false; loadVersion++; currentRun = null; execution = null; $("#execution-select").replaceChildren(); inspector.hidden = true; runControls(); render(); }
+    if (scope !== nextScope) { scope = nextScope; pinned = null; preserve = false; loadVersion++; currentRun = null; execution = null; $("#execution-select").replaceChildren(); $('#execution-history-list').replaceChildren(); $('#execution-history').hidden = true; if (returnButton) returnButton.hidden = true; inspector.hidden = true; runControls(); render(); }
     if (!scope) { $("#execution-note").textContent = "왼쪽 목록에서 세션을 선택하세요."; return; }
     const picker = $("#execution-select"), startedWith = picker.value;
     const [{ executions }, { runs }, { works }] = await Promise.all([api(scoped("executions")), api(scoped("runs")), api(scoped('works'))]);

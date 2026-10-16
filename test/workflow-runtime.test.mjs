@@ -39,6 +39,17 @@ test('missing project dependencies stop before any model call instead of enterin
   assert.equal(native.calls.size,0);const run=f.store.read(f.store.list(f.repo)[0].id);
   assert.equal(run.errors.at(-1).kind,'environment');assert.ok(run.nodes.every(n=>n.attempts.length===0));
 });
+test('dependency manifest changes preserve the worker attempt and stop without a second model call', async t => {
+  const f = await fixture(t, { ...manifest, nodes: [manifest.nodes[0]] }), native = fakeAgents({ failFirstB: false });
+  await fs.writeFile(path.join(f.repo, 'package.json'), '{}');
+  await exec('git', ['-C', f.repo, 'add', 'package.json']); await exec('git', ['-C', f.repo, '-c', 'user.name=waga-proof', '-c', 'user.email=proof@example.invalid', 'commit', '-qm', 'manifest']);
+  const runner = async (argv, options) => { const result = await native.run(argv, options); if (argv[0] === 'claude') await fs.writeFile(path.join(options.cwd, 'package.json'), '{"private":true}'); return result; };
+  await assert.rejects(runWorkflow(f.file, { ...f.options, sample: capacity, processRunner: runner }), /의존성 명세/);
+  const run = f.store.read(f.store.list(f.repo)[0].id);
+  assert.equal(native.calls.get('a'), 1); assert.equal(run.state, 'interrupted');
+  assert.equal(run.nodes[0].attempts.length, 1); assert.equal(run.nodes[0].attempts[0].worker.exitCode, 0);
+  assert.match(run.nodes[0].attempts[0].check.stderr, /의존성 명세/);
+});
 function fakeAgents({ failFirstB = true, alwaysFail = false, rejectReview = false } = {}) {
   const calls = new Map();
   return { calls, run: async (argv, options) => {

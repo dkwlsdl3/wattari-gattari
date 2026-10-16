@@ -80,7 +80,7 @@ export class WorkStore {
     const row = this.read(id), value = validateWorkPlan(input);
     if (row.plan && (!input.replanFrom || input.replanFrom === row.plan.replanFrom) && JSON.stringify(value) === JSON.stringify({ title: row.plan.title, skill: row.plan.skill, nodes: row.plan.nodes, ...(row.plan.execution ? { execution: row.plan.execution } : {}) })) return row;
     const launched = row.plan && row.launches?.filter(launch => launch.planRevision === row.plan.revision);
-    if (input.replanFrom && (!launched?.some(launch => launch.runId === input.replanFrom) || previousRun?.id !== input.replanFrom || previousRun?.workId !== id || !['needs-replan','stopped'].includes(previousRun.state))) throw fail(409, '종료된 실패 실행을 확인한 뒤 같은 작업을 재계획해 주세요.');
+    if (input.replanFrom && (!launched?.some(launch => launch.runId === input.replanFrom) || previousRun?.id !== input.replanFrom || previousRun?.workId !== id || !['needs-replan','stopped','interrupted'].includes(previousRun.state))) throw fail(409, '종료된 실패 실행을 확인한 뒤 같은 작업을 재계획해 주세요.');
     if (launched?.length && !input.replanFrom) throw fail(409, '실행으로 넘긴 계획은 실행 기록으로 관리합니다. 실패 후 변경은 replanFrom으로 해당 실행을 지정해 주세요.');
     if (input.revision !== (row.plan?.revision ?? 0)) throw fail(409, '계획이 변경됐습니다. 현재 revision을 읽은 뒤 갱신해 주세요.');
     row.plan = { ...value, ...(input.replanFrom ? { replanFrom: input.replanFrom } : {}), revision: input.revision + 1, updatedAt: Date.now(), basis: 'agent-declared' };

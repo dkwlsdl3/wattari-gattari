@@ -189,7 +189,11 @@ export async function runWorkflow(manifestFile, { url = process.env.WAGA_WEB_URL
         const permitted = new Set([...node.outputs, ...node.inputs.map(item => item.path)]);
         const inputsUnchanged = protectedBefore === JSON.stringify(await artifacts(workspace, protectedInputs));
         const scopeOk = inputsUnchanged && (node.role === "edit" ? changed.every(file => permitted.has(file)) : before === await git(workspace, ["diff", "--binary", "HEAD"]) && changed.every(file => node.inputs.some(input => input.path === file)));
-        await prepareDependencies(source, workspace);
+        try { await prepareDependencies(source, workspace); }
+        catch (error) {
+          await event({ type: 'attempt', nodeId: node.id, result: { worker, check: { exitCode: null, signal: null, stdout: '', stderr: error.message }, review: { verdict: 'unverified', reason: '환경 검증 실패', exitCode: null }, evidence: await workspaceEvidence({ ...node, workspace }), artifacts: [], fingerprint: hash('[]'), diff: '', costUsd: totalCost } });
+          throw error;
+        }
         // Include new output files in the same git snapshot used by the check and reviewer.
         if (node.outputs.length && (await artifacts(workspace, node.outputs)).every(row => !row.missing)) await git(workspace, ["add", "--", ...node.outputs]);
         await gate(node.id); await event({ type: "phase", nodeId: node.id, state: "checking" });
@@ -197,6 +201,7 @@ export async function runWorkflow(manifestFile, { url = process.env.WAGA_WEB_URL
         const checkResult = worker.exitCode === 0 && scopeOk ? await execute(current, "check", node.check, { cwd: workspace, monitor, intervalMs }) : { exitCode: null, signal: null, stdout: "", stderr: scopeOk ? worker.summary : "작업 범위 밖의 변경 감지" };
         const check = { argv: node.check, cwd: workspace, observedAt: Date.now(), environment: { platform: process.platform, arch: process.arch, node: process.version }, exitCode: checkResult.failure ? null : checkResult.exitCode, signal: checkResult.signal, stdout: checkResult.stdout.slice(0, 8000), stderr: (checkResult.failure || checkResult.stderr).slice(0, 2000) };
         if (check.exitCode === 0 && beforeCheck.fingerprint !== (await workspaceEvidence({ ...node, workspace })).fingerprint) { check.exitCode = 1; check.stderr = '검사 실행 중 대상 코드·입력 자료가 변경됐습니다.'; }
+        try { await prepareDependencies(source, workspace); } catch (error) { check.exitCode = null; check.stderr = error.message; }
         const produced = await artifacts(workspace, node.outputs), fingerprint = hash(JSON.stringify(produced));
         const evidence = await workspaceEvidence({ ...node, workspace });
         let review = { verdict: "unverified", reason: "검사 실패로 검증 미실행", exitCode: null };
@@ -205,6 +210,7 @@ export async function runWorkflow(manifestFile, { url = process.env.WAGA_WEB_URL
           const beforeReview = await git(workspace, ["diff", "--binary", "HEAD"]);
           review = await agent(node, workspace, `Independently verify this task, read-only in ${workspace}. ${run.providers?.verify === "codex" ? "Read-only shell commands to inspect files are allowed. Do not edit, run tests/builds, or trust the worker conclusion." : "Do not edit, run commands, or trust the worker conclusion."} Task: ${node.prompt}\nDeclared outputs: ${JSON.stringify(node.outputs)}\nMachine check: ${JSON.stringify(check)}\nRead the implementation and check files yourself. Return verdict pass only if the task is met, otherwise fail with a concrete reason.`, true);
           review.unchanged = evidence.fingerprint === (await workspaceEvidence({ ...node, workspace })).fingerprint && beforeReview === await git(workspace, ["diff", "--binary", "HEAD"]) && fingerprint === hash(JSON.stringify(await artifacts(workspace, node.outputs)));
+          try { await prepareDependencies(source, workspace); } catch (error) { review.unchanged = false; review.exitCode = null; review.reason = error.message; }
         }
         const diff = (await git(workspace, ["diff", "HEAD", "--", ...node.outputs])).slice(0, 16000);
         await event({ type: "attempt", nodeId: node.id, result: { worker, check, review, evidence, artifacts: produced, fingerprint, diff, costUsd: totalCost } });
@@ -251,7 +257,7 @@ export async function runWorkflow(manifestFile, { url = process.env.WAGA_WEB_URL
     await event({ type: "end" }); return run;
   } catch (error) {
     output.write(`실행 중단: ${error.message}\n`);
-    try { if (await readJson(journal)) throw error; for (const node of run.nodes.filter(node => ["working", "checking", "verifying", "paused", "waiting-resource"].includes(node.state))) await event({ type: "phase", nodeId: node.id, state: "interrupted" }); await event({ type: "end", reason: error.message.slice(0, 2000), kind: error.kind ?? "environment" }); } catch { /* The last saved phase remains visible when transport is unavailable. */ }
+    try { if (await readJson(journal)) throw error; for (const node of run.nodes.filter(node => ["working", "checking", "verifying", "paused", "waiting-resource"].includes(node.state))) await event({ type: "phase", nodeId: node.id, state: "interrupted" }); await event({ type: "end", reason: error.message.slice(0, 2000), kind: error.kind ?? "uncertain" }); } catch { /* The last saved phase remains visible when transport is unavailable. */ }
     throw error;
   } finally { await lockFd.close(); await fs.rm(lock, { force: true }); }
 }
