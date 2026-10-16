@@ -1,5 +1,5 @@
 import { taskGraph } from "./task-graph.mjs";
-import { chooseSelection, currentTarget, keepsInspector, linkedRun } from "./execution-selection.mjs";
+import { chooseSelection, currentTarget, keepsInspector, linkedRun, historyGroups } from "./execution-selection.mjs";
 const tool = span => {
   const name = span.attributes["tool_name"] || span.attributes["gen_ai.tool.name"];
   return ({ commandExecution: "명령 실행", fileChange: "파일 변경", webSearch: "웹 검색", imageView: "이미지 확인", collabAgentToolCall: "에이전트 호출" })[name] || name;
@@ -91,6 +91,54 @@ export async function initExecutions({ api, notice, selectedSession = () => null
   let flowFilter = "all", flowSearch = "", flowAgent = "", visibleCount = 80;
   let flowComposing = false, searchFrame = 0, timelineExecution, timelineModel;
   let currentRun, workView = true, selectedTask = "", execution, selectedSpan = "", drawnEdges = [], cards = new Map();
+  let selectedId = '', groups = [], imported = [], nativeId = '', historySignature = '', historyLimit = 8, historyComposing = false;
+  const historyDialog = $('#execution-history-dialog'), historySearch = $('#execution-history-search');
+  const dateLabel = value => value ? new Date(value).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }) : '날짜 미기록';
+  function selectRecord(id) {
+    historyDialog.close(); pinned = id; workView = true;
+    void listing().catch(error => notice(error.message));
+  }
+  function historyEntry(entry) {
+    const row = el('div', undefined, 'history-attempt');
+    row.append(el('span', `${dateLabel(entry.updatedAt)} · ${entry.state === 'declaration' ? '등록한 계획' : taskStates[entry.state] || '호출 기록'}`, 'muted'));
+    if (entry.id === selectedId) row.append(el('span', '현재 표시 중', 'history-selected'));
+    else { const open = el('button', '열기'); open.setAttribute('aria-label', `${entry.title} · ${dateLabel(entry.updatedAt)} 열기`); open.onclick = () => selectRecord(entry.id); row.append(open); }
+    return row;
+  }
+  function renderHistory() {
+    const list = $('#execution-history-list'), scroll = historyDialog.scrollTop;
+    const expanded = new Set([...list.querySelectorAll('details[open]')].map(node => node.dataset.work));
+    list.replaceChildren();
+    const query = historySearch.value.trim().normalize('NFC').toLocaleLowerCase('ko-KR');
+    const matches = groups.filter(group => group.title.normalize('NFC').toLocaleLowerCase('ko-KR').includes(query));
+    $('#execution-history-count').textContent = `작업 ${matches.length}건${query ? ' 검색됨' : ''}`;
+    for (const group of matches.slice(0, historyLimit)) {
+      const card = el('article', undefined, 'history-work'); card.append(el('h3', group.title), historyEntry(group.entries[0]));
+      if (group.entries.length > 1) {
+        const attempts = el('details'); attempts.dataset.work = group.id; attempts.open = expanded.has(group.id);
+        attempts.append(el('summary', `이전 실행 ${group.entries.length - 1}회`));
+        for (const entry of group.entries.slice(1)) attempts.append(historyEntry(entry));
+        card.append(attempts);
+      }
+      list.append(card);
+    }
+    if (!matches.length) list.append(el('p', query ? '일치하는 작업이 없습니다.' : '등록된 작업 기록이 없습니다.', 'muted'));
+    if (imported.length && !query) {
+      const section = el('details'); section.dataset.work = 'imported'; section.open = expanded.has('imported'); section.append(el('summary', `가져온 호출 기록 ${imported.length}건`));
+      for (const entry of imported) { const card = el('article', undefined, 'history-work'); card.append(el('h3', entry.title), historyEntry(entry)); section.append(card); }
+      list.append(section);
+    }
+    $('#execution-history-more').hidden = matches.length <= historyLimit;
+    historyDialog.scrollTop = scroll;
+  }
+  $('#execution-history').onclick = () => { renderHistory(); historyDialog.showModal(); historySearch.focus(); };
+  $('#execution-history-close').onclick = () => historyDialog.close();
+  historySearch.addEventListener('compositionstart', () => { historyComposing = true; });
+  historySearch.addEventListener('compositionend', () => { historyComposing = false; historyLimit = 8; renderHistory(); });
+  historySearch.addEventListener('input', event => { if (historyComposing || event.isComposing) return; historyLimit = 8; renderHistory(); });
+  $('#execution-history-more').onclick = () => { historyLimit += 8; renderHistory(); };
+  $('#execution-native').onclick = () => selectRecord(nativeId);
+  $('#execution-current').onclick = () => { pinned = null; workView = true; void listing().catch(error => notice(error.message)); };
   function drawEdges() {
     const graph = $("#execution-graph"); graph.querySelector("svg")?.remove();
     if (!graph.clientWidth || !drawnEdges.length) return;
@@ -238,12 +286,18 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     attemptEvidence(selected, selectedAttempt >= 0 ? selected.attempts[selectedAttempt] : selected.attempts.at(-1));
   }
   function runControls() {
-    $("#run-controls").hidden = !currentRun || currentRun.proposal || currentRun.declaration || currentRun.superseded; $("#run-work-view").hidden = !currentRun || currentRun.proposal || currentRun.declaration; $("#run-call-view").hidden = !currentRun || currentRun.proposal || currentRun.declaration;
-    if (!currentRun || currentRun.proposal || currentRun.declaration) return;
+    const managed = currentRun && !currentRun.proposal && !currentRun.declaration;
+    $("#run-work-view").hidden = !managed; $("#run-call-view").hidden = !managed;
+    $('#run-work-view').setAttribute('aria-pressed', String(workView)); $('#run-call-view').setAttribute('aria-pressed', String(!workView));
+    $('#run-management').hidden = true; $('#run-approve').hidden = true; $('#run-controls').hidden = true;
+    if (!managed || currentRun.superseded) return;
     const ended = ["review_required", "approved"].includes(currentRun.state);
-    $("#run-pause").disabled = ended || currentRun.control === "pause";
-    $("#run-resume").disabled = ended || currentRun.control === "run" && !["interrupted", "needs-replan", "waiting-user"].includes(currentRun.state);
-    $("#run-stop").disabled = ended || currentRun.control === "stop";
+    $('#run-controls').hidden = currentRun.state === 'approved';
+    $('#run-management').hidden = ended;
+    if (ended) $('#run-management').open = false;
+    const resumable = currentRun.control !== 'run' || ['interrupted', 'needs-replan', 'waiting-user'].includes(currentRun.state);
+    $('#run-pause').hidden = resumable; $('#run-resume').hidden = !resumable;
+    $("#run-stop").disabled = currentRun.control === "stop";
     $("#run-approve").hidden = currentRun.state !== "review_required";
     const resource = currentRun.resource;
     $("#run-resource").textContent = resource ? `여유 ${resource.availableGiB.toFixed(1)}GiB · CPU ${resource.cpuPercent === null ? "측정 중" : `${resource.cpuPercent.toFixed(0)}%`}${currentRun.control === "pause" ? " · 다음 단계 대기" : ""}` : "";
@@ -363,7 +417,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
 
   async function load(id, preserve = false) {
     const version = ++loadVersion;
-    if (!preserve) $("#run-controls").hidden = true;
+    if (!preserve) { $("#run-controls").hidden = true; $('#run-management').open = false; }
     if (id?.startsWith('plan:')) {
       const row = await api(scoped(`works/${id.slice(5)}`)); if (version !== loadVersion) return;
       if (!row.plan) throw Error('등록한 작업 계획이 없습니다.');
@@ -398,41 +452,39 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     }
   }
   const shownId = () => currentRun ? (currentRun.declaration || currentRun.proposal ? currentRun.id : `run:${currentRun.id}`) : execution?.id;
-  let returnButton;
   async function listing(preserve = false) {
     const version = ++listVersion;
     const nextScope = selectedSession()?.id || "";
-    if (scope !== nextScope) { scope = nextScope; pinned = null; preserve = false; loadVersion++; currentRun = null; execution = null; $("#execution-select").replaceChildren(); $('#execution-history-list').replaceChildren(); $('#execution-history').hidden = true; if (returnButton) returnButton.hidden = true; inspector.hidden = true; runControls(); render(); }
+    if (scope !== nextScope) { scope = nextScope; pinned = null; selectedId = ''; preserve = false; loadVersion++; currentRun = null; execution = null; groups = []; imported = []; nativeId = ''; historySignature = ''; historySearch.value = ''; historyLimit = 8; historyDialog.close(); $('#execution-history-list').replaceChildren(); $('#execution-history').hidden = true; $('#execution-native').hidden = true; $('#execution-current').hidden = true; inspector.hidden = true; runControls(); render(); }
     if (!scope) { $("#execution-note").textContent = "왼쪽 목록에서 세션을 선택하세요."; return; }
-    const picker = $("#execution-select"), startedWith = picker.value;
+    const startedWith = selectedId;
     const [{ executions }, { runs }, { works }] = await Promise.all([api(scoped("executions")), api(scoped("runs")), api(scoped('works'))]);
-    if (version !== listVersion || (preserve && picker.value !== startedWith)) return;
+    if (version !== listVersion || (preserve && selectedId !== startedWith)) return;
     let selected = pinned;
-    executions.sort((a, b) => Number(b.source === "native") - Number(a.source === "native")); picker.replaceChildren();
-    for (const run of runs) { const option = el("option", `${run.title} · ${taskStates[run.state]}`); option.value = `run:${run.id}`; picker.append(option); }
+    executions.sort((a, b) => Number(b.source === "native") - Number(a.source === "native") || b.importedAt - a.importedAt);
+    const ids = runs.map(run => `run:${run.id}`);
     const proposals = works.filter(work => work.analysis?.nodes && selected === `proposal:${work.id}`);
     const plans = works.filter(work => work.plan).sort((a, b) => b.plan.updatedAt - a.plan.updatedAt);
     for (const work of plans) {
       const linked = linkedRun(work, runs);
       if (linked) { if (selected === `plan:${work.id}`) selected = pinned = `run:${linked.id}`; continue; }
-      const option = el('option', `${work.plan.title} · ${work.plan.skill}`); option.value = `plan:${work.id}`; picker.append(option);
+      ids.push(`plan:${work.id}`);
     }
-    for (const work of proposals) { const option = el('option', `${work.analysis.summary} · LLM 제안`); option.value = `proposal:${work.id}`; picker.append(option); }
-    for (const run of executions) { const option = el("option", run.source === "native" ? "세션 실행 기록 · 자동 수집" : `${run.title} · ${new Date(run.importedAt).toLocaleString("ko-KR")}`); option.value = run.id; picker.append(option); }
-    const ids = [...picker.options].map(option => option.value);
+    ids.push(...proposals.map(work => `proposal:${work.id}`), ...executions.map(run => run.id));
     const choice = chooseSelection({ pinned: selected, ids, current: currentTarget(works, runs) });
-    pinned = choice.pinned; picker.value = choice.value;
-    picker.disabled = !ids.length; picker.hidden = true;
-    const history = $('#execution-history'), list = $('#execution-history-list'); list.replaceChildren(); history.hidden = ids.length < 2;
-    if (!returnButton) { returnButton = el('button', '현재 작업'); returnButton.onclick = () => { pinned = null; void listing().catch(error => notice(error.message)); }; history.before(returnButton); }
-    returnButton.hidden = !pinned;
-    for (const option of [...picker.options].filter(option => option.value !== picker.value)) {
-      const button = el('button', option.textContent); button.onclick = () => { history.open = false; pinned = option.value; void listing().catch(error => notice(error.message)); }; list.append(button);
-    }
-    await load(picker.value, keepsInspector(preserve, shownId(), picker.value));
+    pinned = choice.pinned; selectedId = choice.value;
+    groups = historyGroups(works, runs);
+    imported = executions.filter(row => row.source !== 'native').map(row => ({ ...row, updatedAt: row.importedAt }));
+    nativeId = executions.find(row => row.source === 'native')?.id || '';
+    $('#execution-history').hidden = !groups.length && !imported.length;
+    $('#execution-native').hidden = !nativeId || selectedId === nativeId;
+    $('#execution-current').hidden = !pinned;
+    const signature = JSON.stringify({ groups, imported, selectedId });
+    if (signature !== historySignature && !historyComposing) { historySignature = signature; if (historyDialog.open) renderHistory(); }
+    await load(selectedId, keepsInspector(preserve, shownId(), selectedId));
   }
   async function control(action, extra = {}) {
-    if (!currentRun || currentRun.proposal || currentRun.superseded || $("#execution-select").value !== `run:${currentRun.id}`) return;
+    if (!currentRun || currentRun.proposal || currentRun.superseded || selectedId !== `run:${currentRun.id}`) return;
     const requestedScope = scope, runId = currentRun.id;
     try { const row = await api(scoped(`runs/${runId}/control`), { action, ...extra });
       if (scope !== requestedScope || currentRun?.id !== runId) return;
@@ -440,8 +492,8 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     catch (error) { notice(error.message); }
   }
   for (const action of ["pause", "resume", "stop", "approve"]) $(`#run-${action}`).addEventListener("click", () => { void control(action); });
-  $("#run-work-view").addEventListener("click", () => { workView = true; render(); });
-  $("#run-call-view").addEventListener("click", () => { workView = false; render(); });
+  $("#run-work-view").addEventListener("click", () => { workView = true; runControls(); render(); });
+  $("#run-call-view").addEventListener("click", () => { workView = false; runControls(); render(); });
   $("#run-resource-settings").addEventListener("click", () => { $("#reserve-memory").value = currentRun.resources.reserveGiB; $("#max-cpu").value = currentRun.resources.maxCpuPercent; $("#resource-dialog").showModal(); });
   $("#resource-form").addEventListener("submit", async event => { event.preventDefault(); await control("resources", { resources: { reserveGiB: Number($("#reserve-memory").value), maxCpuPercent: Number($("#max-cpu").value) } }); $("#resource-dialog").close(); });
   let polling = false;
@@ -449,7 +501,6 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     if (document.hidden || $("#execution-panel").hidden || polling) return;
     polling = true; try { await listing(true); } catch (error) { notice(error.message); } finally { polling = false; }
   }, 2000);
-  $("#execution-select").addEventListener("change", () => { pinned = $("#execution-select").value; void load(pinned).catch(error => notice(error.message)); });
   mode(false);
   const refresh = () => listing(true);
   refresh.openWork = async (row, runId) => { mode(true); workView = true; pinned = runId ? `run:${runId}` : row.plan ? `plan:${row.id}` : row.analysis?.nodes ? `proposal:${row.id}` : null; await listing(); };

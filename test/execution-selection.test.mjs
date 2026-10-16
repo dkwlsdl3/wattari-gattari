@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chooseSelection, currentTarget, keepsInspector } from "../src/web/execution-selection.mjs";
+import { chooseSelection, currentTarget, keepsInspector, historyGroups } from "../src/web/execution-selection.mjs";
 
 const work = (id, updatedAt, revision = 1, launches = []) => ({ id, plan: { updatedAt, revision }, launches });
 const pick = (works, runs, pinned, extra = []) => {
@@ -41,4 +41,29 @@ test("inspector is kept only for the same execution", () => {
   assert.equal(keepsInspector(true, "run:1", "run:1"), true);
   assert.equal(keepsInspector(true, "plan:1", "run:1"), false);
   assert.equal(keepsInspector(false, "run:1", "run:1"), false);
+});
+
+test("replanned attempts occupy one history group and keep the exact launched revision first", () => {
+  const w = { ...work('a', 5, 2, [{ runId: 'new', planRevision: 2 }]), plan: { title: '검색 수정', updatedAt: 5, revision: 2 } };
+  const runs = [{ id: 'old', workId: 'a', title: '예전 제목', updatedAt: 20 }, { id: 'new', workId: 'a', title: '검색 수정', updatedAt: 10 }];
+  const groups = historyGroups([w], runs);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].title, '검색 수정');
+  assert.deepEqual(groups[0].entries.map(entry => entry.id), ['run:new', 'run:old']);
+});
+
+test("unlaunched revisions remain accessible alongside their older attempts", () => {
+  const w = { ...work('a', 30, 3), plan: { title: '재계획', updatedAt: 30, revision: 3 } };
+  const groups = historyGroups([w], [{ id: 'old', workId: 'a', title: '수정', updatedAt: 10 }]);
+  assert.deepEqual(groups[0].entries.map(entry => entry.id), ['plan:a', 'run:old']);
+});
+
+test("history preserves standalone runs and groups runs whose work has no plan", () => {
+  const groups = historyGroups([], [
+    { id: 'a', workId: 'w', title: '오래된 제목', updatedAt: 1 },
+    { id: 'b', title: '단독 실행', updatedAt: 2 },
+    { id: 'c', workId: 'w', title: '수정된 제목', updatedAt: 3 }
+  ]);
+  assert.deepEqual(groups.map(group => group.title), ['수정된 제목', '단독 실행']);
+  assert.deepEqual(groups[0].entries.map(entry => entry.id), ['run:c', 'run:a']);
 });
