@@ -125,6 +125,12 @@ test('plan --execute hands the exact registered graph to one durable launch and 
   assert.equal((await oldDetail.json()).superseded,true);
   const oldEvent = await fetch(`${web.origin}/api/runs/${result.launch.runId}/events?session=${f.session.id}`,{method:'POST',headers,body:JSON.stringify({type:'start',eventId:crypto.randomUUID()})});
   assert.equal(oldEvent.status,409);
+  const oldRevision = runStore.read(result.launch.runId).revision;
+  for (const [suffix,input] of [['control',{action:'pause'}],['traces',{spans:[]}]]) {
+    const response = await fetch(`${web.origin}/api/runs/${result.launch.runId}/${suffix}?session=${f.session.id}`,{method:'POST',headers,body:JSON.stringify(input)});
+    assert.equal(response.status,409);
+  }
+  assert.equal(runStore.read(result.launch.runId).revision,oldRevision);
   const lockFile = path.join(f.store.directory,`${result.workId}.json.plan-lock`);
   await fs.writeFile(lockFile,'busy',{flag:'wx'});
   assert.throws(()=>f.store.plan(result.workId,replan),{status:409});

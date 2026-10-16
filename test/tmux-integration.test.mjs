@@ -273,7 +273,7 @@ test("Codex selection waits for post-attach permission checks on new, forced, de
   };
   t.after(() => {
     spawnSync("tmux", [...prefix, "kill-server"], { stdio: "ignore", env, timeout: commandTimeoutMs });
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
   await call(["new-session", "-d", "-s", env.WAGA_TMUX_SESSION, "-n", "overview", "-x", "100", "-y", "30", "sleep 60"]);
   const workspace = new TmuxWorkspace({ run: call, env, eventLog: { record() {} } });

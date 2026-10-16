@@ -277,9 +277,10 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
           json(response, 200, { ...current, superseded: superseded() }); return;
         }
         if (request.method === "POST") {
-          if (runMatch[2] === "traces") { runStore.trace(row.id, await body(request, 4 * 1024 * 1024)); json(response, 200, {}); return; }
+          if (runMatch[2] === "traces") { const input = await body(request, 4 * 1024 * 1024); if (superseded()) throw fail(409, '재계획 전 실행 기록은 변경할 수 없습니다.'); runStore.trace(row.id, input); json(response, 200, {}); return; }
           if (runMatch[2] === "events") { const input = await body(request); if (superseded()) throw fail(409, '재계획 전 실행 기록은 변경할 수 없습니다.'); json(response, 200, runStore.event(row.id, input)); return; }
           if (runMatch[2] === "control" && !nativeRun) { const input = await body(request);
+            if (superseded()) throw fail(409, '재계획 전 실행은 제어할 수 없습니다. 현재 작업을 확인해 주세요.');
             if (input.action === 'resume' && row.workId) {
               const work = workStore.read(row.workId), link = work.launches?.find(item => item.runId === row.id);
               if (link?.planRevision && link.planRevision !== work.plan?.revision) throw fail(409, '재계획 전 실행은 다시 시작할 수 없습니다. 현재 작업을 확인해 주세요.');
