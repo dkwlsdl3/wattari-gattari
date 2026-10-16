@@ -13,7 +13,8 @@ export function claudeHistoryMessage(row, session, offset) {
   if (row.type === "user" && (row.toolUseResult || (row.origin && row.origin.kind !== "human")
     || row.message?.content?.some?.(block => block.type === "tool_result"))) return null;
   const text = historyText(row.message?.content);
-  return text ? { id: row.uuid || String(offset), role: row.type === "user" ? "user" : "assistant", text } : null;
+  return text ? { id: row.uuid || String(offset), role: row.type === "user" ? "user" : "assistant", text,
+    ...(typeof row.timestamp === "string" && Number.isFinite(Date.parse(row.timestamp)) ? { timestamp: row.timestamp } : {}) } : null;
 }
 
 const bounded = value => {
@@ -28,6 +29,7 @@ export function claudeConversationRecord(row, session, offset) {
     if (row.type === "assistant" && block.type === "tool_use" && block.id) {
       const input = block.input ?? {};
       return [{ id: `tool:${block.id}`, role: "activity", tool: block.name,
+        ...(typeof row.timestamp === "string" && Number.isFinite(Date.parse(row.timestamp)) ? { timestamp: row.timestamp } : {}),
         text: bounded(input.description || input.command || input.file_path || input.query || block.name), state: "running" }];
     }
     if (row.type === "user" && block.type === "tool_result" && block.tool_use_id) {
@@ -41,7 +43,8 @@ export function claudeConversationRecord(row, session, offset) {
 export function codexConversationItem(entry, fallbackId, activities = false) {
   const item = entry.item;
   if (!item) return null;
-  const common = { id: item.id ?? entry.id ?? fallbackId, turnId: entry.turnId };
+  const common = { id: item.id ?? entry.id ?? fallbackId, turnId: entry.turnId,
+    ...(Number.isFinite(entry.startedAtMs) ? { timestamp: entry.startedAtMs } : {}) };
   if (["userMessage", "agentMessage"].includes(item.type)) {
     const text = historyText(item.type === "userMessage" ? item.content : item.text);
     return text ? { ...common, role: item.type === "userMessage" ? "user" : "assistant", text } : null;
