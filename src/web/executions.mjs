@@ -212,7 +212,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     for (const node of nodes) { const level = levels.get(node.id) ?? 0; if (!groups.has(level)) groups.set(level, []); groups.get(level).push(node.id); }
     const rows = Math.max(...[...groups.values()].map(group => group.length));
     const selected = currentRun.nodes.find(node => node.id === selectedTask) || currentRun.nodes.find(node => !['passed', 'skipped'].includes(node.state)) || currentRun.nodes[0]; selectedTask = selected.id;
-    $("#execution-note").textContent = `${currentRun.title} · ${currentRun.declaration ? `${currentRun.skill} · 작업 계획 · 에이전트 진행 보고` : currentRun.proposal ? 'LLM 제안 관계 · 실행 전' : `${taskStates[currentRun.state]} · 명세에 선언된 작업 의존성`}${currentRun.blockedReason ? ` · ${currentRun.blockedReason}` : ""}`;
+    $("#execution-note").textContent = `${currentRun.title} · ${currentRun.declaration ? `${currentRun.skill} · 작업 계획 · 에이전트 진행 보고` : currentRun.proposal ? 'LLM 제안 관계 · 실행 전' : `${currentRun.superseded ? '이전 실행 · 재계획으로 대체됨' : taskStates[currentRun.state]} · 명세에 선언된 작업 의존성`}${currentRun.blockedReason ? ` · ${currentRun.blockedReason}` : ""}`;
     for (const node of nodes) {
       const card = el("button", undefined, `agent-card task-${node.state}`); card.style.gridColumn = String((levels.get(node.id) ?? 0) + 1); card.setAttribute("aria-pressed", String(node.id === selected.id));
       const group = groups.get(levels.get(node.id) ?? 0); card.style.gridRow = group.length === 1 ? `1 / span ${rows}` : String(group.indexOf(node.id) + 1);
@@ -238,7 +238,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     attemptEvidence(selected, selectedAttempt >= 0 ? selected.attempts[selectedAttempt] : selected.attempts.at(-1));
   }
   function runControls() {
-    $("#run-controls").hidden = !currentRun || currentRun.proposal || currentRun.declaration; $("#run-work-view").hidden = !currentRun || currentRun.proposal || currentRun.declaration; $("#run-call-view").hidden = !currentRun || currentRun.proposal || currentRun.declaration;
+    $("#run-controls").hidden = !currentRun || currentRun.proposal || currentRun.declaration || currentRun.superseded; $("#run-work-view").hidden = !currentRun || currentRun.proposal || currentRun.declaration; $("#run-call-view").hidden = !currentRun || currentRun.proposal || currentRun.declaration;
     if (!currentRun || currentRun.proposal || currentRun.declaration) return;
     const ended = ["review_required", "approved"].includes(currentRun.state);
     $("#run-pause").disabled = ended || currentRun.control === "pause";
@@ -377,7 +377,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     } else if (id?.startsWith("run:")) {
       const row = await api(scoped(`runs/${id.slice(4)}`));
       if (version !== loadVersion) return;
-      if (preserve && currentRun?.id === row.id && currentRun.revision === row.revision) return;
+      if (preserve && currentRun?.id === row.id && currentRun.revision === row.revision && currentRun.superseded === row.superseded) return;
       currentRun = row; execution = { spans: row.traceSpans || [], title: row.title, includesContent: row.includeContent };
     } else {
       const row = id ? await api(scoped(`executions/${id}`)) : null;
@@ -432,7 +432,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     await load(picker.value, keepsInspector(preserve, shownId(), picker.value));
   }
   async function control(action, extra = {}) {
-    if (!currentRun || currentRun.proposal || $("#execution-select").value !== `run:${currentRun.id}`) return;
+    if (!currentRun || currentRun.proposal || currentRun.superseded || $("#execution-select").value !== `run:${currentRun.id}`) return;
     const requestedScope = scope, runId = currentRun.id;
     try { const row = await api(scoped(`runs/${runId}/control`), { action, ...extra });
       if (scope !== requestedScope || currentRun?.id !== runId) return;
