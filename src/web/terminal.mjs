@@ -19,7 +19,7 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
     rejectReady = resolveReady = null; connecting = null; connected = false;
     socket?.close(); socket = null; terminal?.dispose(); terminal = null;
     for (const { reject, timer } of pending.values()) { clearTimeout(timer); reject(error ?? new Error("입력 연결이 종료됐습니다. 전송 여부를 확인해 주세요.")); }
-    pending.clear();
+    pending.clear(); lastInput = Promise.resolve();
     setProgress("");
     host.replaceChildren(); panel.hidden = true; fallback.hidden = true; question = null; answered = "";
   }
@@ -90,7 +90,9 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
         terminal.open(host);
         const ws = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/terminal?ticket=${encodeURIComponent(ticket)}`);
         socket = ws;
-        terminal.onData(data => { lastInput = input(data, undefined, ws); void lastInput.catch(error => { if (current === generation) notify(error.message); }); });
+        terminal.onData(data => { lastInput = lastInput.then(async () => {
+          for (let start = 0; start < data.length; start += 8192) await input(data.slice(start, start + 8192), undefined, ws);
+        }); void lastInput.catch(error => { if (current === generation) notify(error.message); }); });
         ws.addEventListener("message", event => {
           if (current !== generation) return;
           const message = JSON.parse(event.data);
@@ -121,7 +123,7 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
     const work = record ? await record() : null;
     if (current !== generation || id !== selected()?.id) throw new Error("입력 대상이 변경됐습니다. 메시지는 전송하지 않았습니다.");
     if (nativeQuestion(lines(), selected().provider)) throw new Error("대기 중인 질문에 먼저 응답해 주세요. 작성한 메시지는 보관했습니다.");
-    terminal.paste(value); await lastInput;
+    terminal.paste(work?.deliveryText ?? value); await lastInput;
     if (current !== generation || id !== selected()?.id) throw new Error("입력 대상이 변경됐습니다. 작성한 메시지와 이전 세션의 입력창을 확인해 주세요.");
     await input("\r", undefined, ws, work?.id);
     notify(""); return true;

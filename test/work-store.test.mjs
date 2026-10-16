@@ -98,3 +98,33 @@ test("native Enter records the exact work once, approval keys remain opaque, and
   assert.deepEqual(detail.instructions.map(row => row.instruction), ["실제 지시", "완료 조건을 정정합니다."]);
   assert.equal(detail.runs[0].workId, work.id); // Old evidence still names the old instruction.
 });
+
+test('context survives a provider change as a selected snapshot with source versions, never as a claimed verified fact', async t => {
+  const f = await fixture(t), work = f.create();
+  const context = { goal: '순서 유지', decisions: [{ text: '폴더 내부에서만 이동', kind: 'user', source: 'message:123' }], facts: [{ text: '순서 저장 파일 확인', source: 'src/dock-order.mjs', version: 'abc123', observedAt: 1720000000000, kind: 'project' }], unknowns: [{ text: '동시 변경 결과', kind: 'inference' }], next: [{ text: '실제 두 화면 확인', kind: 'user' }] };
+  f.store.context(work.id, context);
+  const moved = f.create('계속 진행', f.sessions[1], { contextFrom: work.id });
+  assert.equal(moved.contextSource.workId, work.id); assert.equal(moved.context.facts[0].version, 'abc123');
+  f.store.context(work.id, { ...context, goal: '수정된 목표' });
+  assert.equal(new WorkStore(f.store.directory).read(moved.id).context.goal, '순서 유지');
+  assert.equal(moved.context.facts[0].observedAt, 1720000000000);
+  assert.throws(() => f.store.context(work.id, { ...context, facts: [{ text: '근거 없음', kind: 'user' }] }), { status: 400 });
+  assert.equal(moved.delivery, 'unconfirmed');
+  for (const at of [9e15, 1e99, Infinity, NaN, -1, 0]) assert.throws(() => f.store.context(work.id, { ...context, facts: [{ ...context.facts[0], observedAt: at }] }), { status: 400 });
+});
+
+test('web launch binds context and source to the selected work and deduplicates simultaneous clicks', async t => {
+  const f = await fixture(t), runStore = new RunStore(path.join(f.root, 'runs')), work = f.create(); let calls = 0, launched;
+  f.store.context(work.id, { goal: '선택한 컨텍스트', facts: [{ text: '출처 확인', kind: 'project', source: 'file:source', version: 'abc' }] });
+  const web = await startWebServer({ port: 0, cwd: f.root, runStore, workStore: f.store, bridge: { discover: async () => ({ sessions: f.sessions }), history: async () => ({ messages: [] }) }, launch: async run => { calls++; launched = run; await new Promise(resolve => setTimeout(resolve, 20)); } }); t.after(() => web.close());
+  const headers = { Cookie: `waga_web=${web.url.split('#')[1]}`, Origin: web.origin, 'Content-Type': 'application/json' };
+  const input = { launchId: crypto.randomUUID(), launch: { title: '실제 검사', sourceCwd: '/foreign', nodes: [{ id: 'read', title: '읽기', role: 'scan', prompt: '소스 확인', check: [process.execPath, '-e', 'process.exit(0)'] }] } };
+  const send = () => fetch(`${web.origin}/api/works/${work.id}?session=${f.sessions[0].id}`, { method: 'POST', headers, body: JSON.stringify(input) });
+  const results = await Promise.all([send(), send()]); const rows = await Promise.all(results.map(result => result.json()));
+  assert.equal(calls, 1); assert.equal(rows[0].runId, rows[1].runId); assert.equal(launched.sourceCwd, f.root); assert.equal(launched.workId, work.id); assert.equal(launched.context.snapshot.facts[0].version, 'abc');
+  assert.equal(runStore.list(f.root).length, 1); assert.equal(f.store.read(work.id).launches[0].state, 'started');
+  const foreign = await fetch(`${web.origin}/api/works/${work.id}?session=${f.sessions[1].id}`, { method: 'POST', headers, body: JSON.stringify(input) }); assert.equal(foreign.status, 404);
+  const moved = f.create('새 세션에서 계속', f.sessions[1], { contextFrom: work.id });
+  assert.match(moved.deliveryText, /선택한 컨텍스트/); assert.equal(moved.instruction, '새 세션에서 계속');
+  f.store.submitted(moved.id, f.sessions[1].id); assert.equal(f.store.reconcile(f.sessions[1].id, [{ id: 'native-handoff', role: 'user', text: moved.deliveryText }])[0].messageId, 'native-handoff');
+});

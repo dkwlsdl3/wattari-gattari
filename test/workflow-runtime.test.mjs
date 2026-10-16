@@ -150,3 +150,66 @@ test("malformed manifest collections are client errors", () => {
   for (const node of [null, { ...manifest.nodes[0], inputs: {} }, { ...manifest.nodes[0], inputs: [null] }, { ...manifest.nodes[0], outputs: "file" }, { ...manifest.nodes[0], dependsOn: {} }]) assert.throws(() => validateRun({ ...manifest, nodes: [node] }), { status: 400 });
   assert.throws(() => validateRun({ ...manifest, models: { unknown: "haiku" } }), { status: 400 });
 });
+
+test('changed check implementation invalidates the passed revision and prevents final approval and dependent reuse', async t => {
+  const f = await fixture(t, { ...manifest, nodes: [manifest.nodes[0]] }), native = fakeAgents();
+  const run = await runWorkflow(f.file, { ...f.options, sample: capacity, processRunner: native.run });
+  await fs.writeFile(path.join(run.nodes[0].workspace, 'check.mjs'), 'process.exit(0); // changed verification\n');
+  const response = await fetch(`${f.web.origin}/api/runs/${run.id}/control`, { method: 'POST', headers: { Cookie: `waga_web=${f.web.url.split('#')[1]}`, Origin: f.web.origin, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'approve' }) });
+  assert.equal(response.status, 409); assert.equal(f.store.read(run.id).nodes[0].state, 'stale');
+  await assert.rejects(runWorkflow(f.file, { ...f.options, resume: run.id, sample: capacity, processRunner: native.run }), /검증이 무효/);
+  assert.equal(native.calls.get('a'), 1);
+});
+
+test('two disjoint edits can overlap, dependencies wait for verified artifacts, and resource peaks are recorded', async t => {
+  const f = await fixture(t, { ...manifest, maxParallel: 2 }), native = fakeAgents({ failFirstB: false });
+  let active = 0, peak = 0;
+  const processRunner = async (argv, options) => {
+    if (argv[0] !== 'claude') return native.run(argv, options);
+    active++; peak = Math.max(peak, active);
+    try { await wait(50); return await native.run(argv, options); } finally { active--; }
+  };
+  const run = await runWorkflow(f.file, { ...f.options, sample: capacity, processRunner });
+  assert.equal(run.state, 'review_required'); assert.equal(peak, 2); assert.equal(run.metrics.minAvailableGiB, 20); assert.ok(run.metrics.samples > 0);
+  assert.equal(await fs.readFile(path.join(run.nodes[2].workspace, 'a.mjs'), 'utf8'), 'export default 2;\n');
+});
+
+test('permission denial waits for user judgement without automatic repair calls', async t => {
+  const f = await fixture(t, { ...manifest, nodes: [manifest.nodes[0]] }); let calls = 0;
+  const run = await runWorkflow(f.file, { ...f.options, sample: capacity, processRunner: async argv => {
+    calls++; return { exitCode: 0, stdout: JSON.stringify({ session_id: argv[argv.indexOf('--session-id') + 1], result: 'Denied', permission_denials: [{ tool_name: 'Write' }] }), stderr: '' };
+  } });
+  assert.equal(calls, 1); assert.equal(run.nodes[0].state, 'permission-wait'); assert.equal(run.nodes[0].attempts[0].failure.action, 'wait');
+});
+
+test('a changing patch with the identical failing behavioral check is still stopped as no progress', async t => {
+  const f = await fixture(t, { ...manifest, nodes: [manifest.nodes[0]] }), native = fakeAgents({ alwaysFail: true }); let counter = 0;
+  const run = await runWorkflow(f.file, { ...f.options, sample: capacity, processRunner: async (argv, options) => {
+    const result = await native.run(argv, options);
+    if (argv[0] === 'claude' && !argv.includes('--json-schema')) await fs.appendFile(path.join(options.cwd, 'a.mjs'), `// different patch ${++counter}\n`);
+    return result;
+  } });
+  assert.equal(counter, 3); assert.equal(run.nodes[0].state, 'needs-replan');
+  assert.notEqual(run.nodes[0].attempts[0].fingerprint, run.nodes[0].attempts[1].fingerprint);
+});
+
+test('lost HTTP acknowledgement replays the saved event ID and recovers a completed worker instead of submitting it again', async t => {
+  const f = await fixture(t, { ...manifest, nodes: [manifest.nodes[0]] }), native = fakeAgents(), originalFetch = globalThis.fetch; let failures = 0;
+  globalThis.fetch = async (url, options) => {
+    const response = await originalFetch(url, options);
+    if (String(url).endsWith('/events') && JSON.parse(options.body).type === 'attempt' && failures++ < 3) throw Error('lost acknowledgement after server commit');
+    return response;
+  };
+  try { await assert.rejects(runWorkflow(f.file, { ...f.options, sample: capacity, processRunner: native.run }), /lost acknowledgement/); }
+  finally { globalThis.fetch = originalFetch; }
+  const saved = f.store.read(f.store.list(f.repo)[0].id); assert.equal(saved.nodes[0].state, 'passed');
+  const resumed = await runWorkflow(f.file, { ...f.options, resume: saved.id, sample: capacity, processRunner: native.run });
+  assert.equal(resumed.state, 'review_required'); assert.equal(native.calls.get('a'), 1); assert.equal(resumed.nodes[0].attempts.length, 1);
+});
+
+test('a check which changes its own target cannot certify the changed result', async t => {
+  const spec = { ...manifest, maxAttempts: 1, nodes: [{ ...manifest.nodes[0], check: [process.execPath, '-e', "require('fs').writeFileSync('a.mjs','export default 999;\\n')"] }] };
+  const f = await fixture(t, spec), native = fakeAgents();
+  const run = await runWorkflow(f.file, { ...f.options, sample: capacity, processRunner: native.run });
+  assert.equal(run.state, 'needs-replan'); assert.match(run.nodes[0].attempts[0].check.stderr, /검사 실행 중/); assert.equal(run.nodes[0].attempts[0].passed, false);
+});

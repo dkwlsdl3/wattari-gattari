@@ -15,8 +15,12 @@ let browserStorage; try { browserStorage = localStorage; } catch { browserStorag
 const histories = new Map(), sentMessages = new Map(), drafts = new DraftStore(browserStorage);
 const operations = new Map(), directRequests = new Map();
 let refreshExecutions = async () => {};
-let followUpWork = null;
-const works = initWorks({ api, selected: () => session(), changed: renderConversation, notice, followUp: row => {
+let followUpWork = null, contextWork = null;
+const works = initWorks({ api, selected: () => session(), changed: renderConversation, notice, handoff: row => {
+  contextWork = row; followUpWork = null;
+  $("#follow-up-instruction").hidden = false; $("#follow-up-title").textContent = `인계 첨부: ${row.context?.goal.slice(0, 60) ?? row.instruction.slice(0, 60)} · 왼쪽에서 받을 세션을 선택해 주세요.`;
+  $("#message").focus();
+}, followUp: row => {
   if (row.session.id !== session()?.id) return;
   followUpWork = row;
   $("#follow-up-instruction").hidden = false; $("#follow-up-title").textContent = `변경 지시: ${row.instruction.slice(0, 60)}`;
@@ -138,7 +142,7 @@ function renderDetail() {
   controls.sync(directSessionId);
   historyStream.sync(ready && !document.hidden ? session() : null);
   if (composerRecipient !== recipientKey()) {
-    followUpWork = null; $("#follow-up-instruction").hidden = true;
+    followUpWork = null; $("#follow-up-instruction").hidden = !contextWork;
     if (composerRecipient) drafts.set(composerRecipient, $("#message").value);
     composerRecipient = recipientKey(); $("#message").value = drafts.get(composerRecipient) ?? "";
   }
@@ -167,7 +171,7 @@ function renderConversation() {
   const identity = selected ? `${selected.id}:${selected.cwd}` : activeKey();
   const records = directRequests.get(directSessionId) ?? [];
   const history = histories.get(identity);
-  const items = [...conversationItems({ history: history?.messages ?? [], records, inputs: sentMessages, pending: pendingForSession() }), ...works.items()];
+  const items = [...conversationItems({ history: history?.messages ?? [], records, inputs: sentMessages, pending: pendingForSession() }).map(works.display), ...works.items()];
   const key = JSON.stringify([identity, history?.nextCursor, history?.loading, items, works.rows()]); if (key === previewKey) return;
   const scrollTop = messages.scrollTop;
   const changed = identity !== previewIdentity;
@@ -345,17 +349,17 @@ $("#message").addEventListener("keydown", event => {
 $("#query-form").addEventListener("submit", async event => {
   event.preventDefault();
   if (!session() || sending || !$("#message").value.trim()) return;
-  const text = $("#message").value, recipient = recipientKey();
+  const text = $("#message").value, recipient = recipientKey(), targetId = directSessionId, parentId = followUpWork?.id, contextFrom = contextWork?.id;
   sending = true; renderDetail();
   try {
-    await controls.sendText(text, () => works.create(text, directSessionId, followUpWork?.id));
-    if (recipient === recipientKey()) { followUpWork = null; $("#follow-up-instruction").hidden = true; }
+    await controls.sendText(text, () => works.create(text, targetId, parentId, contextFrom));
+    if (recipient === recipientKey()) { followUpWork = null; contextWork = null; $("#follow-up-instruction").hidden = true; }
     if (recipient === recipientKey() && $("#message").value === text) { $("#message").value = ""; drafts.delete(recipient); }
     void works.refresh().catch(error => notice(`지시는 전달됐지만 작업 조회에 실패했습니다: ${error.message}`));
   } catch (error) { notice(error.message); }
   finally { sending = false; renderDetail(); }
 });
-$("#cancel-follow-up").addEventListener("click", () => { followUpWork = null; $("#follow-up-instruction").hidden = true; });
+$("#cancel-follow-up").addEventListener("click", () => { followUpWork = null; contextWork = null; $("#follow-up-instruction").hidden = true; });
 $("#new-session").addEventListener("click", () => $("#create-dialog").showModal());
 $("#create-form").addEventListener("submit", async event => {
   event.preventDefault(); const input = { provider: $("#create-provider").value, workspace: $("#create-workspace").value, message: $("#create-message").value };

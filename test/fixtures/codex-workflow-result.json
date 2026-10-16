@@ -1,0 +1,8 @@
+{
+  "exitCode": 0,
+  "signal": null,
+  "stdout": "{\"type\":\"thread.started\",\"thread_id\":\"01a1428e-c74b-7a53-9d41-78fa0f7e8eef\"}\n{\"type\":\"turn.started\"}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_0\",\"type\":\"agent_message\",\"text\":\"`value.mjs`를 읽고 내보내는 값을 확인하겠습니다.\"}}\n{\"type\":\"item.started\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/usr/bin/zsh -lc 'cat value.mjs'\",\"aggregated_output\":\"\",\"exit_code\":null,\"status\":\"in_progress\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_1\",\"type\":\"command_execution\",\"command\":\"/usr/bin/zsh -lc 'cat value.mjs'\",\"aggregated_output\":\"export default 2;\\n\",\"exit_code\":0,\"status\":\"completed\"}}\n{\"type\":\"item.completed\",\"item\":{\"id\":\"item_2\",\"type\":\"agent_message\",\"text\":\"{\\\"verdict\\\":\\\"pass\\\",\\\"reason\\\":\\\"value.mjs는 `export default 2;`로 2를 내보냅니다.\\\"}\"}}\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":41286,\"cached_input_tokens\":20352,\"cache_write_input_tokens\":0,\"output_tokens\":93,\"reasoning_output_tokens\":0}}\n",
+  "stderr": "Reading additional input from stdin...\n",
+  "truncated": false,
+  "durationMs": 14008
+}

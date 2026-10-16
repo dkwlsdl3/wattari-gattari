@@ -7,7 +7,10 @@ import http from "node:http";
 import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { launchWorkflow, workflowRunning } from "./workflow-launch.mjs";
+import { staleNodes } from "./workflow-evidence.mjs";
 import { RunStore } from "./run-store.mjs";
+import { handoffText } from "./work-context.mjs";
 import { WorkStore } from "./work-store.mjs";
 import { sampleResources } from "./resource-gate.mjs";
 import { ExecutionStore } from "./execution-store.mjs";
@@ -19,8 +22,10 @@ const ASSETS = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
   ["/drafts.mjs", ["drafts.mjs", "text/javascript; charset=utf-8"]],
   ["/conversation.mjs", ["conversation.mjs", "text/javascript; charset=utf-8"]],
+  ["/work-context.mjs", ["work-context.mjs", "text/javascript; charset=utf-8"]],
   ["/works.mjs", ["works.mjs", "text/javascript; charset=utf-8"]],
   ["/history-stream.mjs", ["history-stream.mjs", "text/javascript; charset=utf-8"]],
+  ["/task-graph.mjs", ["task-graph.mjs", "text/javascript; charset=utf-8"]],
   ["/executions.mjs", ["executions.mjs", "text/javascript; charset=utf-8"]],
   ["/sortable.mjs", [new URL(import.meta.resolve("sortablejs/modular/sortable.esm.js")), "text/javascript; charset=utf-8"]],
   ["/app.mjs", ["app.mjs", "text/javascript; charset=utf-8"]],
@@ -65,7 +70,7 @@ function publicSession(session) {
 
 // Native providers own sessions and decisions; the web attaches their frontend.
 export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, port = 4317,
-  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore(), workStore = new WorkStore(), orderStore = new DockOrderStore(), terminalFactory } = {}) {
+  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore(), workStore = new WorkStore(), orderStore = new DockOrderStore(), launch = launchWorkflow, terminalFactory } = {}) {
   if (!bridge) throw new TypeError("A session bridge is required");
   const assets = new Map(await Promise.all([...ASSETS].map(async ([route, [file, type]]) =>
     [route, { type, data: await fs.readFile(file instanceof URL ? file : new URL(`./web/${file}`, import.meta.url)) }])));
@@ -168,12 +173,25 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
       if (workMatch) {
         const work = workStore.read(workMatch[1]);
         if (!scopeSession || work.session.id !== scopeSession.id) throw fail(404, "현재 세션의 작업이 아닙니다.");
-        if (request.method === "POST") { json(response, 200, workStore.references(work.id, (await body(request)).references)); return; }
+        if (request.method === "POST") { const input = await body(request);
+          if (input.launch) {
+            if (!UUID.test(input.launchId ?? '')) throw fail(400, '실행 요청 ID가 필요합니다.');
+            const previous = workStore.read(work.id).launches?.find(item => item.id === input.launchId);
+            if (previous) { json(response, 200, previous); return; }
+            const created = runStore.create({ ...input.launch, workId: work.id, sourceCwd: work.session.cwd }, cwd);
+            runStore.context(created.id, { workId: work.id, snapshot: work.context ?? null, text: handoffText(work) });
+            const saved = workStore.launched(work.id, input.launchId, created.id);
+            try { await launch(runStore.read(created.id), created.secret, origin); }
+            catch (error) { workStore.launchState(work.id, input.launchId, 'uncertain', error.message); throw error; }
+            workStore.launchState(work.id, input.launchId, 'started');
+            json(response, 201, { ...saved, state: 'started' }); return;
+          }
+          json(response, 200, input.context ? workStore.context(work.id, input.context) : workStore.references(work.id, input.references)); return; }
         if (request.method === "GET") {
           const instructions = workStore.list(work.session.id).filter(row => (row.rootId ?? row.id) === (work.rootId ?? work.id));
           const ids = new Set(instructions.map(row => row.id));
           const runs = runStore.list(cwd).map(row => runStore.read(row.id)).filter(row => ids.has(row.workId));
-          json(response, 200, { ...work, instructions: instructions.map(({ id, instruction, createdAt, parentId }) => ({ id, instruction, createdAt, parentId })), runs }); return;
+          json(response, 200, { ...work, handoff: handoffText(work), instructions: instructions.map(({ id, instruction, createdAt, parentId }) => ({ id, instruction, createdAt, parentId })), runs }); return;
         }
       }
       if (request.method === "GET" && url.pathname === "/api/runs") { json(response, 200, { runs: [...new Set([...scopeFolders, cwd])].flatMap(folder => runStore.list(folder)).filter(row => runInScope(runStore.read(row.id))) }); return; }
@@ -183,16 +201,32 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
           const work = workStore.read(input.workId);
           if (![work.session.cwd, work.session.workspace].includes(input.sourceCwd ?? cwd)) throw fail(409, "지시를 받은 작업 폴더를 sourceCwd에 지정해 주세요.");
         }
-        json(response, 201, runStore.create(input, cwd)); return;
+        const created = runStore.create(input, cwd);
+        if (input.workId) runStore.context(created.id, { workId: input.workId, snapshot: workStore.read(input.workId).context ?? null, text: handoffText(workStore.read(input.workId)) });
+        json(response, 201, { ...runStore.read(created.id), secret: created.secret }); return;
       }
       if (runMatch) {
         const row = runStore.read(runMatch[1]);
         if (!runInScope(row)) throw fail(404, "현재 세션의 실행이 아닙니다.");
-        if (request.method === "GET" && !runMatch[2]) { json(response, 200, row); return; }
+        if (request.method === "GET" && !runMatch[2]) {
+          let current = row;
+          if (['review_required', 'approved'].includes(row.state)) { const stale = await staleNodes(row); if (stale.length) current = runStore.event(row.id, { type: 'invalidate', eventId: crypto.randomUUID(), nodes: stale }); }
+          else if (row.workId && workStore.read(row.workId).launches?.some(item => item.runId === row.id && item.state === 'started') && !await workflowRunning(row.id) && runStore.read(row.id).revision === row.revision) {
+            for (const node of row.nodes.filter(node => ['working', 'checking', 'verifying', 'waiting-resource', 'paused'].includes(node.state))) runStore.event(row.id, { type: 'phase', nodeId: node.id, state: 'interrupted', eventId: crypto.randomUUID() });
+            current = runStore.event(row.id, { type: 'end', reason: '실행기가 종료됐습니다. 재개하면 기존 명령 결과를 먼저 회수합니다.', kind: 'interrupted', eventId: crypto.randomUUID() });
+          }
+          json(response, 200, current); return;
+        }
         if (request.method === "POST") {
           if (runMatch[2] === "traces") { runStore.trace(row.id, await body(request, 4 * 1024 * 1024)); json(response, 200, {}); return; }
           if (runMatch[2] === "events") { json(response, 200, runStore.event(row.id, await body(request))); return; }
-          if (runMatch[2] === "control" && !nativeRun) { json(response, 200, runStore.control(row.id, await body(request))); return; }
+          if (runMatch[2] === "control" && !nativeRun) { const input = await body(request);
+            if (input.action === 'approve') { const stale = await staleNodes(row); if (stale.length) { runStore.event(row.id, { type: 'invalidate', eventId: crypto.randomUUID(), nodes: stale }); throw fail(409, '검증 후 코드·자료가 변경됐습니다. 재검사가 필요합니다.'); } }
+            const updated = runStore.control(row.id, input);
+            if (input.action === 'resume' && row.workId && workStore.read(row.workId).launches?.some(item => item.runId === row.id)) {
+              try { await launch(updated, undefined, origin); } catch (error) { if (error.status !== 409) throw error; }
+            }
+            json(response, 200, updated); return; }
         }
       }
       if (request.method === "GET" && url.pathname === "/api/executions") {

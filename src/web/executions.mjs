@@ -1,3 +1,4 @@
+import { taskGraph } from "./task-graph.mjs";
 const tool = span => {
   const name = span.attributes["tool_name"] || span.attributes["gen_ai.tool.name"];
   return ({ commandExecution: "명령 실행", fileChange: "파일 변경", webSearch: "웹 검색", imageView: "이미지 확인", collabAgentToolCall: "에이전트 호출" })[name] || name;
@@ -76,7 +77,7 @@ function diffBlock(change) {
   for (const line of lines) pre.append(el("span", line, line.startsWith("+") && !line.startsWith("+++") ? "diff-add" : line.startsWith("-") && !line.startsWith("---") ? "diff-remove" : line.startsWith("@@") ? "diff-hunk" : ""));
   box.append(pre); return box;
 }
-const taskStates = { pending: "대기", working: "작업 중", checking: "검사 중", verifying: "독립 검증 중", passed: "통과", failed: "수정 대기", "needs-replan": "재계획 필요", "waiting-resource": "자원 대기", paused: "일시정지", interrupted: "실행 중단", planned: "실행 준비", running: "실행 중", review_required: "최종 검토 대기", approved: "검토 완료", stopped: "중단" };
+const taskStates = { "waiting-user": "사용자 판단 대기", "permission-wait": "권한 판단 대기", stale: "검증 무효·재계획", pending: "대기", working: "작업 중", checking: "검사 중", verifying: "독립 검증 중", passed: "통과", failed: "수정 대기", "needs-replan": "재계획 필요", "waiting-resource": "자원 대기", paused: "일시정지", interrupted: "실행 중단", planned: "실행 준비", running: "실행 중", review_required: "최종 검토 대기", approved: "검토 완료", stopped: "중단" };
 const states = { error: "오류 기록", returned: "호출 종료", unknown: "종료 미확인" };
 const $ = selector => document.querySelector(selector);
 function el(tag, text, className) { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; }
@@ -99,7 +100,8 @@ export async function initExecutions({ api, notice, selectedSession = () => null
       const x1 = from.right - bounds.left + graph.scrollLeft, y1 = from.top + from.height / 2 - bounds.top;
       const x2 = to.left - bounds.left + graph.scrollLeft, y2 = to.top + to.height / 2 - bounds.top;
       const path = document.createElementNS(svg.namespaceURI, "path");
-      path.setAttribute("d", `M ${x1} ${y1} C ${x1 + 20} ${y1}, ${x2 - 20} ${y2}, ${x2} ${y2}`); svg.append(path);
+      path.setAttribute("d", `M ${x1} ${y1} C ${x1 + 20} ${y1}, ${x2 - 20} ${y2}, ${x2} ${y2}`); if (edge.label) { const title = document.createElementNS(svg.namespaceURI, 'title'); title.textContent = edge.label; path.append(title); path.setAttribute('data-relation', edge.kind); }
+      svg.append(path);
     }
     graph.prepend(svg);
   }
@@ -155,24 +157,36 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     const panel = $("#execution-evidence"); panel.replaceChildren(el("h2", node.title));
     if (!attempt) { panel.append(el("p", "아직 실행 근거가 없습니다.", "muted")); return; }
     panel.append(el("p", `${attempt.passed ? "검사·독립 검증 통과" : "통과하지 못함"} · 작업 모델 ${attempt.worker.model} · 검증 모델 ${attempt.review.model || "미실행"}`, "muted"));
+    if (node.state === 'stale') panel.append(el('p', '검증 후 파일이 변경됐습니다. 아래는 당시 검사 기록입니다.', 'task-blocked'));
+    if (attempt.evidence) panel.append(el('p', `검사 대상 커밋 ${attempt.evidence.revision} · ${attempt.evidence.fingerprint}`, 'muted'));
+    if (attempt.failure) panel.append(el('p', `다음 조치: ${{ repair: '검사 근거로 수정', recover: '원래 실행 회수', wait: '사용자 판단 대기' }[attempt.failure.action]} · ${attempt.failure.reason}`, 'task-blocked'));
     panel.append(el("h3", "검사"), el("pre", `${JSON.stringify(node.check)}\n종료 코드: ${attempt.check.exitCode ?? "미확인"}${attempt.check.signal ? ` · ${attempt.check.signal}` : ""}\n${attempt.check.stdout}\n${attempt.check.stderr}`));
     panel.append(el("h3", "독립 검증"), el("p", `${attempt.review.verdict || "미확인"} · ${attempt.review.reason || attempt.review.summary || "미실행"}`));
     if (attempt.diff) panel.append(diffBlock({ path: "변경", diff: attempt.diff }));
-    const more = el("details"); more.append(el("summary", "세션·산출물 근거"), el("pre", JSON.stringify({ worker: attempt.worker.sessionId, verifier: attempt.review.sessionId, artifacts: attempt.artifacts, workspace: node.workspace, costUsd: attempt.costUsd }, null, 2))); panel.append(more);
+    const more = el("details"); more.append(el("summary", "세션·산출물 근거"), el("pre", JSON.stringify({ worker: attempt.worker.sessionId, verifier: attempt.review.sessionId, artifacts: attempt.artifacts, workspace: node.workspace, usage: { worker: attempt.worker.usage, reviewer: attempt.review.usage }, reportedCostUsd: { worker: attempt.worker.costUsd ?? "미제공", reviewer: attempt.review.costUsd ?? "미제공" } }, null, 2))); panel.append(more);
   }
   function renderRun() {
     const graph = $("#execution-graph"), calls = $("#execution-tools"), detail = $("#execution-evidence"); graph.classList.remove("execution-timeline"); graph.replaceChildren(); calls.replaceChildren(); detail.replaceChildren();
-    const edges = currentRun.nodes.flatMap(node => node.dependsOn.map(id => ({ from: id, to: node.id })));
+    const { nodes, edges } = taskGraph(currentRun);
     const levels = layoutGraph(currentRun.nodes, edges);
     const selected = currentRun.nodes.find(node => node.id === selectedTask) || currentRun.nodes.find(node => node.state !== "passed") || currentRun.nodes[0]; selectedTask = selected.id;
-    $("#execution-note").textContent = `${currentRun.title} · ${taskStates[currentRun.state]} · 명세에 선언된 작업 의존성`;
-    for (const node of currentRun.nodes) {
-      const card = el("button", undefined, `agent-card task-${node.state}`); card.style.gridColumn = String((levels.get(node.id) ?? 0) + 1); card.setAttribute("aria-pressed", String(node === selected));
-      card.append(el("small", `${({ plan: "계획", scan: "조사", edit: "수정", verify: "검증" })[node.role]} · ${currentRun.models[node.role]}`, "muted"), el("strong", node.title), el("span", taskStates[node.state]), el("small", `${node.attempts.length}회 실행${node.stalls ? ` · 무진전 ${node.stalls}회` : ""}`, "muted"));
+    $("#execution-note").textContent = `${currentRun.title} · ${taskStates[currentRun.state]} · 명세에 선언된 작업 의존성${currentRun.blockedReason ? ` · ${currentRun.blockedReason}` : ""}`;
+    for (const node of nodes) {
+      const card = el("button", undefined, `agent-card task-${node.state}`); card.style.gridColumn = String((levels.get(node.id) ?? 0) + 1); card.setAttribute("aria-pressed", String(node.id === selected.id));
+      card.append(el("small", `${currentRun.providers?.[node.role] ?? "claude"} · ${({ plan: "계획", scan: "조사", edit: "수정", verify: "검증" })[node.role]} · ${currentRun.models[node.role]}`, "muted"), el("strong", node.title), el("span", taskStates[node.state]), el("small", `${node.attempts.length}회 실행${node.stalls ? ` · 무진전 ${node.stalls}회` : ""}`, "muted"));
+      if (node.blockedReason) card.append(el('small', node.blockedReason.slice(0, 180), 'task-blocked'));
+      if (node.inputs.length) card.append(el('small', `받는 파일: ${node.inputs.map(input => input.path).join(', ')}`, 'muted'));
+      if (node.state === 'passed') card.append(el('small', '동작 검사 → 독립 검토 통과', 'muted'));
       cards.set(node.id, card); card.addEventListener("click", () => { selectedTask = node.id; selectedAttempt = -1; inspector.hidden = false; renderRun(); }); graph.append(card);
     }
     drawEdges(); calls.append(el("h2", "실행 근거"));
     selected.attempts.forEach((attempt, index) => { const button = el("button", `시도 ${index + 1} · ${attempt.passed ? "통과" : "실패"}`, "trace-call"); button.addEventListener("click", () => { selectedAttempt = index; attemptEvidence(selected, attempt); }); calls.append(button); });
+    for (const edge of edges.filter(edge => edge.to === selected.id || edge.from === selected.id)) {
+      const target = edge.to === selected.id ? edge.from : edge.to, other = currentRun.nodes.find(node => node.id === target);
+      const relation = el('button', `${other.title} · ${edge.label}`, 'trace-call'); relation.onclick = () => { selectedTask = target; selectedAttempt = -1; renderRun(); }; calls.append(relation);
+    }
+    if (currentRun.context) { const context = el('details'); context.append(el('summary', '전달한 컨텍스트·출처'), el('pre', currentRun.context.text)); calls.append(context); }
+    if (currentRun.metrics) calls.append(el('p', `관측 자원: 여유 메모리 최소 ${currentRun.metrics.minAvailableGiB.toFixed(1)}GiB · PC CPU 최대 ${currentRun.metrics.maxCpuPercent.toFixed(0)}% · ${currentRun.metrics.samples}회`, 'muted'));
     const task = el("details"); task.append(el("summary", "작업 지시"), el("pre", selected.prompt)); calls.append(task);
     attemptEvidence(selected, selectedAttempt >= 0 ? selected.attempts[selectedAttempt] : selected.attempts.at(-1));
   }
@@ -181,7 +195,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     if (!currentRun) return;
     const ended = ["review_required", "approved"].includes(currentRun.state);
     $("#run-pause").disabled = ended || currentRun.control === "pause";
-    $("#run-resume").disabled = ended || currentRun.control === "run";
+    $("#run-resume").disabled = ended || currentRun.control === "run" && !["interrupted", "needs-replan", "waiting-user"].includes(currentRun.state);
     $("#run-stop").disabled = ended || currentRun.control === "stop";
     $("#run-approve").hidden = currentRun.state !== "review_required";
     const resource = currentRun.resource;

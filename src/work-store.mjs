@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { normalizeContext, handoffText } from "./work-context.mjs";
 import { APP_ID } from "./product.mjs";
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
@@ -43,18 +44,19 @@ export class WorkStore {
     return files.filter(file => file.isFile() && file.name.endsWith(".json") && UUID.test(file.name.slice(0, -5)))
       .map(file => this.read(file.name.slice(0, -5))).filter(row => row.session.id === sessionId).sort((a, b) => a.createdAt - b.createdAt);
   }
-  create({ id, instruction, parentId }, session, baseline = []) {
+  create({ id, instruction, parentId, contextFrom }, session, baseline = []) {
     this.#file(id);
     if (typeof instruction !== "string" || !instruction.trim() || instruction.length > 16000 || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(instruction)) throw fail(400, "지시는 제어문자 없이 1~16,000자로 입력해 주세요.");
     try {
       const previous = this.read(id);
-      if (previous.session.id !== session.id || previous.instruction !== instruction || previous.parentId !== parentId) throw fail(409, "이미 다른 지시에 사용한 작업 ID입니다.");
+      if (previous.session.id !== session.id || previous.instruction !== instruction || previous.parentId !== parentId || previous.contextFrom !== contextFrom) throw fail(409, "이미 다른 지시에 사용한 작업 ID입니다.");
       return previous;
     } catch (error) { if (error.status !== 404) throw error; }
     if (this.list(session.id).length >= 500) throw fail(409, "세션별 작업 기록 한도입니다.");
     const parent = parentId ? this.read(parentId) : null;
     if (parent && parent.session.id !== session.id) throw fail(409, "같은 세션의 작업에만 변경 지시를 연결할 수 있습니다.");
-    return this.#write({ version: 1, id, rootId: parent?.rootId ?? parent?.id ?? id, instruction, ...(parentId ? { parentId } : {}), session: { id: session.id, provider: session.provider, name: session.name, cwd: session.cwd, workspace: path.resolve(session.projectCwd || session.cwd) },
+    const inherited = contextFrom ? this.read(contextFrom) : parent;
+    return this.#write({ ...(inherited?.context ? { deliveryText: `${instruction}\n\n[Waga 선택한 인계 자료 — 원래 지시와 구분]\n${handoffText(inherited)}` } : {}), ...(contextFrom ? { contextFrom } : {}), ...(inherited?.context ? { context: structuredClone(inherited.context), contextSource: { workId: inherited.id, revision: inherited.context.revision, capturedAt: Date.now() } } : {}), version: 1, id, rootId: parent?.rootId ?? parent?.id ?? id, instruction, ...(parentId ? { parentId } : {}), session: { id: session.id, provider: session.provider, name: session.name, cwd: session.cwd, workspace: path.resolve(session.projectCwd || session.cwd) },
       createdAt: Date.now(), delivery: "unconfirmed", references: [], baseline: baseline.filter(row => row.role === "user").map(row => row.id).slice(-500) });
   }
   submitted(id, sessionId) {
@@ -65,6 +67,15 @@ export class WorkStore {
     row.submitAttemptedAt = Date.now(); return this.#write(row);
   }
   delivered(id) { const row = this.read(id); row.delivery = "submitted"; return this.#write(row); }
+  launched(id, launchId, runId) {
+    this.#file(launchId); const row = this.read(id); row.launches ??= [];
+    const previous = row.launches.find(item => item.id === launchId);
+    if (previous) return previous;
+    if (row.launches.length >= 30) throw fail(409, '작업별 실행 한도입니다.');
+    const launch = { id: launchId, runId, state: "prepared", at: Date.now() }; row.launches.push(launch); this.#write(row); return launch;
+  }
+  launchState(id, launchId, state, reason) { const row = this.read(id), entry = row.launches?.find(item => item.id === launchId); if (!entry) throw fail(404, '실행 요청이 없습니다.'); entry.state = state; if (reason) entry.reason = String(reason).slice(0, 2000); return this.#write(row); }
+  context(id, input) { const row = this.read(id); row.context = normalizeContext(input, row.context); return this.#write(row); }
   references(id, values) {
     if (!Array.isArray(values) || values.length > 30 || values.some(value => typeof value !== "string" || !value.trim() || value.length > 2000)) throw fail(400, "참고 자료는 2,000자 이하 출처를 최대 30개 연결할 수 있습니다.");
     const row = this.read(id); row.references = values.map(source => ({ source, addedAt: Date.now(), origin: "user" })); return this.#write(row);
@@ -73,7 +84,7 @@ export class WorkStore {
     const rows = this.list(sessionId), claimed = new Set(rows.map(row => row.messageId).filter(Boolean));
     return rows.map(row => {
       if (row.messageId || !row.submitAttemptedAt) return row;
-      const matches = messages.filter(message => message.role === "user" && !row.baseline.includes(message.id) && message.text === row.instruction);
+      const matches = messages.filter(message => message.role === "user" && !row.baseline.includes(message.id) && message.text === (row.deliveryText ?? row.instruction));
       // Content matching is a navigation aid, never a claimed native transport acknowledgement.
       if (matches.length === 1 && matches[0].id && !claimed.has(matches[0].id)) {
         claimed.add(matches[0].id);
