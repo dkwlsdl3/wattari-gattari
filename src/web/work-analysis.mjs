@@ -14,8 +14,6 @@ export function workAnalysis(initial, { api, notice, handoff, graph, active }) {
     clearTimeout(timer); panel.replaceChildren();
     const analysis = row.analysis;
     if (!analysis) {
-      panel.append(el('p', '작업 응답이 안정되면 관계와 인계를 자동으로 정리합니다.', 'muted'));
-      timer = setTimeout(async () => { if (!panel.isConnected || !active()) return; try { await reload(); } catch (error) { notice(error.message); } }, 1000);
       return;
     }
     if (analysis.state === 'running') {

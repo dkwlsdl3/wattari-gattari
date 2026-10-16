@@ -189,6 +189,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         const work = workStore.read(workMatch[1]);
         if (!scopeSession || work.session.id !== scopeSession.id) throw fail(404, "현재 세션의 작업이 아닙니다.");
         if (request.method === "POST") { const input = await body(request);
+          if (input.plan) { json(response, 200, workStore.plan(work.id, input.plan)); return; }
           if (input.analyze) {
             const bundle = await workSources(bridge, scopeSession, work.messageId, executionStore.native(scopeSession), work.instruction, work.context);
             json(response, 202, assistant.start(work, bundle, { refresh: input.refresh === true })); return;

@@ -1,4 +1,4 @@
-const COMMANDS = new Set(["run", "serve", "list", "agents", "send", "ask", "result", "open", "overview", "tmux-agents-view", "doctor", "help"]);
+const COMMANDS = new Set(["plan", "run", "serve", "list", "agents", "send", "ask", "result", "open", "overview", "tmux-agents-view", "doctor", "help"]);
 const DEFAULT_WAIT_TIMEOUT_MS = 30 * 60 * 1_000;
 const DEFAULT_REPLY_TIMEOUT_MS = 3 * 60 * 1_000;
 
@@ -64,7 +64,10 @@ export function parseCliArgs(args) {
   if (options.untilIdle && options.command !== "ask") throw invalid("--until-idle is only valid for ask");
   if (options.notifyOrigin && options.command !== "ask") throw invalid("--notify-origin is only valid for ask");
   if (options.resume && options.command !== "run") throw invalid("--resume is only valid for run");
-  if (options.command === "run") {
+  if (options.command === 'plan') {
+    options.target = positional.shift(); options.manifest = positional.shift();
+    if (!/^(claude|codex):.+$/.test(options.target ?? '') || positional.length) throw invalid('plan requires a full provider-prefixed session ID and an optional plan JSON file');
+  } else if (options.command === "run") {
     options.manifest = positional.shift();
     if (!options.manifest || positional.length) throw invalid("run requires one workflow JSON file");
     if (options.resume && !/^[0-9a-f-]{36}$/.test(options.resume)) throw invalid("--resume requires a run ID");

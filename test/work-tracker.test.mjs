@@ -9,7 +9,7 @@ import { WorkTracker } from '../src/work-tracker.mjs';
 import { nativeSpanIdentity } from '../src/native-execution.mjs';
 import { startWebServer } from '../src/web-server.mjs';
 
-async function fixture(t) {
+async function fixture(t, { register = true } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'waga-proof-tracker-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const store = new WorkStore(path.join(root, 'works')), executions = new ExecutionStore(path.join(root, 'executions'));
@@ -18,11 +18,12 @@ async function fixture(t) {
   let clock = 10000, interpretations = 0, writes = 0;
   const bridge = { discover: async () => ({ sessions: [session], warnings: [] }), history: async () => ({ messages }), instruct: async () => { writes++; throw Error('Unexpected native resubmission'); } };
   const assistant = { pending: new Map(), start(work) { interpretations++; store.analysis(work.id, { id: 'proof-analysis', state: 'ready', summary: '원문 기반 제안', nodes: [] }); } };
+  if (register) store.observe(messages[2], session);
   const tracker = new WorkTracker({ bridge, store, executions, assistant, now: () => clock });
   return { root, store, executions, session, messages, bridge, assistant, tracker, now: () => clock, advance: ms => { clock += ms; }, calls: () => interpretations, writes: () => writes };
 }
 
-test('native work progress is visible without opening details and interpretation follows a settled response automatically once', async t => {
+test('explicit work progress follows native evidence without creating interpretation jobs', async t => {
   const f = await fixture(t);
   let row = f.tracker.observe(f.session, { messages: f.messages });
   assert.equal(f.store.list(f.session.id).length, 1); // No historical backfill of model jobs.
@@ -35,14 +36,16 @@ test('native work progress is visible without opening details and interpretation
   f.advance(3000); await f.tracker.tick(); assert.equal(f.calls(), 0);
   f.messages[3].state = 'completed'; f.messages.push({ id: 'a1', role: 'assistant', text: '수정했습니다.' }); f.session.status = 'idle';
   await f.tracker.tick(); assert.equal(f.calls(), 0);
-  f.advance(2001); await f.tracker.tick(); assert.equal(f.calls(), 1);
+  f.advance(2001); await f.tracker.tick(); assert.equal(f.calls(), 0);
   row = f.store.read(row.id); assert.equal(row.progress.state, 'responded'); assert.equal(row.state, undefined); // Reply is not test completion.
-  await f.tracker.tick(); assert.equal(f.calls(), 1); assert.equal(f.writes(), 0);
+  await f.tracker.tick(); assert.equal(f.calls(), 0); assert.equal(f.writes(), 0);
   assert.ok(!JSON.stringify(row.progress).includes('수정했습니다.')); // Progress does not copy the transcript.
   f.messages.push({ id: 'u2', role: 'user', text: '다른 값을 확인해 주세요.' });
+  f.store.observe(f.messages.at(-1), f.session);
   f.session.status = 'needs-input'; row = f.tracker.observe(f.session, { messages: f.messages });
   assert.equal(row.progress.state, 'needs-input'); assert.equal(row.progress.calls, 0); assert.equal(row.progress.response, undefined);
   f.messages.push({ id: 'u3', role: 'user', text: '추가 지시입니다.' });
+  f.store.observe(f.messages.at(-1), f.session);
   f.tracker.observe(f.session, { messages: f.messages });
   assert.equal(f.store.read(row.id).progress.state, 'continued');
 });
@@ -68,7 +71,7 @@ test('a tool-only latest page is traced back to its actual user instruction inst
   assert.deepEqual(reads, [undefined, 'before-tools']); assert.equal(f.calls(), 0);
 });
 
-test('an unfinished interpretation retains its original analysis identity when native work has already moved on', async t => {
+test('old per-message interpretations are not relaunched by conversation tracking', async t => {
   const f = await fixture(t);
   const original = f.tracker.observe(f.session, { messages: f.messages });
   f.store.analysis(original.id, { id: 'existing-analysis', state: 'running' });
@@ -76,18 +79,18 @@ test('an unfinished interpretation retains its original analysis identity when n
   let recovered;
   f.assistant.start = work => { recovered = work; f.store.analysis(work.id, { ...work.analysis, state: 'ready' }); };
   await f.tracker.tick();
-  assert.equal(recovered.id, original.id); assert.equal(recovered.analysis.id, 'existing-analysis'); assert.equal(f.writes(), 0);
+  assert.equal(recovered, undefined); assert.equal(f.store.read(original.id).analysis.id, 'existing-analysis'); assert.equal(f.writes(), 0);
 });
 
-test('reading the actual conversation API connects progress and schedules analysis without any analyze POST or details action', async t => {
-  const f = await fixture(t); f.session.status = 'idle'; f.messages.push({ id: 'a1', role: 'assistant', text: '응답입니다.' });
+test('reading ordinary conversation does not register tasks or schedule model calls', async t => {
+  const f = await fixture(t, { register: false }); f.session.status = 'idle'; f.messages.push({ id: 'a1', role: 'assistant', text: '응답입니다.' });
   const web = await startWebServer({ bridge: f.bridge, cwd: f.root, port: 0, workStore: f.store, executionStore: f.executions, assistant: f.assistant, now: f.now });
   t.after(() => web.close());
   const headers = { Cookie: `waga_web=${web.url.split('#')[1]}` };
   const response = await fetch(`${web.origin}/api/sessions/${encodeURIComponent(f.session.id)}/messages`, { headers });
-  const page = await response.json(); assert.equal(response.status, 200); assert.equal(page.work.messageId, 'u1'); assert.equal(page.work.progress.state, 'responded');
+  const page = await response.json(); assert.equal(response.status, 200); assert.equal(page.work, undefined); assert.equal(f.store.list(f.session.id).length, 0);
   f.advance(3000);
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + 2300;
   while (!f.calls() && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 50));
-  assert.equal(f.calls(), 1); assert.equal(f.writes(), 0);
+  assert.equal(f.calls(), 0); assert.equal(f.writes(), 0);
 });

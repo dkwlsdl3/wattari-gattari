@@ -22,6 +22,9 @@ import { TmuxWorkspace } from "./tmux-workspace.mjs";
 import { WagaSettingsStore } from "./waga-settings.mjs";
 import { runWorkflow } from "./workflow-runtime.mjs";
 import { serveWeb } from "./web-server.mjs";
+import { WorkStore } from './work-store.mjs';
+import { workSources } from './work-assistant.mjs';
+import { validateWorkPlan } from './work-plan.mjs';
 
 function usage() {
   return [
@@ -29,6 +32,7 @@ function usage() {
     "                                Open the global dock, optionally filtered by workspace",
     `${CLI_NAME} list [--provider claude|codex] [--cwd PATH] [--json]`,
     `${CLI_NAME} run <workflow.json> [--resume RUN_ID]    Run isolated native work with checks and independent review`,
+    `${CLI_NAME} plan <provider:session-id> [plan.json] [--json]    Read original message/current plans, or record a skill plan; never execute it`,
     `${CLI_NAME} serve [--port 4317] [--cwd PATH]    Open the local browser workspace`,
     `${CLI_NAME} send <session-id-or-name> <message> [--cwd PATH]    One-way notification`,
     `${CLI_NAME} ask <session-id-or-name> <message> [--notify-origin] [--wait-timeout SEC] [--reply-timeout SEC] [--cwd PATH]`,
@@ -88,6 +92,7 @@ export async function runCli(args = process.argv.slice(2), {
   origin = claudeOrigin(),
   web = serveWeb,
   workflowRuntime = runWorkflow,
+  workStore = new WorkStore(),
   handleSignals = false,
 } = {}) {
   let options;
@@ -100,7 +105,7 @@ export async function runCli(args = process.argv.slice(2), {
     catch (error) { stderr.write(`${error.message}\n`); return 1; }
     finally { process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
   }
-  bridge ??= defaultBridge({ autoStartDaemon: options.command !== "serve" });
+  bridge ??= defaultBridge({ autoStartDaemon: !['serve', 'plan'].includes(options.command) });
 
   const cwd = path.resolve(options.cwd ?? process.cwd());
   if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
@@ -138,7 +143,37 @@ export async function runCli(args = process.argv.slice(2), {
     }
   }
   try {
-    if (options.command === "version") stdout.write(`${VERSION}\n`);
+    if (options.command === 'plan') {
+      const { sessions } = await bridge.discover({ cwd: options.cwd ? cwd : undefined });
+      const session = sessions.find(row => row.id === options.target);
+      if (!session) throw Error('Exact native session not found');
+      if (!options.manifest) {
+        let page = await bridge.history(session, { activities: true });
+        for (let count = 1; count < 8 && !page.messages.some(row => row.role === 'user') && page.nextCursor; count++) {
+          const older = await bridge.history(session, { activities: true, cursor: page.nextCursor });
+          if (older.nextCursor === page.nextCursor) break;
+          page = older;
+        }
+        const message = page.messages.findLast(row => row.role === 'user');
+        stdout.write(`${JSON.stringify({ sessionId: session.id, message: message ? { id: message.id, text: message.text } : null, plans: workStore.list(session.id).filter(row => row.plan).map(row => ({ workId: row.id, messageId: row.messageId, plan: row.plan })) })}\n`);
+        return 0;
+      }
+      const fd = fs.openSync(path.resolve(options.manifest), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+      let input;
+      try { const stat = fs.fstatSync(fd); if (!stat.isFile() || stat.size > 128 * 1024) throw Error('Plan must be a JSON file of at most 128KiB'); input = JSON.parse(fs.readFileSync(fd, 'utf8')); }
+      finally { fs.closeSync(fd); }
+      validateWorkPlan(input);
+      if (typeof input.messageId !== 'string' || !input.messageId || input.messageId.length > 500) throw Error('Plan requires the original native user messageId');
+      const previous = workStore.list(session.id).find(row => row.messageId === input.messageId);
+      let work = previous;
+      if (!work) {
+        const bundle = await workSources(bridge, session, input.messageId, null, '');
+        if (!bundle.message) throw Error('Original native user message not found');
+        work = workStore.observe(bundle.message, session);
+      }
+      const row = workStore.plan(work.id, input);
+      stdout.write(`${JSON.stringify({ workId: row.id, messageId: row.messageId, plan: row.plan })}\n`);
+    } else if (options.command === "version") stdout.write(`${VERSION}\n`);
     else if (options.command === "serve") return await web({ bridge, cwd, filterCwd: options.cwd ? cwd : undefined, port: options.port, output: stdout, orderStore });
     else if (options.command === "help") stdout.write(`${usage()}\n`);
     else if (options.command === "doctor") return (await doctor({ output: stdout, cwd })).exitCode;

@@ -149,12 +149,26 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     const queue = nodes.filter(node => !edges.some(edge => edge.to === node.id)).map(node => node.id);
     for (const id of queue) levels.set(id, 0);
     for (let index = 0; index < queue.length; index++) for (const child of outgoing.get(queue[index]) ?? []) {
-      if (!levels.has(child)) { levels.set(child, Math.min(3, levels.get(queue[index]) + 1)); queue.push(child); }
+      const depth = levels.get(queue[index]) + 1;
+      if (!levels.has(child) || levels.get(child) < depth) { levels.set(child, depth); queue.push(child); }
     }
     return levels;
   }
   function attemptEvidence(node, attempt) {
     const panel = $("#execution-evidence"); panel.replaceChildren(el("h2", node.title));
+    if (currentRun?.declaration) {
+      panel.append(el('p', `${currentRun.skill} · 에이전트가 등록한 계획·진행 보고`, 'muted'));
+      if (node.blockedReason) panel.append(el('p', node.blockedReason, 'task-blocked'));
+      for (const reference of node.evidence) {
+        panel.append(el('h3', reference));
+        const source = currentRun.observations.sources.find(source => source.id === reference);
+        if (source) panel.append(el('pre', source.text));
+        else panel.append(el('p', '에이전트가 연결한 참조 위치입니다. 이 표시만으로 내용·검사 결과가 검증된 것은 아닙니다.', 'muted'));
+      }
+      if (!node.evidence.length) panel.append(el('p', '아직 연결한 실행 근거가 없습니다.', 'muted'));
+      panel.append(el('p', '단계 종료 보고는 동작 검사 통과 판정과 구분합니다.', 'muted'));
+      return;
+    }
     if (currentRun?.proposal) {
       panel.append(el('p', node.prompt), el('p', 'LLM이 원문에서 제안한 작업입니다. 실행·완료·검사 통과를 뜻하지 않습니다.', 'muted'));
       for (const id of node.evidenceIds) {
@@ -184,12 +198,14 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     const graph = $("#execution-graph"), calls = $("#execution-tools"), detail = $("#execution-evidence"); graph.classList.remove("execution-timeline"); graph.replaceChildren(); calls.replaceChildren(); detail.replaceChildren();
     const { nodes, edges } = taskGraph(currentRun);
     const levels = layoutGraph(currentRun.nodes, edges);
+    graph.classList.toggle('declared-plan', Boolean(currentRun.declaration));
+    graph.style.setProperty('--plan-columns', String(Math.max(0, ...levels.values()) + 1));
     const selected = currentRun.nodes.find(node => node.id === selectedTask) || currentRun.nodes.find(node => node.state !== "passed") || currentRun.nodes[0]; selectedTask = selected.id;
-    $("#execution-note").textContent = `${currentRun.title} · ${currentRun.proposal ? 'LLM 제안 관계 · 실행 전' : `${taskStates[currentRun.state]} · 명세에 선언된 작업 의존성`}${currentRun.blockedReason ? ` · ${currentRun.blockedReason}` : ""}`;
+    $("#execution-note").textContent = `${currentRun.title} · ${currentRun.declaration ? `${currentRun.skill} · 작업 계획 · 에이전트 진행 보고` : currentRun.proposal ? 'LLM 제안 관계 · 실행 전' : `${taskStates[currentRun.state]} · 명세에 선언된 작업 의존성`}${currentRun.blockedReason ? ` · ${currentRun.blockedReason}` : ""}`;
     for (const node of nodes) {
       const card = el("button", undefined, `agent-card task-${node.state}`); card.style.gridColumn = String((levels.get(node.id) ?? 0) + 1); card.setAttribute("aria-pressed", String(node.id === selected.id));
       const role = ({ plan: "계획", scan: "조사", edit: "수정", verify: "검증" })[node.role];
-      card.append(el("small", currentRun.proposal ? `${role} · LLM 제안` : `${currentRun.providers?.[node.role] ?? "claude"} · ${role} · ${currentRun.models[node.role]}`, "muted"), el("strong", node.title), el("span", currentRun.proposal ? '제안 · 실행 전' : taskStates[node.state]), el("small", currentRun.proposal ? `원문 근거 ${node.evidenceIds.length}개` : `${node.attempts.length}회 실행${node.stalls ? ` · 무진전 ${node.stalls}회` : ""}`, "muted"));
+      card.append(el("small", currentRun.declaration ? currentRun.skill : currentRun.proposal ? `${role} · LLM 제안` : `${currentRun.providers?.[node.role] ?? "claude"} · ${role} · ${currentRun.models[node.role]}`, "muted"), el("strong", node.title), el("span", currentRun.declaration ? ({ pending: '대기', working: '진행 중', failed: '막힘', reported: '단계 종료 보고' })[node.state] : currentRun.proposal ? '제안 · 실행 전' : taskStates[node.state]), el("small", currentRun.declaration ? `연결한 근거 ${node.evidence.length}개` : currentRun.proposal ? `원문 근거 ${node.evidenceIds.length}개` : `${node.attempts.length}회 실행${node.stalls ? ` · 무진전 ${node.stalls}회` : ""}`, "muted"));
       if (node.blockedReason) card.append(el('small', node.blockedReason.slice(0, 180), 'task-blocked'));
       if (node.inputs.length) card.append(el('small', `받는 파일: ${node.inputs.map(input => input.path).join(', ')}`, 'muted'));
       if (node.state === 'passed') card.append(el('small', '동작 검사 → 독립 검토 통과', 'muted'));
@@ -207,8 +223,8 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     attemptEvidence(selected, selectedAttempt >= 0 ? selected.attempts[selectedAttempt] : selected.attempts.at(-1));
   }
   function runControls() {
-    $("#run-controls").hidden = !currentRun || currentRun.proposal; $("#run-work-view").hidden = !currentRun || currentRun.proposal; $("#run-call-view").hidden = !currentRun || currentRun.proposal;
-    if (!currentRun || currentRun.proposal) return;
+    $("#run-controls").hidden = !currentRun || currentRun.proposal || currentRun.declaration; $("#run-work-view").hidden = !currentRun || currentRun.proposal || currentRun.declaration; $("#run-call-view").hidden = !currentRun || currentRun.proposal || currentRun.declaration;
+    if (!currentRun || currentRun.proposal || currentRun.declaration) return;
     const ended = ["review_required", "approved"].includes(currentRun.state);
     $("#run-pause").disabled = ended || currentRun.control === "pause";
     $("#run-resume").disabled = ended || currentRun.control === "run" && !["interrupted", "needs-replan", "waiting-user"].includes(currentRun.state);
@@ -221,6 +237,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     $("#execution-panel").classList.toggle("native-flow", !(currentRun && workView));
     if (currentRun && workView) { renderRun(); return; }
     const graph = $("#execution-graph"), calls = $("#execution-tools"), detail = $("#execution-evidence");
+    graph.classList.remove('declared-plan');
     const graphTop = graph.scrollTop;
     const followLatest = !keepPosition || graph.scrollHeight - graph.clientHeight - graphTop <= 32;
     const viewportTop = graph.getBoundingClientRect().top;
@@ -332,7 +349,12 @@ export async function initExecutions({ api, notice, selectedSession = () => null
   async function load(id, preserve = false) {
     const version = ++loadVersion;
     if (!preserve) $("#run-controls").hidden = true;
-    if (id?.startsWith('proposal:')) {
+    if (id?.startsWith('plan:')) {
+      const row = await api(scoped(`works/${id.slice(5)}`)); if (version !== loadVersion) return;
+      if (!row.plan) throw Error('등록한 작업 계획이 없습니다.');
+      currentRun = { ...row.plan, id, declaration: true, observations: row.observations, nodes: row.plan.nodes.map(node => ({ ...node, role: 'plan', prompt: node.title, state: ({ active: 'working', blocked: 'failed' })[node.state] ?? node.state, blockedReason: node.reason, attempts: [], inputs: [], outputs: [] })) };
+      execution = null;
+    } else if (id?.startsWith('proposal:')) {
       const row = await api(scoped(`works/${id.slice(9)}`)); if (version !== loadVersion) return;
       if (!row.analysis?.nodes) throw Error('작업 관계 정리가 아직 없습니다.');
       currentRun = { ...row.analysis.manifest, id, title: row.analysis.summary, proposal: true, state: 'planned', models: row.analysis.manifest?.models ?? { plan: row.analysis.provider, scan: row.analysis.provider, edit: row.analysis.provider, verify: row.analysis.provider }, nodes: row.analysis.nodes.map(node => ({ ...node, state: 'pending', attempts: [] })), observations: row.observations };
@@ -372,11 +394,13 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     executions.sort((a, b) => Number(b.source === "native") - Number(a.source === "native")); picker.replaceChildren();
     for (const run of runs) { const option = el("option", `${run.title} · ${taskStates[run.state]}`); option.value = `run:${run.id}`; picker.append(option); }
     const proposals = works.filter(work => work.analysis?.nodes);
+    const plans = works.filter(work => work.plan).sort((a, b) => b.plan.updatedAt - a.plan.updatedAt);
+    for (const work of plans) { const option = el('option', `${work.plan.title} · ${work.plan.skill}`); option.value = `plan:${work.id}`; picker.append(option); }
     for (const work of proposals) { const option = el('option', `${work.analysis.summary} · LLM 제안`); option.value = `proposal:${work.id}`; picker.append(option); }
     for (const run of executions) { const option = el("option", run.source === "native" ? "세션 실행 기록 · 자동 수집" : `${run.title} · ${new Date(run.importedAt).toLocaleString("ko-KR")}`); option.value = run.id; picker.append(option); }
     const latest = works.at(-1), latestRun = latest && runs.findLast(run => run.workId === latest.id);
-    const first = latestRun ? `run:${latestRun.id}` : latest?.analysis?.nodes ? `proposal:${latest.id}` : null;
-    const ids = [...(first ? [first] : []), ...executions.filter(row => row.source === "native").map(row => row.id), ...runs.map(row => `run:${row.id}`), ...proposals.map(work => `proposal:${work.id}`), ...executions.filter(row => row.source !== "native").map(row => row.id)]; picker.value = ids.includes(selected) ? selected : ids[0] || "";
+    const first = plans[0] ? `plan:${plans[0].id}` : latestRun ? `run:${latestRun.id}` : latest?.analysis?.nodes ? `proposal:${latest.id}` : null;
+    const ids = [...new Set([...(first ? [first] : []), ...plans.map(work => `plan:${work.id}`), ...executions.filter(row => row.source === "native").map(row => row.id), ...runs.map(row => `run:${row.id}`), ...proposals.map(work => `proposal:${work.id}`), ...executions.filter(row => row.source !== "native").map(row => row.id)])]; picker.value = ids.includes(selected) ? selected : ids[0] || "";
     picker.disabled = !ids.length; picker.hidden = ids.length < 2;
     await load(picker.value, preserve);
   }
@@ -400,7 +424,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
   }, 2000);
   $("#execution-select").addEventListener("change", () => { void load($("#execution-select").value).catch(error => notice(error.message)); });
   mode(false);
-  const refresh = () => listing(currentRun?.proposal ? currentRun.id : currentRun ? `run:${currentRun.id}` : execution?.id);
-  refresh.openWork = async (row, runId) => { mode(true); workView = true; await listing(runId ? `run:${runId}` : row.analysis?.nodes ? `proposal:${row.id}` : ''); };
+  const refresh = () => listing(currentRun?.proposal || currentRun?.declaration ? currentRun.id : currentRun ? `run:${currentRun.id}` : execution?.id);
+  refresh.openWork = async (row, runId) => { mode(true); workView = true; await listing(runId ? `run:${runId}` : row.plan ? `plan:${row.id}` : row.analysis?.nodes ? `proposal:${row.id}` : ''); };
   return refresh;
 }

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { normalizeContext, handoffText } from "./work-context.mjs";
 import { APP_ID } from "./product.mjs";
+import { validateWorkPlan } from './work-plan.mjs';
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const fail = (status, message) => Object.assign(new Error(message), { status });
@@ -75,6 +76,13 @@ export class WorkStore {
     return this.#write({ ...row, origin: 'native', messageId: message.id, delivery: 'observed' });
   }
   analysis(id, value) { const row = this.read(id); row.analysis = value; return this.#write(row); }
+  plan(id, input) {
+    const row = this.read(id), value = validateWorkPlan(input);
+    if (row.plan && JSON.stringify(value) === JSON.stringify({ title: row.plan.title, skill: row.plan.skill, nodes: row.plan.nodes })) return row;
+    if (input.revision !== (row.plan?.revision ?? 0)) throw fail(409, '계획이 변경됐습니다. 현재 revision을 읽은 뒤 갱신해 주세요.');
+    row.plan = { ...value, revision: input.revision + 1, updatedAt: Date.now(), basis: 'agent-declared' };
+    return this.#write(row);
+  }
   progress(id, value) { const row = this.read(id); row.progress = value; delete row.trackingError; return this.#write(row); }
   trackingError(id, value) { const row = this.read(id); row.trackingError = value; return this.#write(row); }
   generatedContext(id, input, analysisId) {

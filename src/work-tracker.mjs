@@ -1,10 +1,8 @@
-import { workSources } from './work-assistant.mjs';
 import { nativeSpanIdentity } from './native-execution.mjs';
 import crypto from 'node:crypto';
 import { mergeHistoryMessages } from './session-history.mjs';
 
-// Observe native work without resubmitting it. One interpretation follows a quiet response,
-// rather than one model call per streamed token, historical message or browser click.
+// Observe explicitly registered instructions without creating tasks or model jobs from chat.
 export class WorkTracker {
   constructor({ bridge, store, executions, assistant, now = Date.now }) {
     Object.assign(this, { bridge, store, executions, assistant, now });
@@ -21,7 +19,8 @@ export class WorkTracker {
     this.store.reconcile(session.id, messages);
     const original = messages.findLast(message => message.role === 'user');
     if (!original?.id || !original.text?.trim() || original.text.length > 16000) return;
-    const work = this.store.observe(original, session);
+    const work = this.store.list(session.id).find(row => row.messageId === original.id);
+    if (!work) return;
     for (const previous of this.store.list(session.id)) {
       if (previous.id !== work.id && ['working', 'waiting', 'needs-input'].includes(previous.progress?.state)
         && messages.some(message => message.id === previous.messageId)) {
@@ -70,15 +69,7 @@ export class WorkTracker {
           const nextCursor = older.nextCursor === page.nextCursor ? null : older.nextCursor;
           page = { ...older, messages: mergeHistoryMessages(older.messages, page.messages), nextCursor };
         }
-        const work = this.observe(session, page);
-        if (this.assistant.pending.size) continue;
-        // An older interpretation can outlive a new native instruction or web restart.
-        // Its durable analysis ID must be recovered rather than left spinning forever.
-        const recovering = this.store.list(id).find(row => row.analysis?.state === 'running');
-        if (!recovering && (!work || work.analysis || work.progress.state !== 'responded' || this.now() - work.progress.changedAt < 2000)) continue;
-        const target = recovering ?? work;
-        const bundle = await workSources(this.bridge, session, target.messageId, this.executions.native(session), target.instruction, target.context);
-        if (!this.closed) this.assistant.start(target, bundle);
+        this.observe(session, page);
       } catch (error) {
         // Tracking must never hide native conversation or trigger another native instruction.
         const work = this.store.list(id).at(-1);

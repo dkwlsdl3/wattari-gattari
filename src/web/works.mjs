@@ -33,27 +33,13 @@ export function initWorks({ api, selected, changed, notice, followUp, handoff, g
     const old = bubble.querySelector(".work-record");
     const previous = bubble.querySelector('.work-progress');
     if (!work) { old?.remove(); previous?.remove(); return; }
-    const progress = work.progress, analysis = work.analysis;
-    const state = { working: '진행 중', 'needs-input': '승인·입력 대기', error: '세션 오류', responded: '응답 수신', waiting: '응답 대기', continued: '다음 지시 수신' }[progress?.state]
-      ?? (work.delivery === 'unconfirmed' ? '전달 확인 중' : '전달됨 · 응답 대기');
-    const keyStatus = JSON.stringify([progress, analysis?.state, analysis?.id, work.context?.revision, work.trackingError, work.launches]);
-    if (previous?.dataset.version !== keyStatus) {
-      const status = el('section', undefined, 'work-progress'); status.dataset.version = keyStatus;
-      status.append(el('strong', state));
-      if (progress?.current) status.append(el('p', progress.current));
-      if (progress?.calls) status.append(el('small', `도구 ${progress.calls}회${progress.files.length ? ` · 관련 파일 ${progress.files.length}개` : ''}${progress.errors ? ` · 오류 ${progress.errors}회` : ''}`));
-      if (progress?.lastError) status.append(el('p', `최근 오류: ${progress.lastError}`, 'task-blocked'));
-      if (analysis?.state === 'running') status.append(el('small', '작업 관계·인계 정리 중'));
-      else if (analysis?.state === 'ready') status.append(el('p', (work.context?.goal ?? analysis.context?.goal ?? analysis.summary).slice(0, 200)));
-      else if (analysis?.state === 'failed') status.append(el('small', `자동 정리 실패: ${analysis.reason}`));
-      else if (work.trackingError) status.append(el('small', `추적 갱신 실패: ${work.trackingError}`));
-      if (analysis?.nodes?.length || progress?.calls || work.launches?.length) {
-        const flow = el('button', '작업 흐름'); flow.type = 'button'; flow.onclick = () => graph(work, work.launches?.at(-1)?.runId); status.append(flow);
-      }
-      if (previous) previous.replaceWith(status); else bubble.append(status);
-    }
+    // Session state, approvals and native tool items already show current progress.
+    // Analysis metadata must not create a second conversation or status display.
+    previous?.remove();
+    const hasActivity = Boolean(work.plan || work.progress?.calls || work.launches?.length || work.parentId || work.contextFrom);
+    if (!hasActivity) { old?.remove(); return; }
     const key = item.id ?? work.id;
-    const caption = '근거·인계';
+    const caption = '작업 기록';
     if (old?.dataset.key === key) { old.querySelector(":scope > summary").textContent = caption; return; }
     old?.remove();
     const details = el("details", undefined, "work-record"), summary = el("summary", caption), body = el("div");
@@ -84,6 +70,7 @@ export function initWorks({ api, selected, changed, notice, followUp, handoff, g
             catch (error) { notice(error.message); }
           }; body.append(parent);
         }
+        if (row.plan) { const plan = el('button', '작업 계획 보기'); plan.type = 'button'; plan.onclick = () => graph(row); body.append(plan); }
         body.append(workAnalysis(row, { api, notice, handoff, graph, active: () => details.open }));
         for (const run of row.runs) {
           const section = el("section", undefined, "work-evidence"); section.append(el("h3", run.title));
