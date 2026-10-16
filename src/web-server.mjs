@@ -193,6 +193,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
           if (input.plan) {
             const previous = input.plan.replanFrom ? runStore.read(input.plan.replanFrom) : undefined;
             if (previous && await running(previous.id)) throw fail(409, '이전 실행기가 끝난 뒤 재계획해 주세요.');
+            if (previous && runStore.read(previous.id).revision !== previous.revision) throw fail(409, '이전 실행 상태가 변경됐습니다. 다시 확인해 주세요.');
             json(response, 200, workStore.plan(work.id, input.plan, previous)); return;
           }
           if (input.analyze) {
@@ -277,6 +278,10 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
           if (runMatch[2] === "traces") { runStore.trace(row.id, await body(request, 4 * 1024 * 1024)); json(response, 200, {}); return; }
           if (runMatch[2] === "events") { json(response, 200, runStore.event(row.id, await body(request))); return; }
           if (runMatch[2] === "control" && !nativeRun) { const input = await body(request);
+            if (input.action === 'resume' && row.workId) {
+              const work = workStore.read(row.workId), link = work.launches?.find(item => item.runId === row.id);
+              if (link?.planRevision && link.planRevision !== work.plan?.revision) throw fail(409, '재계획 전 실행은 다시 시작할 수 없습니다. 현재 작업을 확인해 주세요.');
+            }
             if (input.action === 'approve') { const stale = await staleNodes(row); if (stale.length) { runStore.event(row.id, { type: 'invalidate', eventId: crypto.randomUUID(), nodes: stale }); throw fail(409, '검증 후 코드·자료가 변경됐습니다. 재검사가 필요합니다.'); } }
             const updated = runStore.control(row.id, input);
             if (input.action === 'resume' && row.workId && workStore.read(row.workId).launches?.some(item => item.runId === row.id)) {

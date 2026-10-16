@@ -27,6 +27,7 @@ export async function staleNodes(run) {
   return stale;
 }
 export function failureOf(result) {
+  if (result.check?.failureKind === 'environment' || result.review?.failureKind === 'environment') return { kind: 'environment', action: 'recover', reason: result.check.failureKind === 'environment' ? result.check.stderr : result.review.reason };
   if (result.worker?.exitCode !== 0) return { kind: result.worker?.failureKind ?? 'uncertain', action: result.worker?.failureKind === 'permission' ? 'wait' : 'recover', reason: result.worker?.summary ?? '작업 응답 미확인' };
   if (result.check.exitCode !== 0 || result.check.signal) return { kind: result.check.signal || result.check.exitCode === null ? 'interrupted' : 'code', action: result.check.signal || result.check.exitCode === null ? 'recover' : 'repair', reason: result.check.stderr || result.check.stdout || '동작 검사 실패' };
   if (result.review?.verdict !== 'pass' || !result.review?.unchanged) return { kind: result.review?.exitCode === 0 ? 'code' : 'uncertain', action: result.review?.exitCode === 0 ? 'repair' : 'recover', reason: result.review?.reason || result.review?.summary || '독립 검토 미확인' };

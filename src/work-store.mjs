@@ -77,6 +77,13 @@ export class WorkStore {
   }
   analysis(id, value) { const row = this.read(id); row.analysis = value; return this.#write(row); }
   plan(id, input, previousRun) {
+    const lock = `${this.#file(id)}.plan-lock`; let fd;
+    try { fd = fs.openSync(lock, 'wx', 0o600); }
+    catch (error) { if (error.code === 'EEXIST') throw fail(409, '다른 요청이 계획을 저장 중입니다. 현재 계획을 다시 읽어 주세요.'); throw error; }
+    try { return this.#plan(id, input, previousRun); }
+    finally { fs.closeSync(fd); fs.unlinkSync(lock); }
+  }
+  #plan(id, input, previousRun) {
     const row = this.read(id), value = validateWorkPlan(input);
     if (row.plan && (!input.replanFrom || input.replanFrom === row.plan.replanFrom) && JSON.stringify(value) === JSON.stringify({ title: row.plan.title, skill: row.plan.skill, nodes: row.plan.nodes, ...(row.plan.execution ? { execution: row.plan.execution } : {}) })) return row;
     const launched = row.plan && row.launches?.filter(launch => launch.planRevision === row.plan.revision);

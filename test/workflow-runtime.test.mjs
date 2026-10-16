@@ -50,6 +50,20 @@ test('dependency manifest changes preserve the worker attempt and stop without a
   assert.equal(run.nodes[0].attempts.length, 1); assert.equal(run.nodes[0].attempts[0].worker.exitCode, 0);
   assert.match(run.nodes[0].attempts[0].check.stderr, /의존성 명세/);
 });
+test('a check that tampers with ignored dependencies cannot pass or trigger a repair loop', async t => {
+  const spec = { ...manifest, nodes: [{ ...manifest.nodes[0], check: [process.execPath, '-e', "require('node:fs').writeFileSync('node_modules/proof/index.js','changed')"] }] };
+  const f = await fixture(t, spec), native = fakeAgents({ failFirstB: false });
+  await fs.writeFile(path.join(f.repo, 'package.json'), '{"dependencies":{"proof":"1"}}');
+  await fs.writeFile(path.join(f.repo, '.gitignore'), 'node_modules/\n');
+  await fs.mkdir(path.join(f.repo, 'node_modules/proof'), {recursive:true});
+  await fs.writeFile(path.join(f.repo, 'node_modules/proof/index.js'), 'original');
+  await exec('git', ['-C', f.repo, 'add', '.']); await exec('git', ['-C', f.repo, '-c', 'user.name=waga-proof', '-c', 'user.email=proof@example.invalid', 'commit', '-qm', 'dependency']);
+  const run = await runWorkflow(f.file, { ...f.options, sample: capacity, processRunner: native.run });
+  assert.equal(run.state, 'interrupted'); assert.equal(native.calls.get('a'), 1);
+  assert.equal(run.nodes[0].attempts[0].failure.kind, 'environment');
+  assert.equal(run.nodes[0].sessions.filter(s=>s.role==='review').length, 0);
+  assert.equal(await fs.readFile(path.join(f.repo,'node_modules/proof/index.js'),'utf8'), 'original');
+});
 function fakeAgents({ failFirstB = true, alwaysFail = false, rejectReview = false } = {}) {
   const calls = new Map();
   return { calls, run: async (argv, options) => {

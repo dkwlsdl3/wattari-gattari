@@ -119,6 +119,12 @@ test('plan --execute hands the exact registered graph to one durable launch and 
   assert.equal(await runCli(['plan',f.session.id,revisedFile,'--execute'],{...options,stdout:output()}),0);assert.equal(launches,2);
   assert.equal(await runCli(['plan',f.session.id,revisedFile,'--execute'],{...options,stdout:output()}),0);assert.equal(launches,2);
   assert.equal(runStore.read(result.launch.runId).state,'needs-replan');assert.equal(f.store.read(result.workId).launches.length,2);
+  const oldResume = await fetch(`${web.origin}/api/runs/${result.launch.runId}/control?session=${f.session.id}`,{method:'POST',headers,body:JSON.stringify({action:'resume'})});
+  assert.equal(oldResume.status,409);
+  const lockFile = path.join(f.store.directory,`${result.workId}.json.plan-lock`);
+  await fs.writeFile(lockFile,'busy',{flag:'wx'});
+  assert.throws(()=>f.store.plan(result.workId,replan),{status:409});
+  await fs.unlink(lockFile);
   const second = f.store.read(result.workId).launches[1].runId;
   runStore.event(second,{type:'phase',eventId:crypto.randomUUID(),nodeId:runStore.read(second).nodes[0].id,state:'interrupted'});
   runStore.event(second,{type:'end',eventId:crypto.randomUUID(),reason:'작업 후 환경 변경',kind:'environment'});
