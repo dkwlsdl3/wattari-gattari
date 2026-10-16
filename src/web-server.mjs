@@ -264,19 +264,21 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
       }
       if (runMatch) {
         const row = runStore.read(runMatch[1]);
+        const superseded = () => { if (!row.workId) return false; const work = workStore.read(row.workId), link = work.launches?.find(item => item.runId === row.id); return Boolean(link?.planRevision && link.planRevision !== work.plan?.revision); };
         if (!runInScope(row)) throw fail(404, "현재 세션의 실행이 아닙니다.");
         if (request.method === "GET" && !runMatch[2]) {
+          if (superseded()) { json(response, 200, { ...row, superseded: true }); return; }
           let current = row;
           if (['review_required', 'approved'].includes(row.state)) { const stale = await staleNodes(row); if (stale.length) current = runStore.event(row.id, { type: 'invalidate', eventId: crypto.randomUUID(), nodes: stale }); }
           else if (row.workId && workStore.read(row.workId).launches?.some(item => item.runId === row.id && item.state === 'started') && !await running(row.id) && runStore.read(row.id).revision === row.revision) {
             for (const node of row.nodes.filter(node => ['working', 'checking', 'verifying', 'waiting-resource', 'paused'].includes(node.state))) runStore.event(row.id, { type: 'phase', nodeId: node.id, state: 'interrupted', eventId: crypto.randomUUID() });
             current = runStore.event(row.id, { type: 'end', reason: '실행기가 종료됐습니다. 재개하면 기존 명령 결과를 먼저 회수합니다.', kind: 'interrupted', eventId: crypto.randomUUID() });
           }
-          json(response, 200, current); return;
+          json(response, 200, { ...current, superseded: superseded() }); return;
         }
         if (request.method === "POST") {
           if (runMatch[2] === "traces") { runStore.trace(row.id, await body(request, 4 * 1024 * 1024)); json(response, 200, {}); return; }
-          if (runMatch[2] === "events") { json(response, 200, runStore.event(row.id, await body(request))); return; }
+          if (runMatch[2] === "events") { const input = await body(request); if (superseded()) throw fail(409, '재계획 전 실행 기록은 변경할 수 없습니다.'); json(response, 200, runStore.event(row.id, input)); return; }
           if (runMatch[2] === "control" && !nativeRun) { const input = await body(request);
             if (input.action === 'resume' && row.workId) {
               const work = workStore.read(row.workId), link = work.launches?.find(item => item.runId === row.id);

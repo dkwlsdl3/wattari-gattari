@@ -83,6 +83,7 @@ export async function runWorkflow(manifestFile, { url = process.env.WAGA_WEB_URL
     if (!/^[0-9a-f-]{36}$/.test(resume)) throw new Error("실행 ID를 확인해 주세요.");
     credential = JSON.parse(await fs.readFile(path.join(root, resume, "client.json"), "utf8"));
     run = await request(`/api/runs/${resume}`);
+    if (run.superseded) throw new Error('재계획 전 실행은 다시 시작할 수 없습니다. 현재 작업을 확인해 주세요.');
     if (JSON.stringify(run.definition) !== JSON.stringify(manifest)) throw new Error("재개할 실행의 명세가 다릅니다.");
     if (["review_required", "approved"].includes(run.state) && !(await staleNodes(run)).length) return run;
     if (run.control === "stop") throw new Error("중단된 실행은 웹에서 재개한 뒤 다시 실행해 주세요.");
