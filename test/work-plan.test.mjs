@@ -114,6 +114,10 @@ test('plan --execute hands the exact registered graph to one durable launch and 
   const replan=structuredClone(input);replan.revision=1;replan.replanFrom=result.launch.runId;replan.title='실패 원인을 반영한 재계획';
   const denied=await fetch(route,{method:'POST',headers,body:JSON.stringify({plan:replan})});assert.equal(denied.status,409);
   runStore.event(result.launch.runId,{type:'end',eventId:crypto.randomUUID(),reason:'환경 준비 실패',kind:'environment'});
+  f.store.launchState(result.workId,result.launch.id,'started');
+  const endedRevision = runStore.read(result.launch.runId).revision;
+  for (let n=0;n<2;n++) assert.equal((await fetch(`${web.origin}/api/runs/${result.launch.runId}?session=${f.session.id}`,{headers})).status,200);
+  assert.equal(runStore.read(result.launch.runId).revision,endedRevision);
   const allowed=await fetch(route,{method:'POST',headers,body:JSON.stringify({plan:replan})});assert.equal(allowed.status,200);assert.equal((await allowed.json()).plan.revision,2);
   const revisedFile=path.join(f.root,'replanned.json');await fs.writeFile(revisedFile,JSON.stringify(replan));
   assert.equal(await runCli(['plan',f.session.id,revisedFile,'--execute'],{...options,stdout:output()}),0);assert.equal(launches,2);

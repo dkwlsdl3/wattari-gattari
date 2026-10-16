@@ -270,7 +270,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
           if (superseded()) { json(response, 200, { ...row, superseded: true }); return; }
           let current = row;
           if (['review_required', 'approved'].includes(row.state)) { const stale = await staleNodes(row); if (stale.length) current = runStore.event(row.id, { type: 'invalidate', eventId: crypto.randomUUID(), nodes: stale }); }
-          else if (row.workId && workStore.read(row.workId).launches?.some(item => item.runId === row.id && item.state === 'started') && !await running(row.id) && runStore.read(row.id).revision === row.revision) {
+          else if (['planned','running','waiting-resource'].includes(row.state) && row.workId && workStore.read(row.workId).launches?.some(item => item.runId === row.id && item.state === 'started') && !await running(row.id) && runStore.read(row.id).revision === row.revision) {
             for (const node of row.nodes.filter(node => ['working', 'checking', 'verifying', 'waiting-resource', 'paused'].includes(node.state))) runStore.event(row.id, { type: 'phase', nodeId: node.id, state: 'interrupted', eventId: crypto.randomUUID() });
             current = runStore.event(row.id, { type: 'end', reason: '실행기가 종료됐습니다. 재개하면 기존 명령 결과를 먼저 회수합니다.', kind: 'interrupted', eventId: crypto.randomUUID() });
           }
