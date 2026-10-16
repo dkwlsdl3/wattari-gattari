@@ -22,6 +22,9 @@ Wattari Gattari는 Claude Agents와 Codex Agents가 소유한 네이티브 세�
 - 현재 상태는 `git status`, `git diff`, `git log`에서만 확인합니다.
 - 활성 작업 명세는 `TODO.md`, 현행 제품 경계와 변경 검증 계약은
   `docs/adr/README.md`를 읽습니다.
+- 웹 UI·작업 실행·컨텍스트 인계·루프·그래프를 설계하거나 수정할 때와
+  컨텍스트 압축 후 해당 작업을 재개할 때는
+  `docs/adr/2026-10-16-agent-work-orchestration.md`의 설계 정본을 먼저 읽습니다.
 - 과거 완료 상태를 문서에 다시 적지 않습니다. 완료 기록은 커밋입니다.
 
 ## Start And End
