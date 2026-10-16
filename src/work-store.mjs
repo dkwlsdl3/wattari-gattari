@@ -75,6 +75,8 @@ export class WorkStore {
     return this.#write({ ...row, origin: 'native', messageId: message.id, delivery: 'observed' });
   }
   analysis(id, value) { const row = this.read(id); row.analysis = value; return this.#write(row); }
+  progress(id, value) { const row = this.read(id); row.progress = value; delete row.trackingError; return this.#write(row); }
+  trackingError(id, value) { const row = this.read(id); row.trackingError = value; return this.#write(row); }
   generatedContext(id, input, analysisId) {
     const row = this.read(id);
     // A manually corrected context is never overwritten by background interpretation.

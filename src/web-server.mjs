@@ -13,6 +13,7 @@ import { RunStore } from "./run-store.mjs";
 import { handoffText } from "./work-context.mjs";
 import { WorkStore } from "./work-store.mjs";
 import { WorkAssistant, workSources, sourceVersion } from "./work-assistant.mjs";
+import { WorkTracker } from "./work-tracker.mjs";
 import { sampleResources } from "./resource-gate.mjs";
 import { ExecutionStore } from "./execution-store.mjs";
 import { WorkflowStore } from "./workflow-store.mjs";
@@ -86,7 +87,12 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
   let snapshot = null, discovering = null, readingRequests = null, requestsSnapshot = null;
   let active = 0, closing = false, closed = null;
   const collector = new NativeExecutionCollector({ bridge, store: executionStore });
-  const streams = historyStreams(bridge);
+  const tracker = new WorkTracker({ bridge, store: workStore, executions: executionStore, assistant, now });
+  const trackPage = (session, page) => {
+    try { page.work = tracker.observe({ ...session, status: tracker.sessions.get(session.id)?.status ?? session.status }, page); }
+    catch (error) { page.workTrackingError = error.message; }
+  };
+  const streams = historyStreams(bridge, { onPage: trackPage });
   const discover = async () => {
     if (snapshot && now() - snapshot.at < 5_000) return snapshot.value;
     if (!discovering) discovering = Promise.resolve().then(() => bridge.discover({ cwd: filterCwd, includeUsage: true }))
@@ -357,7 +363,9 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         if (!session) throw fail(404, "세션을 찾을 수 없습니다.");
         const cursor = url.searchParams.get("cursor");
         if (cursor !== null && (!cursor || cursor.length > 4096)) throw fail(400, "잘못된 대화 페이지입니다.");
-        json(response, 200, await bridge.history(session, { cursor, activities: true })); return;
+        const page = await bridge.history(session, { cursor, activities: true });
+        if (!cursor) trackPage(session, page);
+        json(response, 200, page); return;
       }
       if (request.method === "GET" && url.pathname === "/api/requests") {
         const listing = await recent();
@@ -453,7 +461,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
   const terminals = installWebTerminal(server, {
     now, terminalFactory,
     beforeSubmit: (id, target) => workStore.submitted(id, target),
-    afterSubmit: id => workStore.delivered(id),
+    afterSubmit: id => { const work = workStore.delivered(id); tracker.watch(work.session); void tracker.tick(); },
     authorize: request => request.headers.host === new URL(origin).host && request.headers.origin === origin
       && sameSecret(request.headers.cookie?.split(/;\s*/).find(value => value.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1), token),
     connection: target => bridge.connection(target, { cwd: filterCwd }),
@@ -463,12 +471,23 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
     server.listen(port, "127.0.0.1", resolve);
   });
   origin = `http://127.0.0.1:${server.address().port}`;
-  const collect = async () => { try { if (!closing && typeof bridge.execution === "function") await collector.sweep((await discover()).sessions); } catch { /* Discovery errors remain visible through the sessions API. */ } };
+  const restored = new Set();
+  const collect = async () => { try {
+    if (closing) return;
+    const { sessions } = await discover();
+    for (const session of sessions) if (!restored.has(session.id)) {
+      restored.add(session.id);
+      if (workStore.list(session.id).some(work => work.analysis?.state === 'running' || work.submitAttemptedAt && !work.analysis)) tracker.watch(session);
+    }
+    if (typeof bridge.execution === "function") await collector.sweep(sessions);
+  } catch { /* Discovery errors remain visible through the sessions API. */ } };
   const collectionTimer = setInterval(() => { void collect(); }, 5_000); collectionTimer.unref();
   void collect();
+  const trackingTimer = setInterval(() => { void tracker.tick(); }, 2000); trackingTimer.unref();
   return { server, origin, url: `${origin}/#${token}`, close() {
     closing = true;
     clearInterval(collectionTimer); collector.close();
+    clearInterval(trackingTimer); tracker.close();
     streams.close(); terminals.close();
     closed ??= new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
     return closed;

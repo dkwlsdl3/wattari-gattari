@@ -7,6 +7,14 @@ export function initWorks({ api, selected, changed, notice, followUp, handoff, g
   const cache = new Map();
   const route = (tail, sessionId) => `${tail}?session=${encodeURIComponent(sessionId)}`;
   function rows() { return cache.get(selected()?.id) ?? []; }
+  function accept(work) {
+    if (!work) return;
+    const id = work.session.id;
+    const existing = cache.get(id) ?? [];
+    if (JSON.stringify(existing.find(row => row.id === work.id)) === JSON.stringify(work)) return;
+    cache.set(id, [...existing.filter(row => row.id !== work.id), work]);
+    if (selected()?.id === id) changed();
+  }
   async function refresh() {
     const id = selected()?.id; if (!id) return;
     const result = await api(route("works", id));
@@ -23,9 +31,29 @@ export function initWorks({ api, selected, changed, notice, followUp, handoff, g
   function decorate(bubble, item) {
     const work = rows().find(row => item.workId === row.id || item.id === row.messageId);
     const old = bubble.querySelector(".work-record");
-    if (!work && (item.role !== 'user' || !item.id)) { old?.remove(); return; }
+    const previous = bubble.querySelector('.work-progress');
+    if (!work) { old?.remove(); previous?.remove(); return; }
+    const progress = work.progress, analysis = work.analysis;
+    const state = { working: '진행 중', 'needs-input': '승인·입력 대기', error: '세션 오류', responded: '응답 수신', waiting: '응답 대기', continued: '다음 지시 수신' }[progress?.state]
+      ?? (work.delivery === 'unconfirmed' ? '전달 확인 중' : '전달됨 · 응답 대기');
+    const keyStatus = JSON.stringify([progress, analysis?.state, analysis?.id, work.context?.revision, work.trackingError, work.launches]);
+    if (previous?.dataset.version !== keyStatus) {
+      const status = el('section', undefined, 'work-progress'); status.dataset.version = keyStatus;
+      status.append(el('strong', state));
+      if (progress?.current) status.append(el('p', progress.current));
+      if (progress?.calls) status.append(el('small', `도구 ${progress.calls}회${progress.files.length ? ` · 관련 파일 ${progress.files.length}개` : ''}${progress.errors ? ` · 오류 ${progress.errors}회` : ''}`));
+      if (progress?.lastError) status.append(el('p', `최근 오류: ${progress.lastError}`, 'task-blocked'));
+      if (analysis?.state === 'running') status.append(el('small', '작업 관계·인계 정리 중'));
+      else if (analysis?.state === 'ready') status.append(el('p', (work.context?.goal ?? analysis.context?.goal ?? analysis.summary).slice(0, 200)));
+      else if (analysis?.state === 'failed') status.append(el('small', `자동 정리 실패: ${analysis.reason}`));
+      else if (work.trackingError) status.append(el('small', `추적 갱신 실패: ${work.trackingError}`));
+      if (analysis?.nodes?.length || progress?.calls || work.launches?.length) {
+        const flow = el('button', '작업 흐름'); flow.type = 'button'; flow.onclick = () => graph(work, work.launches?.at(-1)?.runId); status.append(flow);
+      }
+      if (previous) previous.replaceWith(status); else bubble.append(status);
+    }
     const key = item.id ?? work.id;
-    const caption = !work || ['submitted', 'observed'].includes(work.delivery) ? "작업 보기" : "작업 보기 · 전달 미확정";
+    const caption = '근거·인계';
     if (old?.dataset.key === key) { old.querySelector(":scope > summary").textContent = caption; return; }
     old?.remove();
     const details = el("details", undefined, "work-record"), summary = el("summary", caption), body = el("div");
@@ -35,8 +63,7 @@ export function initWorks({ api, selected, changed, notice, followUp, handoff, g
       if (event.target !== details || !details.open || loading) return; loading = true; body.textContent = "작업 기록 불러오는 중…";
       try {
         const sessionId = selected()?.id; if (!sessionId) return;
-        const target = work ?? await api(route('works', sessionId), { nativeMessageId: item.id });
-        if (!work) cache.set(sessionId, [...(cache.get(sessionId) ?? []), target]);
+        const target = work;
         const row = await api(route(`works/${target.id}`, sessionId));
         if (!details.isConnected || selected()?.id !== sessionId) return;
         body.replaceChildren();
@@ -95,5 +122,5 @@ export function initWorks({ api, selected, changed, notice, followUp, handoff, g
       } catch (error) { body.textContent = error.message; } finally { loading = false; }
     });
   }
-  return { rows, items, display, create, refresh, decorate };
+  return { rows, items, display, create, refresh, decorate, accept };
 }

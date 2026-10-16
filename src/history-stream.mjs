@@ -12,7 +12,7 @@ export function watchHistoryFile(filename, { onChange, onError }) {
 }
 
 // Shared, bounded subscriptions: no per-browser transcript polling or extra model processes.
-export function historyStreams(bridge) {
+export function historyStreams(bridge, { onPage = () => {} } = {}) {
   const entries = new Map();
   return {
     async open(session, response) {
@@ -43,6 +43,7 @@ export function historyStreams(bridge) {
             try {
               const value = await bridge.history(session, { activities: true });
               if (entry.stopped) return;
+              onPage(session, value);
               entry.value = value;
               for (const client of entry.responses) send(client, value);
             } catch (error) {

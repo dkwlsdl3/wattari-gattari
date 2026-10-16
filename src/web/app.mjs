@@ -225,6 +225,7 @@ async function loadHistory(older = false) {
     const latest = histories.get(identity) ?? current;
     const messages = older ? mergeMessages(page.messages, latest.messages) : latest.revision !== undefined && latest.revision !== revision ? latest.messages : mergeMessages(latest.messages, page.messages);
     histories.set(identity, { ...latest, messages, nextCursor: older || !latest.loaded ? page.nextCursor : latest.nextCursor, loaded: true, loading: false, lastReadAt: current.lastReadAt });
+    works.accept(page.work);
     if (histories.size > 20) histories.delete(histories.keys().next().value);
     if (session()?.id !== selected.id || session()?.cwd !== selected.cwd) return;
     renderConversation();
@@ -306,6 +307,7 @@ const historyStream = initHistoryStream({ onPage(identity, page) {
   histories.set(identity, { ...current, messages: mergeMessages(current.messages, page.messages), nextCursor: current.loaded ? current.nextCursor : page.nextCursor,
     loaded: true, revision: (current.revision ?? 0) + 1 });
   if (histories.size > 20) histories.delete(histories.keys().next().value);
+  works.accept(page.work);
   if (`${session()?.id}:${session()?.cwd}` === identity) renderConversation();
 }, onError: message => { streamWarning = message; notice(message); } });
 const controls = initTerminal({ api, selected: session, onChange: renderDetail, onProgress: renderSessionStatus, onActivity: () => {
@@ -373,6 +375,7 @@ async function start() {
 document.addEventListener("visibilitychange", () => { if (!document.hidden) void refresh(); });
 setInterval(() => { if (!document.hidden) void refresh(); }, 5000);
 setInterval(() => { if (ready && !document.hidden && !historyStream.live()) void loadHistory(); }, 1000);
+setInterval(() => { if (ready && !document.hidden && session()) void works.refresh().catch(error => notice(error.message)); }, 2000);
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) { historyStream.sync(null); controls.disconnect(); }
   else if (session()) openControls();

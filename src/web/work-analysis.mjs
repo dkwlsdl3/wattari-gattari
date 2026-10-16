@@ -13,7 +13,12 @@ export function workAnalysis(initial, { api, notice, handoff, graph, active }) {
   function render() {
     clearTimeout(timer); panel.replaceChildren();
     const analysis = row.analysis;
-    if (!analysis || analysis.state === 'running') {
+    if (!analysis) {
+      panel.append(el('p', '작업 응답이 안정되면 관계와 인계를 자동으로 정리합니다.', 'muted'));
+      timer = setTimeout(async () => { if (!panel.isConnected || !active()) return; try { await reload(); } catch (error) { notice(error.message); } }, 1000);
+      return;
+    }
+    if (analysis.state === 'running') {
       panel.append(el('p', '대화·실행 기록에서 작업과 인계를 정리하고 있습니다. 기존 세션에는 지시를 보내지 않습니다.', 'muted'));
       if (analysis) timer = setTimeout(async () => { if (!panel.isConnected || !active()) return; try { await reload(); } catch (error) { notice(error.message); } }, 1000);
       return;
@@ -48,6 +53,6 @@ export function workAnalysis(initial, { api, notice, handoff, graph, active }) {
     }
     const update = el('button', '현재 대화로 정리 갱신'); update.onclick = () => { void analyze(true); }; panel.append(update);
   }
-  render(); if (!row.analysis || row.analysis.state === 'running') void analyze();
+  render();
   return panel;
 }

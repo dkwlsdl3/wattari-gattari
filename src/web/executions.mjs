@@ -374,7 +374,9 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     const proposals = works.filter(work => work.analysis?.nodes);
     for (const work of proposals) { const option = el('option', `${work.analysis.summary} · LLM 제안`); option.value = `proposal:${work.id}`; picker.append(option); }
     for (const run of executions) { const option = el("option", run.source === "native" ? "세션 실행 기록 · 자동 수집" : `${run.title} · ${new Date(run.importedAt).toLocaleString("ko-KR")}`); option.value = run.id; picker.append(option); }
-    const ids = [...executions.filter(row => row.source === "native").map(row => row.id), ...runs.map(row => `run:${row.id}`), ...proposals.map(work => `proposal:${work.id}`), ...executions.filter(row => row.source !== "native").map(row => row.id)]; picker.value = ids.includes(selected) ? selected : ids[0] || "";
+    const latest = works.at(-1), latestRun = latest && runs.findLast(run => run.workId === latest.id);
+    const first = latestRun ? `run:${latestRun.id}` : latest?.analysis?.nodes ? `proposal:${latest.id}` : null;
+    const ids = [...(first ? [first] : []), ...executions.filter(row => row.source === "native").map(row => row.id), ...runs.map(row => `run:${row.id}`), ...proposals.map(work => `proposal:${work.id}`), ...executions.filter(row => row.source !== "native").map(row => row.id)]; picker.value = ids.includes(selected) ? selected : ids[0] || "";
     picker.disabled = !ids.length; picker.hidden = ids.length < 2;
     await load(picker.value, preserve);
   }
@@ -399,6 +401,6 @@ export async function initExecutions({ api, notice, selectedSession = () => null
   $("#execution-select").addEventListener("change", () => { void load($("#execution-select").value).catch(error => notice(error.message)); });
   mode(false);
   const refresh = () => listing(currentRun?.proposal ? currentRun.id : currentRun ? `run:${currentRun.id}` : execution?.id);
-  refresh.openWork = async (row, runId) => { mode(true); await listing(); workView = true; await listing(runId ? `run:${runId}` : `proposal:${row.id}`); };
+  refresh.openWork = async (row, runId) => { mode(true); workView = true; await listing(runId ? `run:${runId}` : row.analysis?.nodes ? `proposal:${row.id}` : ''); };
   return refresh;
 }
