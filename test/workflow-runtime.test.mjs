@@ -9,6 +9,7 @@ import test from "node:test";
 import { RunStore, validateRun } from "../src/run-store.mjs";
 import { guardedProcess, runWorkflow } from "../src/workflow-runtime.mjs";
 import { startWebServer } from "../src/web-server.mjs";
+import { WorkStore } from "../src/work-store.mjs";
 const exec = promisify(execFile), wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const manifest = { title: "독립 작업과 의존 작업", includeContent: true, models: { edit: "haiku", verify: "haiku" }, nodes: [
   { id: "a", title: "A 수정", role: "edit", prompt: "A returns 2", outputs: ["a.mjs"], check: [process.execPath, "check.mjs", "a", "2"] },
@@ -22,9 +23,11 @@ async function fixture(t, spec = manifest) {
   await exec("git", ["init", "-q", repo]); await exec("git", ["-C", repo, "add", "."]); await exec("git", ["-C", repo, "-c", "user.name=waga-proof", "-c", "user.email=proof@example.invalid", "commit", "-qm", "fixture"]);
   const file = path.join(root, "workflow.json"); await fs.writeFile(file, JSON.stringify(spec));
   const store = new RunStore(path.join(root, "runs"));
-  const web = await startWebServer({ bridge: { discover: async () => ({ sessions: [], warnings: [] }) }, cwd: repo, port: 0, runStore: store });
+  const workStore = new WorkStore(path.join(root, "works"));
+  const session = { id: "codex:work-proof", provider: "codex", name: "waga-proof-work", cwd: repo };
+  const web = await startWebServer({ bridge: { discover: async () => ({ sessions: [session], warnings: [] }), history: async () => ({ messages: [] }) }, cwd: repo, port: 0, runStore: store, workStore });
   t.after(async () => { await web.close(); await fs.rm(root, { recursive: true, force: true }); });
-  return { root, repo, file, store, web, options: { url: web.url, root: path.join(root, "runtime"), intervalMs: 20, output: { write() {} } } };
+  return { root, repo, file, store, workStore, session, web, options: { url: web.url, root: path.join(root, "runtime"), intervalMs: 20, output: { write() {} } } };
 }
 const capacity = () => ({ at: Date.now(), availableGiB: 20, cpuPercent: 10 });
 function fakeAgents({ failFirstB = true, alwaysFail = false, rejectReview = false } = {}) {
@@ -50,6 +53,30 @@ test("real checks and isolated worktrees retry only the failed unit, bind artifa
   const joined = run.nodes.find(node => node.id === "join"); assert.equal(await fs.readFile(path.join(joined.workspace, "a.mjs"), "utf8"), "export default 2;\n");
   assert.equal(f.store.control(run.id, { action: "approve" }).state, "approved");
   const resumed = await runWorkflow(f.file, { ...f.options, resume: run.id }); assert.equal(resumed.state, "approved");
+});
+
+test("one instruction reopens its isolated diff, real failed and successful checks, environment and report after store reload", async t => {
+  const f = await fixture(t), native = fakeAgents();
+  const headers = { Cookie: `waga_web=${f.web.url.split("#")[1]}`, Origin: f.web.origin, "Content-Type": "application/json" };
+  const instruction = "A는 2, B는 3을 반환하도록 수정하고 실제 동작을 검사해 주세요.\n기존 저장소는 보존합니다.";
+  const response = await fetch(`${f.web.origin}/api/works?session=${f.session.id}`, { method: "POST", headers, body: JSON.stringify({ id: crypto.randomUUID(), instruction }) });
+  assert.equal(response.status, 201); const work = await response.json();
+  const linked = { ...manifest, workId: work.id, sourceCwd: f.repo };
+  await fs.writeFile(f.file, JSON.stringify(linked));
+  const run = await runWorkflow(f.file, { ...f.options, sample: capacity, processRunner: native.run });
+  const reopened = await fetch(`${f.web.origin}/api/works/${work.id}?session=${f.session.id}`, { headers });
+  assert.equal(reopened.status, 200); const detail = await reopened.json();
+  assert.equal(detail.instruction, instruction); assert.equal(detail.session.cwd, f.repo);
+  assert.equal(detail.runs.length, 1); assert.equal(detail.runs[0].id, run.id);
+  const b = detail.runs[0].nodes.find(row => row.id === "b");
+  assert.equal(b.attempts[0].check.exitCode, 1); assert.equal(b.attempts[1].check.exitCode, 0);
+  assert.match(b.attempts[1].check.stdout, /CHECK_OK/); assert.match(b.attempts[1].diff, /\+export default 3/);
+  assert.equal(b.attempts[1].check.cwd, b.workspace); assert.equal(b.attempts[1].check.environment.node, process.version);
+  assert.ok(b.attempts[1].check.observedAt); assert.deepEqual(b.attempts[1].check.argv, manifest.nodes[1].check);
+  assert.equal(new WorkStore(f.workStore.directory).read(work.id).instruction, instruction);
+  assert.equal(new RunStore(f.store.directory).read(run.id).workId, work.id);
+  assert.equal(f.workStore.read(work.id).delivery, "unconfirmed"); // A run is not proof of native input delivery.
+  const resumed = await runWorkflow(f.file, { ...f.options, resume: run.id }); assert.equal(resumed.id, run.id);
 });
 
 test("two unchanged correction rounds stop, preserve other successes, and block dependants", async t => {

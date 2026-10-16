@@ -4,7 +4,7 @@ import { sharedNativeTerminal } from "./web-native-terminal.mjs";
 
 // Share the retained native frontend without creating a second provider attachment.
 // Input is deliberately opaque: native UI owns prompts, keys and decisions.
-export function installWebTerminal(server, { authorize, connection, terminalFactory = sharedNativeTerminal, now = Date.now }) {
+export function installWebTerminal(server, { authorize, connection, terminalFactory = sharedNativeTerminal, now = Date.now, beforeSubmit, afterSubmit }) {
   const tickets = new Map(), sessions = new Map();
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 128 * 1024, perMessageDeflate: false });
   let closed = false;
@@ -56,7 +56,12 @@ export function installWebTerminal(server, { authorize, connection, terminalFact
               && value.cols >= 20 && value.cols <= 300 && value.rows >= 5 && value.rows <= 120) terminal?.resize(value.cols, value.rows);
             else if (value.type === "input" && typeof value.data === "string" && value.data.length <= 16_384) {
               if (!terminal) throw new Error("입력 화면을 준비 중입니다.");
+              if (value.workId) {
+                if (value.data !== "\r" || value.question) throw new Error("작업 지시는 일반 대화 전송에만 연결할 수 있습니다.");
+                beforeSubmit?.(value.workId, entry.target);
+              }
               await terminal.write(value.data, { question: value.question });
+              if (value.workId) afterSubmit?.(value.workId);
               send({ type: "input-result", id: value.id });
             }
             else throw new Error("잘못된 입력입니다.");

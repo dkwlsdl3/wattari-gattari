@@ -8,6 +8,7 @@ import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { RunStore } from "./run-store.mjs";
+import { WorkStore } from "./work-store.mjs";
 import { sampleResources } from "./resource-gate.mjs";
 import { ExecutionStore } from "./execution-store.mjs";
 import { WorkflowStore } from "./workflow-store.mjs";
@@ -18,6 +19,7 @@ const ASSETS = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
   ["/drafts.mjs", ["drafts.mjs", "text/javascript; charset=utf-8"]],
   ["/conversation.mjs", ["conversation.mjs", "text/javascript; charset=utf-8"]],
+  ["/works.mjs", ["works.mjs", "text/javascript; charset=utf-8"]],
   ["/history-stream.mjs", ["history-stream.mjs", "text/javascript; charset=utf-8"]],
   ["/executions.mjs", ["executions.mjs", "text/javascript; charset=utf-8"]],
   ["/sortable.mjs", [new URL(import.meta.resolve("sortablejs/modular/sortable.esm.js")), "text/javascript; charset=utf-8"]],
@@ -63,7 +65,7 @@ function publicSession(session) {
 
 // Native providers own sessions and decisions; the web attaches their frontend.
 export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, port = 4317,
-  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore(), orderStore = new DockOrderStore(), terminalFactory } = {}) {
+  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore(), workStore = new WorkStore(), orderStore = new DockOrderStore(), terminalFactory } = {}) {
   if (!bridge) throw new TypeError("A session bridge is required");
   const assets = new Map(await Promise.all([...ASSETS].map(async ([route, [file, type]]) =>
     [route, { type, data: await fs.readFile(file instanceof URL ? file : new URL(`./web/${file}`, import.meta.url)) }])));
@@ -141,17 +143,51 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
       const scopeFolders = scopeSession ? [...new Set([scopeCwd, scopeSession.cwd])] : [cwd];
       const belongs = row => {
         if (!scopeSession) return true;
+        if (row.workId && workStore.read(row.workId).session.id === scopeSession.id) return true;
         const ids = new Set([scopeSession.id, scopeSession.nativeId, scopeSession.sessionId].filter(Boolean));
         const spans = row.spans ?? row.traceSpans ?? [];
         return ids.has(row.sessionId) || spans.some(span => [span.attributes?.["session.id"], span.attributes?.["gen_ai.conversation.id"]].some(id => ids.has(id)))
           || row.nodes?.some(node => node.sessions?.some(session => ids.has(session.id)) || node.attempts.some(attempt => ids.has(attempt.worker?.sessionId) || ids.has(attempt.review?.sessionId)));
       };
+      const runInScope = row => belongs(row) && (scopeFolders.includes(row.cwd)
+        || Boolean(scopeSession && row.workId && workStore.read(row.workId).session.id === scopeSession.id));
       if (request.method === "GET" && url.pathname === "/api/resources") { json(response, 200, sampleResources()); return; }
-      if (request.method === "GET" && url.pathname === "/api/runs") { json(response, 200, { runs: scopeFolders.flatMap(folder => runStore.list(folder)).filter(row => belongs(runStore.read(row.id))) }); return; }
-      if (request.method === "POST" && url.pathname === "/api/runs") { json(response, 201, runStore.create(await body(request), cwd)); return; }
+      if (url.pathname === "/api/works") {
+        if (!scopeSession) throw fail(400, "작업의 담당 세션이 필요합니다.");
+        if (request.method === "POST") {
+          const input = await body(request);
+          const history = await bridge.history(scopeSession, { activities: false });
+          json(response, 201, workStore.create(input, scopeSession, history.messages)); return;
+        }
+        if (request.method === "GET") {
+          const history = workStore.list(scopeSession.id).some(row => !row.messageId && row.submitAttemptedAt) ? await bridge.history(scopeSession, { activities: false }) : null;
+          json(response, 200, { works: history ? workStore.reconcile(scopeSession.id, history.messages) : workStore.list(scopeSession.id) }); return;
+        }
+      }
+      const workMatch = /^\/api\/works\/([^/]+)$/.exec(url.pathname);
+      if (workMatch) {
+        const work = workStore.read(workMatch[1]);
+        if (!scopeSession || work.session.id !== scopeSession.id) throw fail(404, "현재 세션의 작업이 아닙니다.");
+        if (request.method === "POST") { json(response, 200, workStore.references(work.id, (await body(request)).references)); return; }
+        if (request.method === "GET") {
+          const instructions = workStore.list(work.session.id).filter(row => (row.rootId ?? row.id) === (work.rootId ?? work.id));
+          const ids = new Set(instructions.map(row => row.id));
+          const runs = runStore.list(cwd).map(row => runStore.read(row.id)).filter(row => ids.has(row.workId));
+          json(response, 200, { ...work, instructions: instructions.map(({ id, instruction, createdAt, parentId }) => ({ id, instruction, createdAt, parentId })), runs }); return;
+        }
+      }
+      if (request.method === "GET" && url.pathname === "/api/runs") { json(response, 200, { runs: [...new Set([...scopeFolders, cwd])].flatMap(folder => runStore.list(folder)).filter(row => runInScope(runStore.read(row.id))) }); return; }
+      if (request.method === "POST" && url.pathname === "/api/runs") {
+        const input = await body(request);
+        if (input.workId) {
+          const work = workStore.read(input.workId);
+          if (![work.session.cwd, work.session.workspace].includes(input.sourceCwd ?? cwd)) throw fail(409, "지시를 받은 작업 폴더를 sourceCwd에 지정해 주세요.");
+        }
+        json(response, 201, runStore.create(input, cwd)); return;
+      }
       if (runMatch) {
         const row = runStore.read(runMatch[1]);
-        if (!scopeFolders.includes(row.cwd) || !belongs(row)) throw fail(404, "현재 세션의 실행이 아닙니다.");
+        if (!runInScope(row)) throw fail(404, "현재 세션의 실행이 아닙니다.");
         if (request.method === "GET" && !runMatch[2]) { json(response, 200, row); return; }
         if (request.method === "POST") {
           if (runMatch[2] === "traces") { runStore.trace(row.id, await body(request, 4 * 1024 * 1024)); json(response, 200, {}); return; }
@@ -351,6 +387,8 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
   });
   const terminals = installWebTerminal(server, {
     now, terminalFactory,
+    beforeSubmit: (id, target) => workStore.submitted(id, target),
+    afterSubmit: id => workStore.delivered(id),
     authorize: request => request.headers.host === new URL(origin).host && request.headers.origin === origin
       && sameSecret(request.headers.cookie?.split(/;\s*/).find(value => value.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1), token),
     connection: target => bridge.connection(target, { cwd: filterCwd }),

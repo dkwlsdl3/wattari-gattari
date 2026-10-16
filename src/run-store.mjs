@@ -16,6 +16,7 @@ export function artifactPath(value) {
   return value;
 }
 export function validateRun(input) {
+  if (input?.workId !== undefined && !validId(input.workId)) throw fail(400, "연결할 작업 ID를 확인해 주세요.");
   if (!input || !Array.isArray(input.nodes) || !input.nodes.length || input.nodes.length > 50) throw fail(400, "작업은 1~50개가 필요합니다.");
   if (input.models !== undefined && (!input.models || typeof input.models !== "object" || Array.isArray(input.models) || Object.keys(input.models).some(key => !["plan", "scan", "edit", "verify"].includes(key)))) throw fail(400, "모델 역할을 확인해 주세요.");
   const roles = { plan: "opus", scan: "haiku", edit: "sonnet", verify: "sonnet", ...(input.models ?? {}) };
@@ -47,7 +48,7 @@ export function validateRun(input) {
   const maxAttempts = input.maxAttempts ?? 5;
   if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 5) throw fail(400, "최대 시도는 1~5회입니다.");
   if (input.sourceCwd !== undefined && (typeof input.sourceCwd !== "string" || !path.isAbsolute(input.sourceCwd) || input.sourceCwd.length > 2000)) throw fail(400, "sourceCwd는 절대 경로여야 합니다.");
-  return { ...(input.sourceCwd ? { sourceCwd: input.sourceCwd } : {}), title: text(input.title), nodes, models: roles, includeContent: input.includeContent === true, resources: { reserveGiB, maxCpuPercent }, maxAttempts };
+  return { ...(input.workId ? { workId: input.workId } : {}), ...(input.sourceCwd ? { sourceCwd: input.sourceCwd } : {}), title: text(input.title), nodes, models: roles, includeContent: input.includeContent === true, resources: { reserveGiB, maxCpuPercent }, maxAttempts };
 }
 const digest = value => crypto.createHash("sha256").update(value).digest("hex");
 export class RunStore {

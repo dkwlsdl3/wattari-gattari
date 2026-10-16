@@ -154,7 +154,7 @@ export async function runWorkflow(manifestFile, { url = process.env.WAGA_WEB_URL
         const scopeOk = inputsUnchanged && (node.role === "edit" ? changed.every(file => permitted.has(file)) : before === await git(workspace, ["diff", "--binary", "HEAD"]) && changed.every(file => node.inputs.some(input => input.path === file)));
         await gate(node.id); await event({ type: "phase", nodeId: node.id, state: "checking" });
         const checkResult = worker.exitCode === 0 && scopeOk ? await processRunner(node.check, { cwd: workspace, monitor, intervalMs }) : { exitCode: null, signal: null, stdout: "", stderr: scopeOk ? worker.summary : "작업 범위 밖의 변경 감지" };
-        const check = { exitCode: checkResult.failure ? null : checkResult.exitCode, signal: checkResult.signal, stdout: checkResult.stdout.slice(0, 8000), stderr: (checkResult.failure || checkResult.stderr).slice(0, 2000) };
+        const check = { argv: node.check, cwd: workspace, observedAt: Date.now(), environment: { platform: process.platform, arch: process.arch, node: process.version }, exitCode: checkResult.failure ? null : checkResult.exitCode, signal: checkResult.signal, stdout: checkResult.stdout.slice(0, 8000), stderr: (checkResult.failure || checkResult.stderr).slice(0, 2000) };
         const produced = await artifacts(workspace, node.outputs), fingerprint = hash(JSON.stringify(produced));
         let review = { verdict: "unverified", reason: "검사 실패로 검증 미실행", exitCode: null };
         if (check.exitCode === 0 && produced.every(row => !row.missing)) {

@@ -4,6 +4,7 @@ import { DraftStore } from "./drafts.mjs";
 import { initExecutions } from "./executions.mjs";
 import { conversationItems, mergeMessages } from "./conversation.mjs";
 import { initHistoryStream } from "./history-stream.mjs";
+import { initWorks } from "./works.mjs";
 const $ = selector => document.querySelector(selector);
 const nativeStates = { idle: "대기 중", working: "작업 중", "needs-input": "입력 대기", done: "완료", error: "오류", unavailable: "연결 불가" };
 const transport = { starting: "접수 중", "waiting-local": "앞선 요청 대기", waiting: "전송 대기", submitting: "전송 중", submitted: "답변 대기", accepted: "답변 대기", "reply-received": "답변 수신", replied: "답변 수신", error: "질의 실패", created: "세션 생성됨", "not-sent": "미전송", "result-unknown": "결과 미확정" };
@@ -14,6 +15,13 @@ let browserStorage; try { browserStorage = localStorage; } catch { browserStorag
 const histories = new Map(), sentMessages = new Map(), drafts = new DraftStore(browserStorage);
 const operations = new Map(), directRequests = new Map();
 let refreshExecutions = async () => {};
+let followUpWork = null;
+const works = initWorks({ api, selected: () => session(), changed: renderConversation, notice, followUp: row => {
+  if (row.session.id !== session()?.id) return;
+  followUpWork = row;
+  $("#follow-up-instruction").hidden = false; $("#follow-up-title").textContent = `변경 지시: ${row.instruction.slice(0, 60)}`;
+  $("#message").focus();
+} });
 let orderVersion = 0, dragging = false;
 let sortables = [];
 let filter = "all", moving = false, actionTarget = "", sidebarKey = "";
@@ -36,7 +44,7 @@ async function selectSession(id) {
   document.body.classList.remove("sessions-open"); $("#toggle-sessions").setAttribute("aria-expanded", "false");
   notice(); render();
   openControls();
-  await Promise.all([loadHistory(), refreshExecutions().catch(error => notice(error.message))]);
+  await Promise.all([loadHistory(), works.refresh(), refreshExecutions().catch(error => notice(error.message))]);
 }
 async function moveSession(id, direction) {
   const selected = sessions.find(row => row.id === id); if (!selected) return;
@@ -130,6 +138,7 @@ function renderDetail() {
   controls.sync(directSessionId);
   historyStream.sync(ready && !document.hidden ? session() : null);
   if (composerRecipient !== recipientKey()) {
+    followUpWork = null; $("#follow-up-instruction").hidden = true;
     if (composerRecipient) drafts.set(composerRecipient, $("#message").value);
     composerRecipient = recipientKey(); $("#message").value = drafts.get(composerRecipient) ?? "";
   }
@@ -158,8 +167,8 @@ function renderConversation() {
   const identity = selected ? `${selected.id}:${selected.cwd}` : activeKey();
   const records = directRequests.get(directSessionId) ?? [];
   const history = histories.get(identity);
-  const items = conversationItems({ history: history?.messages ?? [], records, inputs: sentMessages, pending: pendingForSession() });
-  const key = JSON.stringify([identity, history?.nextCursor, history?.loading, items]); if (key === previewKey) return;
+  const items = [...conversationItems({ history: history?.messages ?? [], records, inputs: sentMessages, pending: pendingForSession() }), ...works.items()];
+  const key = JSON.stringify([identity, history?.nextCursor, history?.loading, items, works.rows()]); if (key === previewKey) return;
   const scrollTop = messages.scrollTop;
   const changed = identity !== previewIdentity;
   const follow = changed || messages.scrollHeight - messages.scrollTop - messages.clientHeight < 80;
@@ -190,7 +199,7 @@ function renderConversation() {
       if (output.textContent !== body) output.textContent = body;
       bubble.dataset.state = item.state;
     } else if (bubble.querySelector("p").textContent !== item.text) bubble.querySelector("p").textContent = item.text;
-    ordered.push(bubble);
+    works.decorate(bubble, item); ordered.push(bubble);
   }
   if (!items.length) ordered.push(el("p", selected ? (history?.loading ? "대화 불러오는 중…" : "대화 기록이 없습니다.") : "세션을 선택하거나 새 세션을 만드세요.", "conversation-empty"));
   const retained = new Set(ordered);
@@ -258,7 +267,7 @@ async function refresh() {
       directSessionId = sessions[0].id;
       try { browserStorage.setItem("waga:selected-session", directSessionId); } catch {}
     }
-    render(); await loadHistory(); $("#connection").textContent = "연결됨";
+    render(); await loadHistory(); await works.refresh(); $("#connection").textContent = "연결됨";
     if (!document.hidden && session()) openControls();
     if (warning) notice(warning);
   } catch (error) { $("#connection").textContent = "갱신 실패"; notice(error.message); }
@@ -339,11 +348,14 @@ $("#query-form").addEventListener("submit", async event => {
   const text = $("#message").value, recipient = recipientKey();
   sending = true; renderDetail();
   try {
-    await controls.sendText(text);
+    await controls.sendText(text, () => works.create(text, directSessionId, followUpWork?.id));
+    if (recipient === recipientKey()) { followUpWork = null; $("#follow-up-instruction").hidden = true; }
     if (recipient === recipientKey() && $("#message").value === text) { $("#message").value = ""; drafts.delete(recipient); }
+    void works.refresh().catch(error => notice(`지시는 전달됐지만 작업 조회에 실패했습니다: ${error.message}`));
   } catch (error) { notice(error.message); }
   finally { sending = false; renderDetail(); }
 });
+$("#cancel-follow-up").addEventListener("click", () => { followUpWork = null; $("#follow-up-instruction").hidden = true; });
 $("#new-session").addEventListener("click", () => $("#create-dialog").showModal());
 $("#create-form").addEventListener("submit", async event => {
   event.preventDefault(); const input = { provider: $("#create-provider").value, workspace: $("#create-workspace").value, message: $("#create-message").value };

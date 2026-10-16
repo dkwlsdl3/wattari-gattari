@@ -23,13 +23,13 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
     setProgress("");
     host.replaceChildren(); panel.hidden = true; fallback.hidden = true; question = null; answered = "";
   }
-  function input(data, question, ws = socket) {
+  function input(data, question, ws = socket, workId) {
     if (!ws || ws !== socket || ws.readyState !== WebSocket.OPEN) return Promise.reject(new Error("세션 연결을 확인해 주세요."));
     const id = ++inputId;
     const result = new Promise((resolve, reject) => {
       const timer = setTimeout(() => { pending.delete(id); reject(new Error("입력 전달 확인 시간이 지났습니다. 전송 여부를 확인해 주세요.")); }, 5000);
       pending.set(id, { resolve, reject, timer });
-      ws.send(JSON.stringify({ type: "input", data, id, question }));
+      ws.send(JSON.stringify({ type: "input", data, id, question, workId }));
     });
     result.catch(() => {});
     return result;
@@ -112,15 +112,18 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
     })();
     return connecting;
   }
-  return { open, disconnect: () => { release(); target = ""; }, observe: () => open({ observe: true }), progress: () => progress, sync(id) { if (target && target !== id) { release(); target = ""; notify(""); } }, async sendText(value) {
+  return { open, disconnect: () => { release(); target = ""; }, observe: () => open({ observe: true }), progress: () => progress, sync(id) { if (target && target !== id) { release(); target = ""; notify(""); } }, async sendText(value, record) {
     const id = selected()?.id;
     const ready = await open();
     if (!ready || id !== selected()?.id || !connected || socket?.readyState !== WebSocket.OPEN) throw new Error("세션 연결을 확인해 주세요. 메시지는 전송하지 않았습니다.");
     if (nativeQuestion(lines(), selected().provider)) throw new Error("대기 중인 질문에 먼저 응답해 주세요. 작성한 메시지는 보관했습니다.");
     const ws = socket, current = generation;
+    const work = record ? await record() : null;
+    if (current !== generation || id !== selected()?.id) throw new Error("입력 대상이 변경됐습니다. 메시지는 전송하지 않았습니다.");
+    if (nativeQuestion(lines(), selected().provider)) throw new Error("대기 중인 질문에 먼저 응답해 주세요. 작성한 메시지는 보관했습니다.");
     terminal.paste(value); await lastInput;
     if (current !== generation || id !== selected()?.id) throw new Error("입력 대상이 변경됐습니다. 작성한 메시지와 이전 세션의 입력창을 확인해 주세요.");
-    await input("\r", undefined, ws);
+    await input("\r", undefined, ws, work?.id);
     notify(""); return true;
   } };
 }

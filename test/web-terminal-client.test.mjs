@@ -35,10 +35,12 @@ test('browsing away from a pending connection cancels silently instead of report
 
 test('a message waiting for a cancelled connection remains unsent even when the same session is selected again', async t => {
   const { controls, select } = fixture(t);
-  const send = controls.sendText('must not reach the previous session');
+  let recorded = false;
+  const send = controls.sendText('must not reach the previous session', () => { recorded = true; });
   const rejected = assert.rejects(send, /메시지는 전송하지 않았습니다/);
   select('waga-proof-b'); select('waga-proof-a');
   await rejected;
+  assert.equal(recorded, false);
 });
 
 test('an actual connection failure retains its original reason', async t => {

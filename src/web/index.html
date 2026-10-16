@@ -42,6 +42,7 @@
       <section id="session-question" aria-label="승인 요청" hidden><pre id="question-text"></pre><div id="question-choices"></div></section>
       <div id="native-fallback" hidden><p class="muted">세션에서 추가 입력을 기다리고 있습니다.</p><div id="terminal-screen"></div></div>
       <form id="query-form">
+        <div id="follow-up-instruction" hidden><span id="follow-up-title"></span><button id="cancel-follow-up" type="button" aria-label="변경 지시 연결 취소">연결 취소</button></div>
         <label for="message">메시지</label><div class="inline composer"><textarea id="message" rows="2" maxlength="16000" placeholder="메시지 입력 · Enter로 보내기, Shift+Enter로 줄바꿈" disabled required></textarea><button id="send" disabled>보내기</button></div>
         <small id="input-status" class="muted" role="status"></small>
       </form>
