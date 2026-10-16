@@ -41,7 +41,8 @@ async function projectSources(session, execution) {
 // Use provider item IDs to connect calls; adjacent messages are context, not causal edges.
 export async function workSources(bridge, session, messageId, execution, instruction, selectedContext) {
   let messages = [], cursor, limited = false;
-  for (let page = 0; page < 8; page++) {
+  const deadline = Date.now() + 10000;
+  for (let page = 0; page < 64 && Date.now() < deadline; page++) {
     const result = await bridge.history(session, { activities: true, ...(cursor ? { cursor } : {}) });
     const merged = new Map([...result.messages, ...messages].map(row => [row.id, row])); messages = [...merged.values()];
     limited ||= Boolean(result.skipped);

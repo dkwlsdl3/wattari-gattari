@@ -46,6 +46,15 @@ test('native conversation adoption is idempotent and task sources exclude neighb
   assert.equal((await workSources(f.bridge, f.session, 'missing', null, 'original')).message, null);
 });
 
+test('long running work can recover its original instruction beyond the recent activity window', async t => {
+  const f = await fixture(t); let pages = 0;
+  const bridge = { history: async (_session, { cursor } = {}) => {
+    const page = cursor ? Number(cursor) : 0; pages++;
+    return page === 10 ? {messages:[{id:'original-deep',role:'user',text:'original instruction'}],nextCursor:null} : {messages:[{id:`recent-${page}`,role:'activity',text:'recent call'}],nextCursor:String(page+1)};
+  } };
+  const result = await workSources(bridge, f.session, 'original-deep', null, 'original instruction');
+  assert.equal(result.message.id, 'original-deep'); assert.equal(pages, 11);
+});
 test('LLM graph proposals require real source IDs and valid dependencies, never claiming observed calls are verified task completion', async t => {
   const f = await fixture(t), bundle = await workSources(f.bridge, f.session, 'u1', null, f.work.instruction);
   const result = interpretAnalysis(output(), bundle, f.work);
