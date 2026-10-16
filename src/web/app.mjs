@@ -9,6 +9,7 @@ const $ = selector => document.querySelector(selector);
 const nativeStates = { idle: "대기 중", working: "작업 중", "needs-input": "입력 대기", done: "완료", error: "오류", unavailable: "연결 불가" };
 const transport = { starting: "접수 중", "waiting-local": "앞선 요청 대기", waiting: "전송 대기", submitting: "전송 중", submitted: "답변 대기", accepted: "답변 대기", "reply-received": "답변 수신", replied: "답변 수신", error: "질의 실패", created: "세션 생성됨", "not-sent": "미전송", "result-unknown": "결과 미확정" };
 let sessions = [], refreshing = false, ready = false;
+let createOperationId = "";
 let sending = false, activityTimer, streamWarning = "";
 let directSessionId = "", composerRecipient = "", previewKey = "", previewIdentity = "", warning = "";
 let browserStorage; try { browserStorage = localStorage; } catch { browserStorage = { getItem() {}, setItem() {} }; }
@@ -185,7 +186,17 @@ function renderConversation() {
     older.dataset.messageId = "older"; older.textContent = history.loading ? "이전 대화 불러오는 중…" : "이전 대화 불러오기";
     older.disabled = history.loading; older.onclick = () => { void loadHistory(true); }; ordered.push(older);
   }
+  let previousDay = "";
   for (const [index, item] of items.entries()) {
+    const timestamp = item.timestamp ? new Date(item.timestamp) : null;
+    const validTime = timestamp && Number.isFinite(timestamp.getTime());
+    if (validTime) {
+      const day = timestamp.toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "long", day: "numeric", weekday: "short" });
+      if (day !== previousDay) {
+        const id = `day:${item.id || index}`, separator = existing.get(id) || el("div", day, "conversation-day");
+        separator.dataset.messageId = id; separator.textContent = day; ordered.push(separator); previousDay = day;
+      }
+    }
     const id = item.id || `${item.role}:${index}`;
     let bubble = existing.get(id);
     if (!bubble) {
@@ -203,6 +214,11 @@ function renderConversation() {
       if (output.textContent !== body) output.textContent = body;
       bubble.dataset.state = item.state;
     } else if (bubble.querySelector("p").textContent !== item.text) bubble.querySelector("p").textContent = item.text;
+    if (item.role !== "activity") {
+      const label = bubble.querySelector(":scope > small");
+      const caption = `${item.label}${validTime ? ` · ${timestamp.toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour: "2-digit", minute: "2-digit", hour12: false })}` : ""}`;
+      if (label.textContent !== caption) label.textContent = caption;
+    }
     works.decorate(bubble, item); ordered.push(bubble);
   }
   if (!items.length) ordered.push(el("p", selected ? (history?.loading ? "대화 불러오는 중…" : "대화 기록이 없습니다.") : "세션을 선택하거나 새 세션을 만드세요.", "conversation-empty"));
@@ -210,6 +226,7 @@ function renderConversation() {
   for (const child of [...messages.children]) if (!retained.has(child)) child.remove();
   for (const [index, node] of ordered.entries()) if (messages.children[index] !== node) messages.insertBefore(node, messages.children[index] || null);
   messages.scrollTop = changed && scrollPositions.has(identity) ? scrollPositions.get(identity) : follow ? messages.scrollHeight : scrollTop;
+  $("#latest-messages").hidden = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 100;
 }
 async function loadHistory(older = false) {
   const selected = session(), identity = selected ? `${selected.id}:${selected.cwd}` : "";
@@ -250,24 +267,44 @@ async function refresh() {
     for (const [key, operation] of operations) {
       let job;
       try { job = await api(`operations/${operation.operationId}`); }
-      catch (error) { if (error.status !== 404) throw error; operations.delete(key); notice(error.message); continue; }
+      catch (error) {
+        if (error.status !== 404) throw error;
+        operations.delete(key);
+        if (operation.operationId === createOperationId) {
+          createOperationId = ""; $("#create-error").textContent = error.message; setCreateBusy(false);
+        }
+        notice(error.message); continue;
+      }
       if (job.storageError) notice(job.storageError);
       if (!job.workflowId) {
         const target = job.target ?? operation.target;
-        if (job.kind === "create" && job.finished && job.target && key === activeKey()) directSessionId = job.target;
+        if (job.kind === "create" && job.finished && job.target && key === activeKey()) {
+          if (job.result?.session && !sessions.some(row => row.id === job.target)) sessions.push(job.result.session);
+          directSessionId = job.target;
+          try { browserStorage.setItem("waga:selected-session", directSessionId); } catch {}
+        }
         if (target) {
           const records = directRequests.get(target) ?? [];
           directRequests.set(target, [...records.filter(row => row.operationId !== job.operationId), { operationId: job.operationId, requestId: job.requestId, sessionId: target, state: job.state, reply: job.result?.reply, turnId: job.result?.turnId, error: job.error?.message, at: job.createdAt }].slice(-100));
         }
       }
+      if (job.operationId === createOperationId) {
+        $("#create-error").textContent = job.error?.message ?? (job.finished ? "" : "세션 생성 중…");
+        if (job.finished) {
+          createOperationId = ""; setCreateBusy(false);
+          if (!job.error) { $("#create-dialog").close(); $("#create-message").value = ""; }
+        }
+      }
       if (job.finished) { operations.delete(key); if (job.error) notice(job.error.message); }
       else operations.set(key, job);
     }
-    $("#create-cwd").textContent = "";
     const projectPicker = $("#create-workspace"), previousWorkspace = projectPicker.value;
-    projectPicker.replaceChildren();
-    for (const workspace of new Set([discovery.cwd, ...sessions.map(row => row.workspace)])) { const option = el("option", workspace); option.value = workspace; projectPicker.append(option); }
-    projectPicker.value = [...projectPicker.options].some(option => option.value === previousWorkspace) ? previousWorkspace : discovery.cwd;
+    const workspaces = [...new Set([discovery.cwd, ...sessions.map(row => row.workspace)])].filter(Boolean);
+    if (JSON.stringify([...projectPicker.options].map(option => option.value)) !== JSON.stringify(workspaces)) {
+      projectPicker.replaceChildren();
+      for (const workspace of workspaces) { const option = el("option", workspace); option.value = workspace; projectPicker.append(option); }
+      projectPicker.value = workspaces.includes(previousWorkspace) ? previousWorkspace : discovery.cwd;
+    }
     if (!directSessionId && sessions.length) {
       directSessionId = sessions[0].id;
       try { browserStorage.setItem("waga:selected-session", directSessionId); } catch {}
@@ -339,10 +376,16 @@ for (const action of ["rename", "archive"]) $(`#${action}-form`).addEventListene
 });
 $("#messages").addEventListener("scroll", () => {
   if ($("#conversation-workspace").hidden) return;
+  $("#latest-messages").hidden = $("#messages").scrollHeight - $("#messages").scrollTop - $("#messages").clientHeight < 100;
   scrollPositions.set(previewIdentity, $("#messages").scrollTop);
   while (scrollPositions.size > 20) scrollPositions.delete(scrollPositions.keys().next().value);
   if ($("#messages").scrollTop < 80) void loadHistory(true);
 });
+new ResizeObserver(() => {
+  const detail = $("#detail").getBoundingClientRect(), messages = $("#messages").getBoundingClientRect();
+  $("#latest-messages").style.bottom = `${Math.max(0, detail.bottom - messages.bottom) + 14}px`;
+}).observe($("#messages"));
+$("#latest-messages").onclick = () => { $("#messages").scrollTop = $("#messages").scrollHeight; $("#latest-messages").hidden = true; };
 $("#show-conversation").addEventListener("click", () => { requestAnimationFrame(() => { renderConversation(); if (scrollPositions.has(previewIdentity)) $("#messages").scrollTop = scrollPositions.get(previewIdentity); }); });
 $("#message").addEventListener("input", () => { resizeComposer(); drafts.set(recipientKey(), $("#message").value); $("#send").disabled = !session() || sending || !$("#message").value.trim(); });
 $("#message").addEventListener("keydown", event => {
@@ -362,10 +405,26 @@ $("#query-form").addEventListener("submit", async event => {
   finally { sending = false; renderDetail(); }
 });
 $("#cancel-follow-up").addEventListener("click", () => { followUpWork = null; contextWork = null; $("#follow-up-instruction").hidden = true; });
-$("#new-session").addEventListener("click", () => $("#create-dialog").showModal());
+$("#new-session").addEventListener("click", () => {
+  $("#create-workspace").value = session()?.workspace ?? $("#create-workspace").value;
+  $("#create-error").textContent = ""; $("#create-dialog").showModal(); $("#create-message").focus();
+});
+function setCreateBusy(busy) {
+  for (const id of ["create-workspace", "create-provider", "create-message", "create-submit"]) $(`#${id}`).disabled = busy;
+  $("#create-submit").textContent = busy ? "생성 중…" : "생성";
+}
 $("#create-form").addEventListener("submit", async event => {
-  event.preventDefault(); const input = { provider: $("#create-provider").value, workspace: $("#create-workspace").value, message: $("#create-message").value };
-  $("#create-dialog").close(); await submitOperation("create", input);
+  event.preventDefault(); if (createOperationId) return; const originKey = activeKey(); const input = { provider: $("#create-provider").value, workspace: $("#create-workspace").value, message: $("#create-message").value };
+  notice(); setCreateBusy(true);
+  $("#create-error").textContent = "";
+  try {
+    const operationId = crypto.randomUUID();
+    await api("create", { ...input, operationId });
+    createOperationId = operationId;
+    operations.set(originKey, { operationId, kind: "create", state: "starting" });
+    $("#create-error").textContent = "세션 생성 중…"; await refresh();
+  } catch (error) { $("#create-error").textContent = error.message; }
+  finally { if (!createOperationId) setCreateBusy(false); }
 });
 $("#refresh").addEventListener("click", () => { void refresh(); void refreshExecutions().catch(error => notice(error.message)); });
 async function start() {
@@ -380,5 +439,5 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) { historyStream.sync(null); controls.disconnect(); }
   else if (session()) openControls();
 });
-window.addEventListener("pagehide", () => historyStream.close());
+window.addEventListener("pagehide", () => { historyStream.close(); controls.disconnect(); });
 void start();

@@ -87,13 +87,13 @@ export async function initExecutions({ api, notice, selectedSession = () => null
   let loadVersion = 0, listVersion = 0, selectedAttempt = -1, scope = "", pinned = null;
   const scoped = route => `${route}?session=${encodeURIComponent(scope)}`;
   const inspector = $(".execution-inspector");
-  $("#close-inspector").addEventListener("click", () => { inspector.hidden = true; $("#execution-panel").classList.remove("with-inspector"); });
+  $("#close-inspector").addEventListener("click", () => { inspector.hidden = true; $("#execution-panel").classList.remove("with-inspector"); for (const card of cards.values()) card.setAttribute("aria-pressed", "false"); });
   let flowFilter = "all", flowSearch = "", flowAgent = "", visibleCount = 80;
   let flowComposing = false, searchFrame = 0, timelineExecution, timelineModel;
   let currentRun, workView = true, selectedTask = "", execution, selectedSpan = "", drawnEdges = [], cards = new Map();
   let selectedId = '', groups = [], imported = [], nativeId = '', historySignature = '', historyLimit = 8, historyComposing = false;
   const historyDialog = $('#execution-history-dialog'), historySearch = $('#execution-history-search');
-  const dateLabel = value => value ? new Date(value).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }) : '날짜 미기록';
+  const dateLabel = value => value ? new Date(value).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short' }) : '날짜 미기록';
   function selectRecord(id) {
     historyDialog.close(); pinned = id; workView = true;
     void listing().catch(error => notice(error.message));
@@ -139,23 +139,51 @@ export async function initExecutions({ api, notice, selectedSession = () => null
   $('#execution-history-more').onclick = () => { historyLimit += 8; renderHistory(); };
   $('#execution-native').onclick = () => selectRecord(nativeId);
   $('#execution-current').onclick = () => { pinned = null; workView = true; void listing().catch(error => notice(error.message)); };
+  let fitToView = true;
+  $('#graph-size').onclick = () => { fitToView = !fitToView; $('#graph-size').textContent = fitToView ? '크게 보기' : '화면에 맞춤'; fitGraph(); drawEdges(); };
+  function fitGraph() {
+    const graph = $("#execution-graph"), stage = graph.querySelector('.graph-stage');
+    if (!stage || !graph.clientWidth || !graph.clientHeight) return;
+    stage.style.width = `${Math.max(graph.clientWidth - 20, Number(stage.dataset.columns) * 230 + (Number(stage.dataset.columns) - 1) * 72)}px`;
+    const scale = innerWidth <= 650 || !fitToView ? 1 : Math.min(1, (graph.clientWidth - 20) / stage.offsetWidth, (graph.clientHeight - 30) / stage.offsetHeight);
+    stage.dataset.scale = String(Math.max(.55, scale));
+    stage.style.transform = `scale(${stage.dataset.scale})`;
+    const extent = graph.querySelector('.graph-extent');
+    extent.style.width = `${stage.offsetWidth * Number(stage.dataset.scale)}px`;
+    extent.style.height = `${stage.offsetHeight * Number(stage.dataset.scale)}px`;
+  }
   function drawEdges() {
-    const graph = $("#execution-graph"); graph.querySelector("svg")?.remove();
+    const viewport = $("#execution-graph"), graph = viewport.querySelector('.graph-stage') ?? viewport;
+    graph.querySelector("svg")?.remove();
     if (!graph.clientWidth || !drawnEdges.length) return;
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg"), bounds = graph.getBoundingClientRect();
+    const scale = Number(graph.dataset.scale) || 1;
+    const rect = card => {
+      const r = card?.getBoundingClientRect(); if (!r) return null;
+      return { left: (r.left - bounds.left) / scale, right: (r.right - bounds.left) / scale,
+        top: (r.top - bounds.top) / scale, bottom: (r.bottom - bounds.top) / scale, width: r.width / scale, height: r.height / scale };
+    };
     svg.setAttribute("width", graph.scrollWidth); svg.setAttribute("height", graph.scrollHeight); svg.setAttribute("aria-hidden", "true");
     const defs = document.createElementNS(svg.namespaceURI, 'defs'), marker = document.createElementNS(svg.namespaceURI, 'marker'), arrow = document.createElementNS(svg.namespaceURI, 'path');
     marker.id = 'flow-arrow'; marker.setAttribute('viewBox', '0 0 10 10'); marker.setAttribute('refX','9'); marker.setAttribute('refY','5'); marker.setAttribute('markerWidth','6'); marker.setAttribute('markerHeight','6'); marker.setAttribute('orient','auto'); arrow.setAttribute('d','M 0 0 L 10 5 L 0 10 z'); marker.append(arrow); defs.append(marker); svg.append(defs);
     for (const edge of drawnEdges) {
-      const from = cards.get(edge.from)?.getBoundingClientRect(), to = cards.get(edge.to)?.getBoundingClientRect(); if (!from || !to) continue;
-      const x1 = from.right - bounds.left + graph.scrollLeft, y1 = from.top + from.height / 2 - bounds.top;
-      const x2 = to.left - bounds.left + graph.scrollLeft, y2 = to.top + to.height / 2 - bounds.top;
+      const from = rect(cards.get(edge.from)), to = rect(cards.get(edge.to)); if (!from || !to) continue;
+      const x1 = from.right + graph.scrollLeft, y1 = from.top + from.height / 2 + graph.scrollTop;
+      const x2 = to.left + graph.scrollLeft, y2 = to.top + to.height / 2 + graph.scrollTop;
       const path = document.createElementNS(svg.namespaceURI, "path");
-      const bottom = from.bottom - bounds.top;
-      path.setAttribute("d", edge.kind === 'retry' ? `M ${x1 - 25} ${bottom} C ${x1 - 25} ${bottom + 28}, ${from.left - bounds.left + 25} ${bottom + 28}, ${from.left - bounds.left + 25} ${bottom}` : `M ${x1} ${y1} C ${x1 + 20} ${y1}, ${x2 - 20} ${y2}, ${x2} ${y2}`);
+      const bottom = from.bottom + graph.scrollTop;
+      path.setAttribute("d", edge.kind === 'retry' ? `M ${x1 - 25} ${bottom} C ${x1 - 25} ${bottom + 28}, ${from.left + graph.scrollLeft + 25} ${bottom + 28}, ${from.left + graph.scrollLeft + 25} ${bottom}` : `M ${x1} ${y1} C ${x1 + 20} ${y1}, ${x2 - 20} ${y2}, ${x2} ${y2}`);
       path.setAttribute('marker-end','url(#flow-arrow)'); if (edge.inactive) path.classList.add('inactive-edge');
       if (edge.label) { const title = document.createElementNS(svg.namespaceURI, 'title'); title.textContent = edge.label; path.append(title); path.setAttribute('data-relation', edge.kind); }
       svg.append(path);
+      if (edge.label) {
+        const label = document.createElementNS(svg.namespaceURI, 'text');
+        label.setAttribute('x', edge.kind === 'retry' ? from.left + graph.scrollLeft + from.width / 2 : (x1 + x2) / 2);
+        label.setAttribute('y', edge.kind === 'retry' ? bottom + 23 : (y1 + y2) / 2 - 8);
+        label.setAttribute('text-anchor', 'middle');
+        label.textContent = edge.kind === 'condition' ? '조건' : edge.kind === 'retry' ? '실패 → 수정' : edge.kind === 'artifact' ? '파일 전달' : '선행 결과';
+        const title = document.createElementNS(svg.namespaceURI, 'title'); title.textContent = edge.label; label.append(title); svg.append(label);
+      }
     }
     graph.prepend(svg);
   }
@@ -163,7 +191,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     const graph = $("#execution-graph");
     graph.style.setProperty("--flow-toolbar-height", `${graph.querySelector(".flow-filters")?.offsetHeight || 0}px`);
   }
-  new ResizeObserver(() => { drawEdges(); flowToolbarHeight(); }).observe($("#execution-graph"));
+  new ResizeObserver(() => { fitGraph(); drawEdges(); flowToolbarHeight(); }).observe($("#execution-graph"));
   function mode(graph) {
     $("#execution-panel").hidden = !graph; $("#conversation-workspace").hidden = graph;
     $("#show-executions").setAttribute("aria-pressed", String(graph)); $("#show-conversation").setAttribute("aria-pressed", String(!graph));
@@ -255,26 +283,41 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     const { nodes, edges } = taskGraph(currentRun);
     const levels = layoutGraph(currentRun.nodes, edges);
     graph.classList.add('task-layout');
-    graph.style.setProperty('--plan-columns', String(Math.max(0, ...levels.values()) + 1));
+    const columns = Math.max(0, ...levels.values()) + 1;
+    const extent = el('div', undefined, 'graph-extent'), stage = el('div', undefined, 'graph-stage');
+    stage.dataset.columns = String(columns); stage.style.setProperty('--plan-columns', String(columns)); extent.append(stage); graph.append(extent);
     const groups = new Map();
     for (const node of nodes) { const level = levels.get(node.id) ?? 0; if (!groups.has(level)) groups.set(level, []); groups.get(level).push(node.id); }
     const rows = Math.max(...[...groups.values()].map(group => group.length));
-    const selected = currentRun.nodes.find(node => node.id === selectedTask) || currentRun.nodes.find(node => !['passed', 'skipped'].includes(node.state)) || currentRun.nodes[0]; selectedTask = selected.id;
+    const selected = nodes.find(node => node.id === selectedTask) || nodes.find(node => !['passed', 'skipped', 'reported'].includes(node.state)) || nodes[0];
+    if (!selected) return;
+    selectedTask = selected.id;
     $("#execution-note").textContent = `${currentRun.title} · ${currentRun.declaration ? `${currentRun.skill} · 작업 계획 · 에이전트 진행 보고` : currentRun.proposal ? 'LLM 제안 관계 · 실행 전' : `${currentRun.superseded ? '이전 실행 · 재계획으로 대체됨' : taskStates[currentRun.state]} · 명세에 선언된 작업 의존성`}${currentRun.blockedReason ? ` · ${currentRun.blockedReason}` : ""}`;
+    const summary = el('div', undefined, 'graph-summary');
+    summary.style.gridColumn = '1 / -1'; summary.style.gridRow = '1';
+    const counts = new Map();
     for (const node of nodes) {
-      const card = el("button", undefined, `agent-card task-${node.state}`); card.style.gridColumn = String((levels.get(node.id) ?? 0) + 1); card.setAttribute("aria-pressed", String(node.id === selected.id));
-      const group = groups.get(levels.get(node.id) ?? 0); card.style.gridRow = group.length === 1 ? `1 / span ${rows}` : String(group.indexOf(node.id) + 1);
+      const state = currentRun.declaration ? ({ pending: '대기', working: '진행 중', failed: '막힘', reported: '종료 보고' })[node.state] : taskStates[node.state];
+      counts.set(state, (counts.get(state) ?? 0) + 1);
+    }
+    for (const [state, count] of counts) summary.append(el('span', `${state} ${count}`));
+    stage.append(summary);
+    for (const node of nodes) {
+      const card = el("button", undefined, `agent-card task-${node.state}`); card.style.gridColumn = String((levels.get(node.id) ?? 0) + 1); card.setAttribute("aria-pressed", String(!inspector.hidden && node.id === selected.id));
+      const group = groups.get(levels.get(node.id) ?? 0); card.style.gridRow = group.length === 1 ? `2 / span ${rows}` : String(group.indexOf(node.id) + 2);
       const role = ({ plan: "계획", scan: "조사", edit: "수정", verify: "검증" })[node.role];
       card.append(el("small", currentRun.declaration ? currentRun.skill : currentRun.proposal ? `${role} · LLM 제안` : `${currentRun.providers?.[node.role] ?? "claude"} · ${role} · ${currentRun.models[node.role]}`, "muted"), el("strong", node.title), el("span", currentRun.declaration ? ({ pending: '대기', working: '진행 중', failed: '막힘', reported: '단계 종료 보고' })[node.state] : currentRun.proposal ? '제안 · 실행 전' : taskStates[node.state]), el("small", currentRun.declaration ? `연결한 근거 ${node.evidence.length}개` : currentRun.proposal ? `원문 근거 ${node.evidenceIds.length}개` : `${node.attempts.length}회 실행${node.stalls ? ` · 무진전 ${node.stalls}회` : ""}`, "muted"));
       if (node.blockedReason && node.state !== 'skipped') card.append(el('small', node.blockedReason.slice(0, 180), 'task-blocked'));
       if (node.when) card.append(el('small', `${node.when.field} = ${JSON.stringify(node.when.equals)}${node.decision ? node.decision.selected ? ' · 선택' : ' · 제외' : ' · 판단 대기'}`, 'muted'));
+      if (node.dependsOn.length) card.append(el('small', `← ${node.dependsOn.map(id => nodes.find(other => other.id === id)?.title ?? id).join(' · ')}`, 'task-predecessors'));
+      if (node.dependsOn.length > 1 && node.join !== 'selected') card.append(el('small', '모든 선행 작업 합류', 'muted'));
       if (node.join === 'selected') card.append(el('small', '선택된 경로 합류', 'muted'));
       if (node.attempts.length > 1) card.append(el('small', `실패 근거로 수정 ${node.attempts.length - 1}회`, 'task-blocked'));
       if (node.inputs.length) card.append(el('small', `받는 파일: ${node.inputs.map(input => input.path).join(', ')}`, 'muted'));
       if (node.state === 'passed') card.append(el('small', '동작 검사 → 독립 검토 통과', 'muted'));
-      cards.set(node.id, card); card.addEventListener("click", () => { selectedTask = node.id; selectedAttempt = -1; inspector.hidden = false; renderRun(); }); graph.append(card);
+      cards.set(node.id, card); card.addEventListener("click", () => { selectedTask = node.id; selectedAttempt = -1; inspector.hidden = false; renderRun(); }); stage.append(card);
     }
-    drawEdges(); calls.append(el("h2", "실행 근거"));
+    fitGraph(); drawEdges(); calls.append(el("h2", "실행 근거"));
     selected.attempts.forEach((attempt, index) => { const button = el("button", `시도 ${index + 1} · ${attempt.passed ? "통과" : "실패"}`, "trace-call"); button.addEventListener("click", () => { selectedAttempt = index; attemptEvidence(selected, attempt); }); calls.append(button); });
     for (const edge of edges.filter(edge => edge.to === selected.id || edge.from === selected.id)) {
       const target = edge.to === selected.id ? edge.from : edge.to, other = currentRun.nodes.find(node => node.id === target);
@@ -286,6 +329,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     attemptEvidence(selected, selectedAttempt >= 0 ? selected.attempts[selectedAttempt] : selected.attempts.at(-1));
   }
   function runControls() {
+    $("#graph-size").hidden = !currentRun || !workView;
     const managed = currentRun && !currentRun.proposal && !currentRun.declaration;
     $("#run-work-view").hidden = !managed; $("#run-call-view").hidden = !managed;
     $('#run-work-view').setAttribute('aria-pressed', String(workView)); $('#run-call-view').setAttribute('aria-pressed', String(!workView));
@@ -383,15 +427,15 @@ export async function initExecutions({ api, notice, selectedSession = () => null
       button.dataset.span = span.id; button.setAttribute("aria-pressed", String(selectedSpan === span.id));
       const ms = span.start ? Number(BigInt(span.start) / 1000000n) : NaN;
       const date = Number.isFinite(ms) ? new Date(ms) : null;
-      const key = date ? `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}` : "unknown";
+      const key = date ? date.toLocaleDateString('en-CA', { timeZone: 'Asia/Seoul' }) : "unknown";
       if (key !== dayKey) {
         dayKey = key;
         dayGroup = el("section", undefined, "flow-day");
-        dayGroup.append(el("h3", date ? date.toLocaleDateString("ko-KR", { year: "numeric", month: "long", day: "numeric", weekday: "short" }) : "날짜 미기록", "flow-day-label"));
+        dayGroup.append(el("h3", date ? date.toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul", year: "numeric", month: "long", day: "numeric", weekday: "short" }) : "날짜 미기록", "flow-day-label"));
         timeline.append(dayGroup);
       }
-      const time = el("time", Number.isFinite(ms) ? new Date(ms).toLocaleTimeString("ko-KR", { hour12: false }) : "시각 미기록");
-      if (Number.isFinite(ms)) { time.dateTime = new Date(ms).toISOString(); time.title = new Date(ms).toLocaleString("ko-KR"); }
+      const time = el("time", Number.isFinite(ms) ? new Date(ms).toLocaleTimeString("ko-KR", { timeZone: "Asia/Seoul", hour12: false }) : "시각 미기록");
+      if (Number.isFinite(ms)) { time.dateTime = new Date(ms).toISOString(); time.title = new Date(ms).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" }); }
       const body = el("span", undefined, "flow-body");
       body.append(el("small", `${row.agent} · ${row.changes.length ? "파일 변경" : tool(span)} · ${states[span.state]}`), el("strong", (row.changes.length ? row.changes.map(change => displayPath(change.path)).join(" · ") : span.command || span.file || tool(span))));
       button.append(time, body); button.addEventListener("click", () => { evidence(span); }); dayGroup.append(button);
@@ -406,7 +450,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     }
     if (!files.size) fileList.append(el("p", "기록된 파일 변경이 없습니다.", "muted")); calls.append(fileList);
     const selected = rows.find(row => row.span.id === selectedSpan) || changes.at(-1) || rows.at(-1);
-    if (selected) evidence(selected.span);
+    if (selected && !inspector.hidden) evidence(selected.span);
     flowToolbarHeight();
     if (followLatest) graph.scrollTop = graph.scrollHeight;
     else {
@@ -421,6 +465,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     if (id?.startsWith('plan:')) {
       const row = await api(scoped(`works/${id.slice(5)}`)); if (version !== loadVersion) return;
       if (!row.plan) throw Error('등록한 작업 계획이 없습니다.');
+      if (preserve && currentRun?.id === id && currentRun.revision === row.plan.revision) return;
       currentRun = { ...row.plan, id, declaration: true, observations: row.observations, nodes: row.plan.nodes.map(node => ({ ...node, role: 'plan', prompt: node.title, state: ({ active: 'working', blocked: 'failed' })[node.state] ?? node.state, blockedReason: node.reason, attempts: [], inputs: [], outputs: [] })) };
       execution = null;
     } else if (id?.startsWith('proposal:')) {

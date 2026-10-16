@@ -106,11 +106,11 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
             const request = pending.get(message.id);
             if (request) { clearTimeout(request.timer); pending.delete(message.id); request.resolve(); }
           }
-          if (message.type === "error") { release(new Error(message.message)); notify(message.message); }
+          if (message.type === "error") { const silent = observing && pending.size === 0; release(silent ? undefined : new Error(message.message)); if (!silent) notify(message.message); }
         });
-        ws.addEventListener("close", () => { if (current === generation) { const error = new Error("연결이 끊겼습니다. 다음 전송 때 다시 연결합니다."); release(error); notify(error.message); } });
-        ws.addEventListener("error", () => { if (current === generation) notify("세션에 연결하지 못했습니다."); });
-      } catch (error) { if (current === generation) { release(error); notify(error.message); } }
+        ws.addEventListener("close", () => { if (current === generation) { const error = new Error("연결이 끊겼습니다. 다음 전송 때 다시 연결합니다."); const silent = observing && pending.size === 0; release(silent ? undefined : error); if (!silent) notify(error.message); } });
+        ws.addEventListener("error", () => { if (current === generation && !observing) notify("세션에 연결하지 못했습니다."); });
+      } catch (error) { if (current === generation) { const silent = observing; release(silent ? undefined : error); if (!silent) notify(error.message); } }
     })();
     return connecting;
   }

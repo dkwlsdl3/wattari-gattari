@@ -60,3 +60,12 @@ test('native progress uses only the status row, excluding response text and nati
   assert.equal(nativeProgress(['› Explain Working (45s • esc to interrupt)', 'A completed response']), '');
   assert.equal(nativeProgress(['› Ask Codex to do anything']), '');
 });
+
+// Browsing transport availability must not be reported as a failed user instruction.
+test('read-only observation failure resolves silently and the next explicit send retains the error', async t => {
+  const { controls } = fixture(t, async () => { throw Error('native transport unavailable'); });
+  assert.equal(await controls.observe(), false);
+  assert.equal(document.querySelector('#input-status').textContent, '');
+  await assert.rejects(controls.sendText('user instruction'), /native transport unavailable/);
+  assert.equal(document.querySelector('#input-status').textContent, 'native transport unavailable');
+});
