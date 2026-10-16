@@ -32,11 +32,11 @@ async function artifacts(root, outputs) {
   return rows;
 }
 async function git(cwd, args) { return (await exec("git", ["-C", cwd, ...args], { maxBuffer: 1024 * 1024, timeout: 10000 })).stdout; }
-export function claudeArguments({ prompt, model, review = false, name, sessionId, budget = 0.25, role = "edit" }) {
+export function claudeArguments({ prompt, model, review = false, name, sessionId, budget = 0.25, role = "edit", schema = reviewSchema }) {
   const tools = review || role !== "edit" ? ["Read", "Grep", "Glob"] : ["Read", "Grep", "Glob", "Edit", "Write"];
   return ["--print", "--restricted", ...(sessionId ? ["--session-id", sessionId] : []), "--output-format", "json", "--model", model, "--effort", "low", "--max-budget-usd", String(budget), "--name", name,
     "--setting-sources", "", "--settings", JSON.stringify({ disableAllHooks: true, autoMemoryEnabled: false }), "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-    "--permission-mode", "dontAsk", "--tools", tools.join(","), "--allowedTools", tools.join(","), ...(review ? ["--json-schema", JSON.stringify(reviewSchema)] : []), "--", prompt];
+    "--permission-mode", "dontAsk", "--tools", tools.join(","), "--allowedTools", tools.join(","), ...(review ? ["--json-schema", JSON.stringify(schema)] : []), "--", prompt];
 }
 export async function guardedProcess(argv, { cwd, env = {}, monitor = async () => {}, timeoutMs = 180000, intervalMs = 1000, scope = true } = {}) {
   const started = Date.now();

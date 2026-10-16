@@ -1,9 +1,9 @@
-import { contextEditor } from "./work-context.mjs";
+import { workAnalysis } from "./work-analysis.mjs";
 const el = (tag, text, className) => { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; };
 const dates = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium", timeStyle: "medium", hour12: false });
 const date = value => value ? `${dates.format(new Date(value))} (한국 시간)` : "시각 미기록";
 
-export function initWorks({ api, selected, changed, notice, followUp, handoff }) {
+export function initWorks({ api, selected, changed, notice, followUp, handoff, graph }) {
   const cache = new Map();
   const route = (tail, sessionId) => `${tail}?session=${encodeURIComponent(sessionId)}`;
   function rows() { return cache.get(selected()?.id) ?? []; }
@@ -23,20 +23,26 @@ export function initWorks({ api, selected, changed, notice, followUp, handoff })
   function decorate(bubble, item) {
     const work = rows().find(row => item.workId === row.id || item.id === row.messageId);
     const old = bubble.querySelector(".work-record");
-    if (!work) { old?.remove(); return; }
-    const caption = work.delivery === "submitted" ? "작업 기록" : "작업 기록 · 전달 미확정";
-    if (old?.dataset.workId === work.id) { old.querySelector(":scope > summary").textContent = caption; return; }
+    if (!work && (item.role !== 'user' || !item.id)) { old?.remove(); return; }
+    const key = item.id ?? work.id;
+    const caption = !work || ['submitted', 'observed'].includes(work.delivery) ? "작업 보기" : "작업 보기 · 전달 미확정";
+    if (old?.dataset.key === key) { old.querySelector(":scope > summary").textContent = caption; return; }
     old?.remove();
     const details = el("details", undefined, "work-record"), summary = el("summary", caption), body = el("div");
-    details.dataset.workId = work.id; details.append(summary, body); bubble.append(details);
+    details.dataset.key = key; details.append(summary, body); bubble.append(details);
     let loading = false;
     details.addEventListener("toggle", async event => {
       if (event.target !== details || !details.open || loading) return; loading = true; body.textContent = "작업 기록 불러오는 중…";
       try {
-        const row = await api(route(`works/${work.id}`, work.session.id)); body.replaceChildren();
+        const sessionId = selected()?.id; if (!sessionId) return;
+        const target = work ?? await api(route('works', sessionId), { nativeMessageId: item.id });
+        if (!work) cache.set(sessionId, [...(cache.get(sessionId) ?? []), target]);
+        const row = await api(route(`works/${target.id}`, sessionId));
+        if (!details.isConnected || selected()?.id !== sessionId) return;
+        body.replaceChildren();
         const follow = el("button", "이 작업에 이어서 지시"); follow.type = "button"; follow.onclick = () => followUp(row); body.append(follow);
         body.append(el("p", `${row.session.name} · ${row.session.provider}\n${row.session.cwd}`, "muted"));
-        body.append(el("p", row.delivery === "submitted" ? "지시 입력 전달 · 완료 여부는 아래 검사 근거로 확인합니다." : "전달 미확정 · 원래 세션을 확인해 주세요. 자동 재전송하지 않습니다.", "muted"));
+        body.append(el("p", row.delivery === "observed" ? "기존 세션의 원문 지시에서 연결했습니다. 작업 완료를 뜻하지 않습니다." : row.delivery === "submitted" ? "지시 입력 전달 · 완료 여부는 아래 검사 근거로 확인합니다." : "전달 미확정 · 원래 세션을 확인해 주세요. 자동 재전송하지 않습니다.", "muted"));
         if (row.deliveryText) { const delivered = el('details'); delivered.append(el('summary', '실제로 전달한 지시·인계 원문'), el('pre', row.deliveryText)); body.append(delivered); }
         if (row.messageRelation) body.append(el("p", "원문 내용이 일치하는 대화에 연결했습니다.", "muted"));
         if (row.instructions.length > 1) {
@@ -51,17 +57,7 @@ export function initWorks({ api, selected, changed, notice, followUp, handoff })
             catch (error) { notice(error.message); }
           }; body.append(parent);
         }
-        const attach = el('button', '이 인계를 다음 지시에 첨부'); attach.type = 'button'; attach.disabled = !row.context; attach.onclick = async () => { try { handoff?.(await api(route(`works/${row.id}`, row.session.id))); } catch (error) { notice(error.message); } }; if (handoff) body.append(attach);
-        body.append(contextEditor(row, { notice, save: async context => {
-          await api(route(`works/${row.id}`, row.session.id), { context }); attach.disabled = false;
-          return api(route(`works/${row.id}`, row.session.id));
-        } }));
-        const refs = el("details"), refTitle = el("summary", `참고 자료 ${row.references.length}개`), form = el("form"), label = el("label", "출처 (한 줄에 하나)"), input = el("textarea"), save = el("button", "자료 저장");
-        input.value = row.references.map(ref => ref.source).join("\n"); input.rows = 3; input.maxLength = 60000; label.append(input); form.append(label, save); refs.append(refTitle, form); body.append(refs);
-        form.onsubmit = async event => { event.preventDefault(); save.disabled = true;
-          try { const saved = await api(route(`works/${row.id}`, row.session.id), { references: input.value.split("\n").filter(value => value.trim()) }); refTitle.textContent = `참고 자료 ${saved.references.length}개`; }
-          catch (error) { notice(error.message); } finally { save.disabled = false; }
-        };
+        body.append(workAnalysis(row, { api, notice, handoff, graph, active: () => details.open }));
         for (const run of row.runs) {
           const section = el("section", undefined, "work-evidence"); section.append(el("h3", run.title));
           if (run.blockedReason) section.append(el("p", run.blockedReason, "task-blocked"));
@@ -95,18 +91,7 @@ export function initWorks({ api, selected, changed, notice, followUp, handoff })
           }
           body.append(section);
         }
-        if (!row.runs.length) body.append(el("p", "연결된 실행·검사 근거가 없습니다. 응답만으로 완료 처리하지 않습니다.", "muted"));
-        const launchForm = el('details'), launchTitle = el('summary', '작업 실행'), launchInput = el('textarea'), launchButton = el('button', '명세대로 격리 실행'), launchStatus = el('p');
-        launchInput.rows = 6; launchInput.maxLength = 60000; launchInput.setAttribute('aria-label', '실행 명세 JSON'); launchInput.placeholder = '검사 명령과 수정 파일이 명시된 JSON 실행 명세'; launchButton.type = 'button';
-        launchForm.append(launchTitle, el('p', '실제 검사 명령이 실행됩니다. 수정은 별도 worktree에 보관하고 원본에 자동 적용하지 않습니다.'), launchInput, launchButton, launchStatus); body.append(launchForm);
-        let launchId = crypto.randomUUID();
-        launchInput.oninput = () => { launchId = crypto.randomUUID(); };
-        launchButton.onclick = async () => { launchButton.disabled = true;
-          try { const launch = JSON.parse(launchInput.value); const result = await api(route(`works/${row.id}`, row.session.id), { launch, launchId }); if (result.state === 'uncertain') throw Error('실행 시작 여부가 미확정입니다. 기존 실행 기록을 먼저 확인해 주세요.'); launchStatus.textContent = '실행을 시작했습니다. 실행 흐름에서 진행·검사 근거를 확인할 수 있습니다.'; launchStatus.dataset.runId = result.runId; }
-          catch (error) { notice(error.message); } finally { launchButton.disabled = false; }
-        };
-        const more = el("details"), title = el("summary", "실행 명세 연결"), id = el("code", `"workId": "${row.id}"`);
-        more.append(title, el("p", "waga run 실행 명세의 최상위에 이 값을 넣으면 변경·검사·결과가 이 지시에 연결됩니다."), id); body.append(more);
+        if (!row.runs.length) body.append(el("p", "Waga가 별도로 실행한 검사 기록은 없습니다.", "muted"));
       } catch (error) { body.textContent = error.message; } finally { loading = false; }
     });
   }

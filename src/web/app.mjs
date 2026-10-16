@@ -16,7 +16,7 @@ const histories = new Map(), sentMessages = new Map(), drafts = new DraftStore(b
 const operations = new Map(), directRequests = new Map();
 let refreshExecutions = async () => {};
 let followUpWork = null, contextWork = null;
-const works = initWorks({ api, selected: () => session(), changed: renderConversation, notice, handoff: row => {
+const works = initWorks({ api, selected: () => session(), changed: renderConversation, notice, graph: (row, runId) => { void refreshExecutions.openWork?.(row, runId).catch(error => notice(error.message)); }, handoff: row => {
   contextWork = row; followUpWork = null;
   $("#follow-up-instruction").hidden = false; $("#follow-up-title").textContent = `인계 첨부: ${row.context?.goal.slice(0, 60) ?? row.instruction.slice(0, 60)} · 왼쪽에서 받을 세션을 선택해 주세요.`;
   $("#message").focus();

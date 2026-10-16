@@ -67,12 +67,27 @@ export class WorkStore {
     row.submitAttemptedAt = Date.now(); return this.#write(row);
   }
   delivered(id) { const row = this.read(id); row.delivery = "submitted"; return this.#write(row); }
-  launched(id, launchId, runId) {
+  observe(message, session) {
+    const previous = this.list(session.id).find(row => row.messageId === message.id);
+    if (previous) return previous;
+    if (!message.id || message.role !== 'user') throw fail(400, '원문 지시를 찾을 수 없습니다.');
+    const row = this.create({ id: crypto.randomUUID(), instruction: message.text }, session);
+    return this.#write({ ...row, origin: 'native', messageId: message.id, delivery: 'observed' });
+  }
+  analysis(id, value) { const row = this.read(id); row.analysis = value; return this.#write(row); }
+  generatedContext(id, input, analysisId) {
+    const row = this.read(id);
+    // A manually corrected context is never overwritten by background interpretation.
+    if (row.context && row.context.origin !== 'llm') return row;
+    row.context = { ...normalizeContext(input, row.context), origin: 'llm', analysisId };
+    return this.#write(row);
+  }
+  launched(id, launchId, runId, analysisId) {
     this.#file(launchId); const row = this.read(id); row.launches ??= [];
     const previous = row.launches.find(item => item.id === launchId);
     if (previous) return previous;
     if (row.launches.length >= 30) throw fail(409, '작업별 실행 한도입니다.');
-    const launch = { id: launchId, runId, state: "prepared", at: Date.now() }; row.launches.push(launch); this.#write(row); return launch;
+    const launch = { id: launchId, runId, ...(analysisId ? { analysisId } : {}), state: "prepared", at: Date.now() }; row.launches.push(launch); this.#write(row); return launch;
   }
   launchState(id, launchId, state, reason) { const row = this.read(id), entry = row.launches?.find(item => item.id === launchId); if (!entry) throw fail(404, '실행 요청이 없습니다.'); entry.state = state; if (reason) entry.reason = String(reason).slice(0, 2000); return this.#write(row); }
   context(id, input) { const row = this.read(id); row.context = normalizeContext(input, row.context); return this.#write(row); }

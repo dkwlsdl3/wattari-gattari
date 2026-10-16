@@ -12,6 +12,7 @@ import { staleNodes } from "./workflow-evidence.mjs";
 import { RunStore } from "./run-store.mjs";
 import { handoffText } from "./work-context.mjs";
 import { WorkStore } from "./work-store.mjs";
+import { WorkAssistant, workSources, sourceVersion } from "./work-assistant.mjs";
 import { sampleResources } from "./resource-gate.mjs";
 import { ExecutionStore } from "./execution-store.mjs";
 import { WorkflowStore } from "./workflow-store.mjs";
@@ -23,6 +24,7 @@ const ASSETS = new Map([
   ["/drafts.mjs", ["drafts.mjs", "text/javascript; charset=utf-8"]],
   ["/conversation.mjs", ["conversation.mjs", "text/javascript; charset=utf-8"]],
   ["/work-context.mjs", ["work-context.mjs", "text/javascript; charset=utf-8"]],
+  ["/work-analysis.mjs", ["work-analysis.mjs", "text/javascript; charset=utf-8"]],
   ["/works.mjs", ["works.mjs", "text/javascript; charset=utf-8"]],
   ["/history-stream.mjs", ["history-stream.mjs", "text/javascript; charset=utf-8"]],
   ["/task-graph.mjs", ["task-graph.mjs", "text/javascript; charset=utf-8"]],
@@ -70,7 +72,7 @@ function publicSession(session) {
 
 // Native providers own sessions and decisions; the web attaches their frontend.
 export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, port = 4317,
-  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore(), workStore = new WorkStore(), orderStore = new DockOrderStore(), launch = launchWorkflow, terminalFactory } = {}) {
+  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore(), workStore = new WorkStore(), orderStore = new DockOrderStore(), launch = launchWorkflow, assistant = new WorkAssistant({ store: workStore }), terminalFactory } = {}) {
   if (!bridge) throw new TypeError("A session bridge is required");
   const assets = new Map(await Promise.all([...ASSETS].map(async ([route, [file, type]]) =>
     [route, { type, data: await fs.readFile(file instanceof URL ? file : new URL(`./web/${file}`, import.meta.url)) }])));
@@ -161,6 +163,13 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         if (!scopeSession) throw fail(400, "작업의 담당 세션이 필요합니다.");
         if (request.method === "POST") {
           const input = await body(request);
+          if (input.nativeMessageId) {
+            if (typeof input.nativeMessageId !== 'string' || input.nativeMessageId.length > 500) throw fail(400, '원문 메시지 ID를 확인해 주세요.');
+            const bundle = await workSources(bridge, scopeSession, input.nativeMessageId, executionStore.native(scopeSession), '');
+            if (!bundle.message) throw fail(404, '원문 지시를 현재 기록에서 찾을 수 없습니다.');
+            workStore.reconcile(scopeSession.id, [bundle.message]);
+            json(response, 200, workStore.observe(bundle.message, scopeSession)); return;
+          }
           const history = await bridge.history(scopeSession, { activities: false });
           json(response, 201, workStore.create(input, scopeSession, history.messages)); return;
         }
@@ -174,13 +183,34 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         const work = workStore.read(workMatch[1]);
         if (!scopeSession || work.session.id !== scopeSession.id) throw fail(404, "현재 세션의 작업이 아닙니다.");
         if (request.method === "POST") { const input = await body(request);
-          if (input.launch) {
+          if (input.analyze) {
+            const bundle = await workSources(bridge, scopeSession, work.messageId, executionStore.native(scopeSession), work.instruction, work.context);
+            json(response, 202, assistant.start(work, bundle, { refresh: input.refresh === true })); return;
+          }
+          if (input.launch || input.analysisId) {
             if (!UUID.test(input.launchId ?? '')) throw fail(400, '실행 요청 ID가 필요합니다.');
-            const previous = workStore.read(work.id).launches?.find(item => item.id === input.launchId);
+            const previous = workStore.read(work.id).launches?.find(item => item.id === input.launchId || input.analysisId && item.analysisId === input.analysisId);
             if (previous) { json(response, 200, previous); return; }
-            const created = runStore.create({ ...input.launch, workId: work.id, sourceCwd: work.session.cwd }, cwd);
+            let definition = input.launch;
+            if (input.analysisId) {
+              const analysis = work.analysis;
+              if (!analysis || analysis.id !== input.analysisId || analysis.state !== 'ready' || !analysis.manifest) throw fail(409, '현재 실행 가능한 계획이 아닙니다.');
+              const fresh = (await bridge.discover()).sessions.find(session => session.id === scopeSession.id);
+              if (!fresh || fresh.cwd !== work.session.cwd || fresh.provider !== work.session.provider) throw fail(409, '현재 세션 연결을 다시 확인해 주세요.');
+              if (fresh.status === 'working') throw fail(409, '원래 세션이 작업 중입니다. 같은 지시를 별도로 중복 실행하지 않습니다.');
+              const bundle = await workSources(bridge, scopeSession, work.messageId, executionStore.native(scopeSession), work.instruction, work.context);
+              const version = await sourceVersion(work.session.cwd);
+              if (JSON.stringify(version) !== JSON.stringify(analysis.version) || crypto.createHash('sha256').update(JSON.stringify(bundle.sources)).digest('hex') !== analysis.sourcesHash) throw fail(409, '계획 후 코드·대화가 변경됐습니다. 작업 정리를 갱신해 주세요.');
+              if (!version.clean) throw fail(409, '원본 작업 폴더에 미커밋 변경이 있습니다. 현재 세션에서 변경을 정리한 뒤 실행해 주세요.');
+              definition = analysis.manifest;
+            }
+            const latest = workStore.read(work.id);
+            const concurrent = latest.launches?.find(item => item.id === input.launchId || input.analysisId && item.analysisId === input.analysisId);
+            if (concurrent) { json(response, 200, concurrent); return; }
+            if (input.analysisId && (latest.analysis?.id !== input.analysisId || JSON.stringify(latest.context) !== JSON.stringify(work.context))) throw fail(409, '계획·인계가 변경됐습니다. 최신 작업을 확인해 주세요.');
+            const created = runStore.create({ ...definition, workId: work.id, sourceCwd: work.session.cwd }, cwd);
             runStore.context(created.id, { workId: work.id, snapshot: work.context ?? null, text: handoffText(work) });
-            const saved = workStore.launched(work.id, input.launchId, created.id);
+            const saved = workStore.launched(work.id, input.launchId, created.id, input.analysisId);
             try { await launch(runStore.read(created.id), created.secret, origin); }
             catch (error) { workStore.launchState(work.id, input.launchId, 'uncertain', error.message); throw error; }
             workStore.launchState(work.id, input.launchId, 'started');
@@ -191,7 +221,8 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
           const instructions = workStore.list(work.session.id).filter(row => (row.rootId ?? row.id) === (work.rootId ?? work.id));
           const ids = new Set(instructions.map(row => row.id));
           const runs = runStore.list(cwd).map(row => runStore.read(row.id)).filter(row => ids.has(row.workId));
-          json(response, 200, { ...work, handoff: handoffText(work), instructions: instructions.map(({ id, instruction, createdAt, parentId }) => ({ id, instruction, createdAt, parentId })), runs }); return;
+          const observations = await workSources(bridge, scopeSession, work.messageId, executionStore.native(scopeSession), work.instruction, work.context);
+          json(response, 200, { ...work, handoff: handoffText(work), observations, instructions: instructions.map(({ id, instruction, createdAt, parentId }) => ({ id, instruction, createdAt, parentId })), runs }); return;
         }
       }
       if (request.method === "GET" && url.pathname === "/api/runs") { json(response, 200, { runs: [...new Set([...scopeFolders, cwd])].flatMap(folder => runStore.list(folder)).filter(row => runInScope(runStore.read(row.id))) }); return; }

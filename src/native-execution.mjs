@@ -3,13 +3,17 @@ import crypto from "node:crypto";
 const hash = value => crypto.createHash("sha256").update(value).digest("hex");
 const clip = (value, max = 4000) => (typeof value === "string" ? value : JSON.stringify(value ?? "")).slice(0, max);
 const nanos = ms => Number.isFinite(ms) && ms > 0 ? String(BigInt(Math.trunc(ms)) * 1_000_000n) : "";
+export function nativeSpanIdentity(session, key) {
+  const traceId = hash(session.id).slice(0, 32), spanId = hash(key).slice(0, 16);
+  return { id: `${traceId}:${spanId}`, traceId, spanId };
+}
 const content = (name, value) => ({ name, content: { [name]: clip(value) }, limited: (typeof value === "string" ? value : JSON.stringify(value ?? "")).length > 4000 });
 
 // These are native observations, not invented OTLP requests or test verdicts.
 // Stable native IDs correlate tool results across page boundaries and restarts.
 export function nativeExecution(session, records, previous = [], agentId = "") {
-  const traceId = hash(session.id).slice(0, 32), spans = new Map(previous.map(span => [span.id, span]));
-  const identity = key => { const spanId = hash(key).slice(0, 16); return { id: `${traceId}:${spanId}`, traceId, spanId }; };
+  const spans = new Map(previous.map(span => [span.id, span]));
+  const identity = key => nativeSpanIdentity(session, key);
   function put(key, update) {
     const ids = identity(key), old = spans.get(ids.id);
     const events = new Map([...(old?.events ?? []), ...(update.events ?? [])].map(event => [event.name, event]));

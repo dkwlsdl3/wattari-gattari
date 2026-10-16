@@ -155,6 +155,21 @@ export async function initExecutions({ api, notice, selectedSession = () => null
   }
   function attemptEvidence(node, attempt) {
     const panel = $("#execution-evidence"); panel.replaceChildren(el("h2", node.title));
+    if (currentRun?.proposal) {
+      panel.append(el('p', node.prompt), el('p', 'LLM이 원문에서 제안한 작업입니다. 실행·완료·검사 통과를 뜻하지 않습니다.', 'muted'));
+      for (const id of node.evidenceIds) {
+        const source = currentRun.observations.sources.find(source => source.id === id);
+        if (!source) continue;
+        if (source.role === 'project' || source.role === 'context' || id === 'instruction') { panel.append(el('h3', id === 'instruction' ? '원래 지시' : source.role === 'context' ? '정정한 인계' : id.slice(5)), el('pre', source.text)); continue; }
+        const show = el('button', `${source.role === 'tool' ? '실제 호출 근거' : '원문 대화'} 보기`, 'trace-call');
+        show.onclick = async () => {
+          if (source.role === 'tool') { const executionId = currentRun.observations.executionId; await load(executionId); const span = execution?.spans.find(span => span.id === id); if (span) { inspector.hidden = false; evidence(span); } }
+          else { mode(false); const messageId = id.slice('message:'.length); const bubble = [...document.querySelectorAll('[data-message-id]')].find(node => node.dataset.messageId === messageId); bubble?.scrollIntoView({ block: 'center' }); }
+        };
+        panel.append(show, el('pre', source.text));
+      }
+      return;
+    }
     if (!attempt) { panel.append(el("p", "아직 실행 근거가 없습니다.", "muted")); return; }
     panel.append(el("p", `${attempt.passed ? "검사·독립 검증 통과" : "통과하지 못함"} · 작업 모델 ${attempt.worker.model} · 검증 모델 ${attempt.review.model || "미실행"}`, "muted"));
     if (node.state === 'stale') panel.append(el('p', '검증 후 파일이 변경됐습니다. 아래는 당시 검사 기록입니다.', 'task-blocked'));
@@ -170,10 +185,11 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     const { nodes, edges } = taskGraph(currentRun);
     const levels = layoutGraph(currentRun.nodes, edges);
     const selected = currentRun.nodes.find(node => node.id === selectedTask) || currentRun.nodes.find(node => node.state !== "passed") || currentRun.nodes[0]; selectedTask = selected.id;
-    $("#execution-note").textContent = `${currentRun.title} · ${taskStates[currentRun.state]} · 명세에 선언된 작업 의존성${currentRun.blockedReason ? ` · ${currentRun.blockedReason}` : ""}`;
+    $("#execution-note").textContent = `${currentRun.title} · ${currentRun.proposal ? 'LLM 제안 관계 · 실행 전' : `${taskStates[currentRun.state]} · 명세에 선언된 작업 의존성`}${currentRun.blockedReason ? ` · ${currentRun.blockedReason}` : ""}`;
     for (const node of nodes) {
       const card = el("button", undefined, `agent-card task-${node.state}`); card.style.gridColumn = String((levels.get(node.id) ?? 0) + 1); card.setAttribute("aria-pressed", String(node.id === selected.id));
-      card.append(el("small", `${currentRun.providers?.[node.role] ?? "claude"} · ${({ plan: "계획", scan: "조사", edit: "수정", verify: "검증" })[node.role]} · ${currentRun.models[node.role]}`, "muted"), el("strong", node.title), el("span", taskStates[node.state]), el("small", `${node.attempts.length}회 실행${node.stalls ? ` · 무진전 ${node.stalls}회` : ""}`, "muted"));
+      const role = ({ plan: "계획", scan: "조사", edit: "수정", verify: "검증" })[node.role];
+      card.append(el("small", currentRun.proposal ? `${role} · LLM 제안` : `${currentRun.providers?.[node.role] ?? "claude"} · ${role} · ${currentRun.models[node.role]}`, "muted"), el("strong", node.title), el("span", currentRun.proposal ? '제안 · 실행 전' : taskStates[node.state]), el("small", currentRun.proposal ? `원문 근거 ${node.evidenceIds.length}개` : `${node.attempts.length}회 실행${node.stalls ? ` · 무진전 ${node.stalls}회` : ""}`, "muted"));
       if (node.blockedReason) card.append(el('small', node.blockedReason.slice(0, 180), 'task-blocked'));
       if (node.inputs.length) card.append(el('small', `받는 파일: ${node.inputs.map(input => input.path).join(', ')}`, 'muted'));
       if (node.state === 'passed') card.append(el('small', '동작 검사 → 독립 검토 통과', 'muted'));
@@ -191,8 +207,8 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     attemptEvidence(selected, selectedAttempt >= 0 ? selected.attempts[selectedAttempt] : selected.attempts.at(-1));
   }
   function runControls() {
-    $("#run-controls").hidden = !currentRun; $("#run-work-view").hidden = !currentRun; $("#run-call-view").hidden = !currentRun;
-    if (!currentRun) return;
+    $("#run-controls").hidden = !currentRun || currentRun.proposal; $("#run-work-view").hidden = !currentRun || currentRun.proposal; $("#run-call-view").hidden = !currentRun || currentRun.proposal;
+    if (!currentRun || currentRun.proposal) return;
     const ended = ["review_required", "approved"].includes(currentRun.state);
     $("#run-pause").disabled = ended || currentRun.control === "pause";
     $("#run-resume").disabled = ended || currentRun.control === "run" && !["interrupted", "needs-replan", "waiting-user"].includes(currentRun.state);
@@ -315,7 +331,13 @@ export async function initExecutions({ api, notice, selectedSession = () => null
 
   async function load(id, preserve = false) {
     const version = ++loadVersion;
-    if (id?.startsWith("run:")) {
+    if (!preserve) $("#run-controls").hidden = true;
+    if (id?.startsWith('proposal:')) {
+      const row = await api(scoped(`works/${id.slice(9)}`)); if (version !== loadVersion) return;
+      if (!row.analysis?.nodes) throw Error('작업 관계 정리가 아직 없습니다.');
+      currentRun = { ...row.analysis.manifest, id, title: row.analysis.summary, proposal: true, state: 'planned', models: row.analysis.manifest?.models ?? { plan: row.analysis.provider, scan: row.analysis.provider, edit: row.analysis.provider, verify: row.analysis.provider }, nodes: row.analysis.nodes.map(node => ({ ...node, state: 'pending', attempts: [] })), observations: row.observations };
+      execution = null;
+    } else if (id?.startsWith("run:")) {
       const row = await api(scoped(`runs/${id.slice(4)}`));
       if (version !== loadVersion) return;
       if (preserve && currentRun?.id === row.id && currentRun.revision === row.revision) return;
@@ -344,18 +366,20 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     if (scope !== nextScope) { scope = nextScope; preferred = ""; preserve = false; loadVersion++; currentRun = null; execution = null; $("#execution-select").replaceChildren(); inspector.hidden = true; runControls(); render(); }
     if (!scope) { $("#execution-note").textContent = "왼쪽 목록에서 세션을 선택하세요."; return; }
     const picker = $("#execution-select"), startedWith = picker.value;
-    const [{ executions }, { runs }] = await Promise.all([api(scoped("executions")), api(scoped("runs"))]);
+    const [{ executions }, { runs }, { works }] = await Promise.all([api(scoped("executions")), api(scoped("runs")), api(scoped('works'))]);
     if (version !== listVersion || (preserve && picker.value !== startedWith)) return;
     const selected = preferred || picker.value;
     executions.sort((a, b) => Number(b.source === "native") - Number(a.source === "native")); picker.replaceChildren();
     for (const run of runs) { const option = el("option", `${run.title} · ${taskStates[run.state]}`); option.value = `run:${run.id}`; picker.append(option); }
+    const proposals = works.filter(work => work.analysis?.nodes);
+    for (const work of proposals) { const option = el('option', `${work.analysis.summary} · LLM 제안`); option.value = `proposal:${work.id}`; picker.append(option); }
     for (const run of executions) { const option = el("option", run.source === "native" ? "세션 실행 기록 · 자동 수집" : `${run.title} · ${new Date(run.importedAt).toLocaleString("ko-KR")}`); option.value = run.id; picker.append(option); }
-    const ids = [...executions.filter(row => row.source === "native").map(row => row.id), ...runs.map(row => `run:${row.id}`), ...executions.filter(row => row.source !== "native").map(row => row.id)]; picker.value = ids.includes(selected) ? selected : ids[0] || "";
+    const ids = [...executions.filter(row => row.source === "native").map(row => row.id), ...runs.map(row => `run:${row.id}`), ...proposals.map(work => `proposal:${work.id}`), ...executions.filter(row => row.source !== "native").map(row => row.id)]; picker.value = ids.includes(selected) ? selected : ids[0] || "";
     picker.disabled = !ids.length; picker.hidden = ids.length < 2;
     await load(picker.value, preserve);
   }
   async function control(action, extra = {}) {
-    if (!currentRun) return;
+    if (!currentRun || currentRun.proposal || $("#execution-select").value !== `run:${currentRun.id}`) return;
     const requestedScope = scope, runId = currentRun.id;
     try { const row = await api(scoped(`runs/${runId}/control`), { action, ...extra });
       if (scope !== requestedScope || currentRun?.id !== runId) return;
@@ -374,5 +398,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
   }, 2000);
   $("#execution-select").addEventListener("change", () => { void load($("#execution-select").value).catch(error => notice(error.message)); });
   mode(false);
-  return () => listing(currentRun ? `run:${currentRun.id}` : execution?.id);
+  const refresh = () => listing(currentRun?.proposal ? currentRun.id : currentRun ? `run:${currentRun.id}` : execution?.id);
+  refresh.openWork = async (row, runId) => { mode(true); await listing(); workView = true; await listing(runId ? `run:${runId}` : `proposal:${row.id}`); };
+  return refresh;
 }
