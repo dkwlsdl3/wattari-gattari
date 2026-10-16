@@ -25,6 +25,9 @@ Wattari Gattari는 Claude Agents와 Codex Agents가 소유한 네이티브 세�
 - 웹 UI·작업 실행·컨텍스트 인계·루프·그래프를 설계하거나 수정할 때와
   컨텍스트 압축 후 해당 작업을 재개할 때는
   `docs/adr/2026-10-16-agent-work-orchestration.md`의 설계 정본을 먼저 읽습니다.
+- 사용자가 허용한 다단계 로컬 코딩 작업을 시작하는 에이전트는 첫 파일 수정 전에
+  `docs/work-plans.md`의 "저장소 진입 계약"에 따라 계획을 등록·인계합니다.
+  일반 질문은 대상이 아닙니다.
 - 과거 완료 상태를 문서에 다시 적지 않습니다. 완료 기록은 커밋입니다.
 
 ## Start And End

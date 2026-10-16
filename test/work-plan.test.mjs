@@ -111,4 +111,12 @@ test('plan --execute hands the exact registered graph to one durable launch and 
   const changed=structuredClone(input); changed.revision=1; changed.title='실행 중 교체';
   assert.throws(()=>f.store.plan(result.workId,changed),{status:409});
   const read=output(); assert.equal(await runCli(['plan',f.session.id],{...options,stdout:read}),0); assert.equal(JSON.parse(read.value).plans[0].runs[0].id,result.launch.runId);
+  const replan=structuredClone(input);replan.revision=1;replan.replanFrom=result.launch.runId;replan.title='실패 원인을 반영한 재계획';
+  const denied=await fetch(route,{method:'POST',headers,body:JSON.stringify({plan:replan})});assert.equal(denied.status,409);
+  runStore.event(result.launch.runId,{type:'end',eventId:crypto.randomUUID(),reason:'환경 준비 실패',kind:'environment'});
+  const allowed=await fetch(route,{method:'POST',headers,body:JSON.stringify({plan:replan})});assert.equal(allowed.status,200);assert.equal((await allowed.json()).plan.revision,2);
+  const revisedFile=path.join(f.root,'replanned.json');await fs.writeFile(revisedFile,JSON.stringify(replan));
+  assert.equal(await runCli(['plan',f.session.id,revisedFile,'--execute'],{...options,stdout:output()}),0);assert.equal(launches,2);
+  assert.equal(await runCli(['plan',f.session.id,revisedFile,'--execute'],{...options,stdout:output()}),0);assert.equal(launches,2);
+  assert.equal(runStore.read(result.launch.runId).state,'needs-replan');assert.equal(f.store.read(result.workId).launches.length,2);
 });

@@ -9,6 +9,7 @@ import { artifactPath, validateRun, dependenciesReady } from "./run-store.mjs";
 import { sampleResources, hasCapacity } from "./resource-gate.mjs";
 import { workspaceEvidence, staleNodes } from "./workflow-evidence.mjs";
 import { acquireLock, durableProcess, readJson } from "./workflow-recovery.mjs";
+import { prepareDependencies } from './workflow-dependencies.mjs';
 import { APP_ID } from "./product.mjs";
 const exec = promisify(execFile), sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const hash = value => crypto.createHash("sha256").update(value).digest("hex");
@@ -172,6 +173,7 @@ export async function runWorkflow(manifestFile, { url = process.env.WAGA_WEB_URL
         const data = await fs.readFile(file); if (!expected || hash(data) !== expected) throw new Error("선행 산출물이 검증 후 변경됐습니다.");
         await fs.mkdir(path.dirname(target), { recursive: true }); await fs.writeFile(target, data);
       }
+      await prepareDependencies(source, workspace);
       await event({ type: "phase", nodeId: node.id, state: "working", workspace });
       while (run.nodes.find(row => row.id === node.id).state !== "passed") {
         const current = run.nodes.find(row => row.id === node.id); if (current.state === "needs-replan") break;
@@ -187,6 +189,7 @@ export async function runWorkflow(manifestFile, { url = process.env.WAGA_WEB_URL
         const permitted = new Set([...node.outputs, ...node.inputs.map(item => item.path)]);
         const inputsUnchanged = protectedBefore === JSON.stringify(await artifacts(workspace, protectedInputs));
         const scopeOk = inputsUnchanged && (node.role === "edit" ? changed.every(file => permitted.has(file)) : before === await git(workspace, ["diff", "--binary", "HEAD"]) && changed.every(file => node.inputs.some(input => input.path === file)));
+        await prepareDependencies(source, workspace);
         // Include new output files in the same git snapshot used by the check and reviewer.
         if (node.outputs.length && (await artifacts(workspace, node.outputs)).every(row => !row.missing)) await git(workspace, ["add", "--", ...node.outputs]);
         await gate(node.id); await event({ type: "phase", nodeId: node.id, state: "checking" });

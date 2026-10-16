@@ -178,7 +178,7 @@ export async function runCli(args = process.argv.slice(2), {
         if (!bundle.message) throw Error('Original native user message not found');
         work = workStore.observe(bundle.message, session);
       }
-      const row = workStore.plan(work.id, input);
+      const row = input.replanFrom ? await planRequest(`works/${work.id}?session=${encodeURIComponent(session.id)}`, { plan: input }, planUrl) : workStore.plan(work.id, input);
       const launch = options.execute ? await executePlan(row, planUrl) : undefined;
       stdout.write(`${JSON.stringify({ workId: row.id, messageId: row.messageId, plan: row.plan, ...(launch ? { launch } : {}) })}\n`);
     } else if (options.command === "version") stdout.write(`${VERSION}\n`);

@@ -1,4 +1,5 @@
 import { taskGraph } from "./task-graph.mjs";
+import { chooseSelection, currentTarget, keepsInspector, linkedRun } from "./execution-selection.mjs";
 const tool = span => {
   const name = span.attributes["tool_name"] || span.attributes["gen_ai.tool.name"];
   return ({ commandExecution: "명령 실행", fileChange: "파일 변경", webSearch: "웹 검색", imageView: "이미지 확인", collabAgentToolCall: "에이전트 호출" })[name] || name;
@@ -83,7 +84,7 @@ const $ = selector => document.querySelector(selector);
 function el(tag, text, className) { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; }
 
 export async function initExecutions({ api, notice, selectedSession = () => null }) {
-  let loadVersion = 0, listVersion = 0, selectedAttempt = -1, scope = "";
+  let loadVersion = 0, listVersion = 0, selectedAttempt = -1, scope = "", pinned = null;
   const scoped = route => `${route}?session=${encodeURIComponent(scope)}`;
   const inspector = $(".execution-inspector");
   $("#close-inspector").addEventListener("click", () => { inspector.hidden = true; $("#execution-panel").classList.remove("with-inspector"); });
@@ -119,7 +120,7 @@ export async function initExecutions({ api, notice, selectedSession = () => null
     $("#execution-panel").hidden = !graph; $("#conversation-workspace").hidden = graph;
     $("#show-executions").setAttribute("aria-pressed", String(graph)); $("#show-conversation").setAttribute("aria-pressed", String(!graph));
   }
-  $("#show-executions").addEventListener("click", () => { mode(true); void listing(execution?.id).catch(error => notice(error.message)); });
+  $("#show-executions").addEventListener("click", () => { mode(true); void listing().catch(error => notice(error.message)); });
   $("#show-conversation").addEventListener("click", () => mode(false));
   const displayPath = path => execution?.cwd && path?.startsWith(`${execution.cwd}/`) ? path.slice(execution.cwd.length + 1) : path;
   function evidence(span) {
@@ -396,35 +397,39 @@ export async function initExecutions({ api, notice, selectedSession = () => null
       if ($(".changed-files")) $(".changed-files").scrollTop = filesTop;
     }
   }
-  async function listing(preferred, preserve = false) {
+  const shownId = () => currentRun ? (currentRun.declaration || currentRun.proposal ? currentRun.id : `run:${currentRun.id}`) : execution?.id;
+  let returnButton;
+  async function listing(preserve = false) {
     const version = ++listVersion;
     const nextScope = selectedSession()?.id || "";
-    if (scope !== nextScope) { scope = nextScope; preferred = ""; preserve = false; loadVersion++; currentRun = null; execution = null; $("#execution-select").replaceChildren(); inspector.hidden = true; runControls(); render(); }
+    if (scope !== nextScope) { scope = nextScope; pinned = null; preserve = false; loadVersion++; currentRun = null; execution = null; $("#execution-select").replaceChildren(); inspector.hidden = true; runControls(); render(); }
     if (!scope) { $("#execution-note").textContent = "왼쪽 목록에서 세션을 선택하세요."; return; }
     const picker = $("#execution-select"), startedWith = picker.value;
     const [{ executions }, { runs }, { works }] = await Promise.all([api(scoped("executions")), api(scoped("runs")), api(scoped('works'))]);
     if (version !== listVersion || (preserve && picker.value !== startedWith)) return;
-    let selected = preferred || picker.value;
+    let selected = pinned;
     executions.sort((a, b) => Number(b.source === "native") - Number(a.source === "native")); picker.replaceChildren();
     for (const run of runs) { const option = el("option", `${run.title} · ${taskStates[run.state]}`); option.value = `run:${run.id}`; picker.append(option); }
     const proposals = works.filter(work => work.analysis?.nodes && selected === `proposal:${work.id}`);
     const plans = works.filter(work => work.plan).sort((a, b) => b.plan.updatedAt - a.plan.updatedAt);
     for (const work of plans) {
-      const linked = runs.find(run => run.workId === work.id && work.launches?.some(launch => launch.runId === run.id && launch.planRevision === work.plan.revision));
-      if (linked) { if (selected === `plan:${work.id}`) selected = `run:${linked.id}`; continue; }
+      const linked = linkedRun(work, runs);
+      if (linked) { if (selected === `plan:${work.id}`) selected = pinned = `run:${linked.id}`; continue; }
       const option = el('option', `${work.plan.title} · ${work.plan.skill}`); option.value = `plan:${work.id}`; picker.append(option);
     }
     for (const work of proposals) { const option = el('option', `${work.analysis.summary} · LLM 제안`); option.value = `proposal:${work.id}`; picker.append(option); }
     for (const run of executions) { const option = el("option", run.source === "native" ? "세션 실행 기록 · 자동 수집" : `${run.title} · ${new Date(run.importedAt).toLocaleString("ko-KR")}`); option.value = run.id; picker.append(option); }
-    const latestRun = plans[0] && runs.find(run => run.workId === plans[0].id);
-    const first = latestRun ? `run:${latestRun.id}` : plans[0] ? `plan:${plans[0].id}` : runs[0] ? `run:${runs[0].id}` : null;
-    const ids = [...picker.options].map(option => option.value); picker.value = ids.includes(selected) ? selected : ids.includes(first) ? first : ids[0] || '';
+    const ids = [...picker.options].map(option => option.value);
+    const choice = chooseSelection({ pinned: selected, ids, current: currentTarget(works, runs) });
+    pinned = choice.pinned; picker.value = choice.value;
     picker.disabled = !ids.length; picker.hidden = true;
     const history = $('#execution-history'), list = $('#execution-history-list'); list.replaceChildren(); history.hidden = ids.length < 2;
+    if (!returnButton) { returnButton = el('button', '현재 작업'); returnButton.onclick = () => { pinned = null; void listing().catch(error => notice(error.message)); }; history.before(returnButton); }
+    returnButton.hidden = !pinned;
     for (const option of [...picker.options].filter(option => option.value !== picker.value)) {
-      const button = el('button', option.textContent); button.onclick = () => { history.open = false; void listing(option.value).catch(error => notice(error.message)); }; list.append(button);
+      const button = el('button', option.textContent); button.onclick = () => { history.open = false; pinned = option.value; void listing().catch(error => notice(error.message)); }; list.append(button);
     }
-    await load(picker.value, preserve);
+    await load(picker.value, keepsInspector(preserve, shownId(), picker.value));
   }
   async function control(action, extra = {}) {
     if (!currentRun || currentRun.proposal || $("#execution-select").value !== `run:${currentRun.id}`) return;
@@ -442,11 +447,11 @@ export async function initExecutions({ api, notice, selectedSession = () => null
   let polling = false;
   setInterval(async () => {
     if (document.hidden || $("#execution-panel").hidden || polling) return;
-    polling = true; try { await listing($("#execution-select").value, true); } catch (error) { notice(error.message); } finally { polling = false; }
+    polling = true; try { await listing(true); } catch (error) { notice(error.message); } finally { polling = false; }
   }, 2000);
-  $("#execution-select").addEventListener("change", () => { void load($("#execution-select").value).catch(error => notice(error.message)); });
+  $("#execution-select").addEventListener("change", () => { pinned = $("#execution-select").value; void load(pinned).catch(error => notice(error.message)); });
   mode(false);
-  const refresh = () => listing(currentRun?.proposal || currentRun?.declaration ? currentRun.id : currentRun ? `run:${currentRun.id}` : execution?.id);
-  refresh.openWork = async (row, runId) => { mode(true); workView = true; await listing(runId ? `run:${runId}` : row.plan ? `plan:${row.id}` : row.analysis?.nodes ? `proposal:${row.id}` : ''); };
+  const refresh = () => listing(true);
+  refresh.openWork = async (row, runId) => { mode(true); workView = true; pinned = runId ? `run:${runId}` : row.plan ? `plan:${row.id}` : row.analysis?.nodes ? `proposal:${row.id}` : null; await listing(); };
   return refresh;
 }

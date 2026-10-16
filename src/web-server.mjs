@@ -30,6 +30,7 @@ const ASSETS = new Map([
   ["/history-stream.mjs", ["history-stream.mjs", "text/javascript; charset=utf-8"]],
   ["/task-graph.mjs", ["task-graph.mjs", "text/javascript; charset=utf-8"]],
   ["/executions.mjs", ["executions.mjs", "text/javascript; charset=utf-8"]],
+  ["/execution-selection.mjs", ["execution-selection.mjs", "text/javascript; charset=utf-8"]],
   ["/sortable.mjs", [new URL(import.meta.resolve("sortablejs/modular/sortable.esm.js")), "text/javascript; charset=utf-8"]],
   ["/app.mjs", ["app.mjs", "text/javascript; charset=utf-8"]],
   ["/native-question.mjs", ["native-question.mjs", "text/javascript; charset=utf-8"]],
@@ -189,7 +190,11 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
         const work = workStore.read(workMatch[1]);
         if (!scopeSession || work.session.id !== scopeSession.id) throw fail(404, "현재 세션의 작업이 아닙니다.");
         if (request.method === "POST") { const input = await body(request);
-          if (input.plan) { json(response, 200, workStore.plan(work.id, input.plan)); return; }
+          if (input.plan) {
+            const previous = input.plan.replanFrom ? runStore.read(input.plan.replanFrom) : undefined;
+            if (previous && await running(previous.id)) throw fail(409, '이전 실행기가 끝난 뒤 재계획해 주세요.');
+            json(response, 200, workStore.plan(work.id, input.plan, previous)); return;
+          }
           if (input.analyze) {
             const bundle = await workSources(bridge, scopeSession, work.messageId, executionStore.native(scopeSession), work.instruction, work.context);
             json(response, 202, assistant.start(work, bundle, { refresh: input.refresh === true })); return;

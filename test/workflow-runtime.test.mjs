@@ -31,6 +31,14 @@ async function fixture(t, spec = manifest) {
   return { root, repo, file, store, workStore, session, web, options: { url: web.url, root: path.join(root, "runtime"), intervalMs: 20, output: { write() {} } } };
 }
 const capacity = () => ({ at: Date.now(), availableGiB: 20, cpuPercent: 10 });
+test('missing project dependencies stop before any model call instead of entering a repair loop', async t => {
+  const f=await fixture(t),native=fakeAgents();
+  await fs.writeFile(path.join(f.repo,'package.json'),JSON.stringify({dependencies:{'proof-missing':'1.0.0'}}));
+  await exec('git',['-C',f.repo,'add','package.json']);await exec('git',['-C',f.repo,'-c','user.name=waga-proof','-c','user.email=proof@example.invalid','commit','-qm','declare dependency']);
+  await assert.rejects(runWorkflow(f.file,{...f.options,sample:capacity,processRunner:native.run}),/실행 환경 준비 필요/);
+  assert.equal(native.calls.size,0);const run=f.store.read(f.store.list(f.repo)[0].id);
+  assert.equal(run.errors.at(-1).kind,'environment');assert.ok(run.nodes.every(n=>n.attempts.length===0));
+});
 function fakeAgents({ failFirstB = true, alwaysFail = false, rejectReview = false } = {}) {
   const calls = new Map();
   return { calls, run: async (argv, options) => {
