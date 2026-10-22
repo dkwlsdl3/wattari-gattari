@@ -62,10 +62,10 @@ export function historyStreams(bridge, { onPage = () => {} } = {}) {
       }
       entry.waiters++;
       try { await entry.start; } finally { entry.waiters--; }
-      if (entry.stopped || response.destroyed) { if (!entry.responses.size) entry.close(); if (!response.destroyed) response.end(); return; }
+      if (entry.stopped || response.destroyed) { if (!entry.responses.size && !entry.waiters) entry.close(); if (!response.destroyed) response.end(); return; }
       response.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-store", "X-Accel-Buffering": "no" });
       entry.responses.add(response);
-      response.on("close", () => { entry.responses.delete(response); if (!entry.responses.size) entry.close(); });
+      response.on("close", () => { entry.responses.delete(response); if (!entry.responses.size && !entry.waiters) entry.close(); });
       if (entry.value) entry.send(response, entry.value);
       else entry.changed();
     },
