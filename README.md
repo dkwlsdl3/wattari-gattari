@@ -186,7 +186,7 @@ No model calls or additional transcript files are created.
 | `Alt+D` | New session with provider defaults, skipping local-llm-router (`Alt+D` toggles it while composing) |
 | `Alt+S` | New-session Claude and Codex execution settings |
 | `Alt+Y` | Toggle the new Codex session execution mode |
-| `Alt+X` twice | Archive a session |
+| `Alt+X` twice | End or archive a session, preserving conversation logs |
 | `Alt+Q` | Exit Waga |
 | `PgUp` / `PgDn` | Scroll the selected response in the right pane |
 
@@ -218,7 +218,8 @@ for view-reuse rules.
   Claude sessions created by Waga. Without the hook, Claude uses a local alias;
   the save notice distinguishes these cases.
 - **Archive:** logs are preserved. Codex moves to archived sessions; Claude cleans
-  up the BG job and managed worktree. End interactive Claude in its original screen.
+  up the BG job and managed worktree. Waga-created Claude CLI sessions terminate
+  and close all linked windows. Newly created CLI sessions also close their window on `/exit`.
 
 If old output overwrites a resumed Codex 0.153.4 screen, `/raw on` provides a
 workaround with simpler formatting and unchanged logs. A new TUI may need it again;

@@ -372,6 +372,8 @@ provider가 소유합니다. 사용법과 단축키는 [README](../../README.ko.
 tmux는 화면 배치와 전환만 소유합니다. provider daemon, 세션, transcript와 작업은
 Waga dock 또는 tmux window의 수명과 독립적입니다.
 대화형 Claude는 retained tmux pane 자체에서 실행하므로 그 pane을 종료하면 CLI도 종료됩니다.
+Alt+X 두 번은 retained 소유권·원래 PID·UUID를 확인한 Waga 생성 CLI만 종료하고 그 창을 닫으며
+transcript와 다른 세션은 보존합니다. 새 CLI의 `/exit`로 끝난 pane도 `remain-on-exit off`로 창이 닫힙니다.
 단순 client·WezTerm·dock 종료는 retained pane을 유지합니다. Claude 자체의 사용량 한도 대기는
 프로세스 안에 남으며 Waga는 대기 타이머나 자동 재시작 정책을 소유하지 않습니다.
 전원 종료·재부팅·로그아웃 복구는 다루지 않습니다.

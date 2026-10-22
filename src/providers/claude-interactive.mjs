@@ -29,6 +29,12 @@ export class ClaudeInteractive {
     } catch { throw interactiveUnavailable(); }
   }
 
+  // Kill the verified window, including all links and legacy remain-on-exit panes.
+  async terminate(session) {
+    await this.verify(session);
+    await this.run([...this.prefix, "kill-window", "-t", interactiveRetainedName(session.id)], { env: this.env });
+  }
+
   async list() {
     // Claude does not publish an agents row until startup trust/import prompts
     // finish. Discover our terminals too so those prompts remain reachable.
@@ -67,7 +73,7 @@ export class ClaudeInteractive {
       ";", "set-window-option", "-t", retained, "@waga_provider", "claude",
       ";", "set-window-option", "-t", retained, "@waga_interactive", "1",
       ";", "set-window-option", "-t", retained, "@waga_project_cwd", cwd,
-      ";", "set-window-option", "-t", retained, "remain-on-exit", "on"], { env: this.env });
+      ";", "set-window-option", "-t", retained, "remain-on-exit", "off"], { env: this.env });
     } catch (error) {
       // A timed-out tmux request may already have launched Claude. Preserve its
       // UUID without retrying, terminating it, or reporting confirmed creation.

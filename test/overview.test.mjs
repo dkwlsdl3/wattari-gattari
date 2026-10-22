@@ -555,11 +555,11 @@ test("Korean Alt+Q leaves the dock when the terminal sends ESC plus jamo", async
   }
 });
 
-test("Alt+X twice archives the selected session and closes its retained view", async (t) => {
+for (const provider of ["codex", "claude"]) test(`Alt+X twice closes the selected ${provider} session and its retained view`, async (t) => {
   const input = ttyInput();
   t.after(() => input.emit("end"));
   const output = capturedOutput();
-  const active = { id: "codex:archive-me", nativeId: "archive-me", provider: "codex", status: "idle", name: "Archive me", cwd: "/work/p", updatedAt: 1 };
+  const active = { id: `${provider}:archive-me`, nativeId: "archive-me", provider, ...(provider === "claude" ? { kind: "interactive" } : {}), status: "idle", name: "Archive me", cwd: "/work/p", updatedAt: 1 };
   let archived = false;
   const archiveCalls = [];
   const closedViews = [];
@@ -579,11 +579,12 @@ test("Alt+X twice archives the selected session and closes its retained view", a
   input.emit("keypress", "", { name: "x", meta: true });
   assert.equal(archiveCalls.length, 0);
   assert.match(plain(output.writes.at(-1)), /Alt\+X를 다시 누르면/);
+  if (provider === "claude") assert.match(plain(output.writes.at(-1)), /종료/);
 
   input.emit("keypress", "", { name: "x", meta: true });
   await waitFor(() => archiveCalls.length === 1 && closedViews.length === 1);
-  assert.deepEqual(archiveCalls, [["codex:archive-me", {}]]);
-  assert.deepEqual(closedViews, ["codex:archive-me"]);
+  assert.deepEqual(archiveCalls, [[active.id, {}]]);
+  assert.deepEqual(closedViews, [active.id]);
   await waitFor(() => /0 need input\s+0 working\s+0 idle\s+0 done/.test(plain(output.writes.at(-1))));
 
   pressAlt(input, "q");

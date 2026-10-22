@@ -14,7 +14,7 @@ import { ClaudePeerEndpoint } from "./claude-peer.mjs";
 import { claudeReplyOffset, readClaudeReply, readClaudeReceipt, waitForClaudeReply } from "./claude-reply.mjs";
 import { ClaudePreviewReader, readClaudeHistory, watchClaudeHistory } from "../session-preview.mjs";
 import { applyClaudeExecutionSettings, normalizeProviderExecutionSettings } from "../provider-execution.mjs";
-import { ClaudeInteractive, interactiveUnavailable } from "./claude-interactive.mjs";
+import { ClaudeInteractive } from "./claude-interactive.mjs";
 
 const execFileAsync = promisify(execFile);
 const SHORT_ID = /^[0-9a-f]{8}$/i;
@@ -214,7 +214,10 @@ export class ClaudeProvider {
   }
 
   async archive(session) {
-    if (session.kind === "interactive") throw interactiveUnavailable();
+    if (session.kind === "interactive") {
+      await this.#interactive.terminate(session);
+      return { target: session.id, archived: true };
+    }
     if (!SHORT_ID.test(session.nativeId)) {
       throw Object.assign(new Error(`Claude background id is invalid: ${session.nativeId}`), { code: "CLAUDE_BACKGROUND_INVALID" });
     }

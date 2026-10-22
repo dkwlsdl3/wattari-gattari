@@ -32,6 +32,7 @@ test("real tmux keeps the original interactive CLI across F4, lost discovery and
 const fs = require('node:fs');
 fs.writeFileSync(${JSON.stringify(recordPath)}, JSON.stringify({pid:process.pid, args:process.argv.slice(2), launch:process.env.WAGA_CLAUDE_LAUNCH}));
 process.stdin.resume();
+process.stdin.on('data', chunk => { if (String(chunk).trim() === '/exit') process.exit(0); });
 `, { mode: 0o700 });
   const call = async args => ({ ...await exec("tmux", [...prefix, ...args], { env, encoding: "utf8", timeout: 5000 }), code: 0 });
   t.after(() => {
@@ -84,23 +85,49 @@ process.stdin.resume();
   assert.equal((await call(["list-panes", "-t", retained, "-F", "#{pane_id}\t#{pane_pid}"])).stdout, before);
   await interactive.verify(session);
   assert.doesNotThrow(() => process.kill(recorded.pid, 0));
-  await assert.rejects(provider.archive(session), { code: "CLAUDE_INTERACTIVE_UNAVAILABLE" });
+  await assert.rejects(provider.archive({ ...session, pid: process.pid }), { code: "CLAUDE_INTERACTIVE_UNAVAILABLE" });
+  assert.doesNotThrow(() => process.kill(recorded.pid, 0));
   // A different native PID or an ended process must never trigger a replacement.
   await assert.rejects(interactive.verify({ ...session, pid: process.pid }), { code: "CLAUDE_INTERACTIVE_UNAVAILABLE" });
   const registry = path.join(env.CLAUDE_CONFIG_DIR, "sessions");
   fs.mkdirSync(registry, { recursive: true });
   fs.writeFileSync(path.join(registry, `${session.pid}.json`), JSON.stringify({ pid: session.pid, sessionId: "a-different-session" }));
   await assert.rejects(interactive.verify(session), { code: "CLAUDE_INTERACTIVE_UNAVAILABLE" });
+  await assert.rejects(provider.archive(session), { code: "CLAUDE_INTERACTIVE_UNAVAILABLE" });
+  assert.doesNotThrow(() => process.kill(recorded.pid, 0));
   assert.deepEqual(await provider.list({ cwd: root }), [], "native navigation cannot leave an old UUID pointing at a different session");
   fs.rmSync(path.join(registry, `${session.pid}.json`));
-  process.kill(recorded.pid, "SIGTERM");
-  await eventually(async () => (await call(["display-message", "-p", "-t", retained, "#{pane_dead}"])).stdout.trim() === "1");
+  // Old sessions used remain-on-exit on. Closing one must remove every link,
+  // without ending the overview process in either independent view.
+  const siblings = [];
+  for (const name of ["waga-proof-first", "waga-proof-second"]) {
+    await call(["new-session", "-d", "-s", name, "-n", "overview", "-c", root, "sleep", "60"]);
+    siblings.push(Number((await call(["display-message", "-p", "-t", name, "#{pane_pid}"])).stdout.trim()));
+    await call(["link-window", "-s", retained, "-t", `${name}:`]);
+  }
+  await call(["set-window-option", "-t", retained, "remain-on-exit", "on"]);
+  assert.deepEqual(await provider.archive(session), { target: session.id, archived: true });
+  await eventually(() => { try { process.kill(recorded.pid, 0); return false; } catch (error) { return error.code === "ESRCH"; } });
+  assert.equal((await call(["list-panes", "-a", "-F", "#{@waga_session_id}"])).stdout.includes(session.id), false);
+  for (const pid of siblings) assert.doesNotThrow(() => process.kill(pid, 0));
   await assert.rejects(interactive.verify(session), { code: "CLAUDE_INTERACTIVE_UNAVAILABLE" });
   assert.deepEqual(await provider.list({ cwd: root }), []);
+
+  const normal = await provider.create("normal exit", { cwd: root });
+  const normalSession = await eventually(async () => (await provider.list({ cwd: root })).find(row => row.sessionId === normal.sessionId));
+  const normalRetained = interactiveRetainedName(normalSession.id);
+  await call(["link-window", "-s", normalRetained, "-t", "waga-proof-first:"]);
+  await call(["send-keys", "-t", normalRetained, "-l", "/exit"]);
+  await call(["send-keys", "-t", normalRetained, "Enter"]);
+  await eventually(async () => !(await call(["list-panes", "-a", "-F", "#{@waga_session_id}"])).stdout.includes(normalSession.id));
+  assert.throws(() => process.kill(normalSession.pid, 0), { code: "ESRCH" });
+  for (const pid of siblings) assert.doesNotThrow(() => process.kill(pid, 0));
 });
 
 test("external interactive CLI cannot be attached or duplicated by Waga", async () => {
   const interactive = new ClaudeInteractive({ run: async () => { throw new Error("retained pane does not exist"); } });
+  const provider = new ClaudeProvider({ interactive });
+  await assert.rejects(provider.archive({ provider: "claude", kind: "interactive", id: "claude:external", pid: process.pid }), { code: "CLAUDE_INTERACTIVE_UNAVAILABLE" });
   await assert.rejects(nativeSessionCommand({ provider: "claude", kind: "interactive", id: "claude:external",
     nativeId: "external", cwd: "/tmp/waga-proof-external", pid: process.pid }, { claudeInteractive: interactive }), { code: "CLAUDE_INTERACTIVE_UNAVAILABLE" });
 });

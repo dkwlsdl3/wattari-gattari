@@ -1052,14 +1052,12 @@ export async function runOverview({
   };
 
   const archiveSession = (target) => {
-    if (target.provider === "claude" && target.kind === "interactive") {
-      notice = "대화형 Claude는 원래 화면에서 종료하세요. Waga는 BG 세션만 보관합니다.";
-      render();
-      return;
-    }
+    const terminating = target.provider === "claude" && target.kind === "interactive";
     if (pendingArchiveId !== target.id) {
       pendingArchiveId = target.id;
-      notice = target.provider === "claude"
+      notice = terminating
+        ? `${target.name}: CLI와 창을 종료합니다. Alt+X를 다시 누르면 실행합니다.`
+        : target.provider === "claude"
         ? `${target.name}: Agent View 작업과 worktree를 정리하고 transcript는 보존합니다. Alt+X를 다시 누르면 실행합니다.`
         : `${target.name}: 로그를 archived_sessions로 옮겨 보존합니다. Alt+X를 다시 누르면 실행합니다.`;
       render();
@@ -1068,7 +1066,7 @@ export async function runOverview({
 
     pendingArchiveId = null;
     busy = true;
-    notice = `${target.name} 세션을 보관하는 중입니다.`;
+    notice = terminating ? `${target.name} Claude CLI를 종료하는 중입니다.` : `${target.name} 세션을 보관하는 중입니다.`;
     render();
     const scope = filterCwd ? { cwd: path.resolve(filterCwd) } : {};
     void (async () => {
@@ -1080,7 +1078,7 @@ export async function runOverview({
         archivedSessionIds.add(target.id);
         allSessions = allSessions.filter((session) => session.id !== target.id);
         selectedKey = null;
-        notice = `${target.name} 세션을 보관했습니다. 대화 로그는 유지됩니다.`;
+        notice = terminating ? `${target.name} Claude CLI를 종료했습니다. 대화 로그는 유지됩니다.` : `${target.name} 세션을 보관했습니다. 대화 로그는 유지됩니다.`;
       } catch (error) {
         warnings = [{ provider: target.provider, message: error.message }];
       } finally {

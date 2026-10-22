@@ -184,7 +184,7 @@ version 1 Codex 전환 설정은 읽을 때 provider 설정으로 변환되며, 
 | `Alt+D` | local-llm-router를 거치지 않는 provider 기본값 새 세션 (편집 중 `Alt+D`로 전환) |
 | `Alt+S` | 새 세션 Claude·Codex 실행 설정 |
 | `Alt+Y` | 새 Codex 세션 실행 모드 기본값 / YOLO 전환 |
-| `Alt+X` 두 번 | 세션 보관 |
+| `Alt+X` 두 번 | 세션 종료·보관 (대화 로그 보존) |
 | `Alt+Q` | Waga 종료 |
 | `PgUp` / `PgDn` | 오른쪽 선택 응답만 페이지 단위로 스크롤 |
 
@@ -204,7 +204,8 @@ Claude `←`나 Codex `/agents`로 내부 이동해도, dock에서 다시 선택
 - **이름 변경:** Codex는 즉시, Waga에서 만든 훅 지원 Claude 세션은 다음 프롬프트 때
   한 번 반영합니다. 훅 없는 Claude 세션은 로컬 별칭이며 저장 안내로 구분합니다.
 - **보관:** 대화 로그는 남깁니다. Codex는 archived sessions로 옮기고,
-  Claude는 BG job과 관리 worktree를 정리합니다. 대화형 CLI는 원래 화면에서 종료합니다.
+  Claude BG는 job과 관리 worktree를 정리합니다. Waga가 만든 Claude CLI는 종료하고
+  연결된 창을 모두 닫습니다. 새 CLI는 `/exit`로 종료해도 창을 남기지 않습니다.
 
 새 Claude는 tmux의 분리된 터미널에서 일반 `claude`로 실행합니다. tmux가 필요하며,
 `Alt+S` → Claude 실행 방식 → BG를 고르면 기존 `claude --bg`도 계속 사용할 수 있습니다.
