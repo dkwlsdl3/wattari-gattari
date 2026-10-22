@@ -7,7 +7,7 @@ function runCommand(args) {
   const result = spawnSync(args[0], args.slice(1), { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 10_000 });
   return {
     ok: result.status === 0, spawned: !result.error,
-    detail: (result.stdout || result.stderr || result.error?.message || "not found").trim(), stdout: result.stdout,
+    detail: ([result.stdout, result.stderr].filter(Boolean).join('\n') || result.error?.message || "not found").trim(), stdout: result.stdout,
   };
 }
 
@@ -29,9 +29,12 @@ export function defaultDoctorProbes({ command = runCommand } = {}) {
     },
     codexDaemon: async () => {
       const result = command(["codex", "app-server", "daemon", "version"]);
-      // A stopped daemon reports itself only by exiting non-zero on the control socket,
-      // so a failed run that still reached the CLI is "stopped", not a broken install.
-      if (!result.ok) return result.spawned ? { ok: true, detail: "stopped" } : result;
+      // Measured control-socket absence is a normal stopped daemon. Preserve all
+      // other failures, including permissions and unsupported CLI commands.
+      if (!result.ok) return result.spawned
+        && /Error: failed to connect to [^\r\n]*app-server-control\.sock/.test(result.detail)
+        && /(?:No such file or directory \(os error 2\)|Connection refused \(os error 111\))/.test(result.detail)
+        ? { ok: true, detail: "stopped" } : result;
       try {
         const daemon = parseDaemonVersion(result.stdout);
         return { ok: ["running", "stopped"].includes(daemon.status), detail: `${daemon.status}${daemon.socketPath ? ` at ${daemon.socketPath}` : ""}` };

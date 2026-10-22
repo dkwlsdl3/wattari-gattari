@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from 'node:fs';
 
 import { defaultDoctorProbes, runDoctor } from "../src/doctor.mjs";
 
@@ -40,9 +41,8 @@ test("doctor reports missing tmux without failing required checks", async () => 
 });
 
 test("doctor reads a stopped Codex daemon as stopped and a missing CLI as broken", async () => {
-  // codex exits non-zero with a connect error while the daemon is down; only a failed
-  // spawn means the CLI itself is absent.
-  const stopped = defaultDoctorProbes({ command: () => ({ ok: false, spawned: true, detail: "Error: failed to connect" }) });
+  const detail = fs.readFileSync(new URL('./fixtures/codex-daemon-stopped.txt', import.meta.url), 'utf8');
+  const stopped = defaultDoctorProbes({ command: () => ({ ok: false, spawned: true, detail }) });
   assert.deepEqual(await stopped.codexDaemon(), { ok: true, detail: "stopped" });
   const absent = defaultDoctorProbes({ command: () => ({ ok: false, spawned: false, detail: "not found" }) });
   assert.equal((await absent.codexDaemon()).ok, false);
@@ -51,3 +51,10 @@ test("doctor reads a stopped Codex daemon as stopped and a missing CLI as broken
   });
   assert.deepEqual(await running.codexDaemon(), { ok: true, detail: "running at /tmp/codex.sock" });
 });
+
+for (const detail of ['Permission denied connecting to daemon socket', 'error: unrecognized subcommand daemon', 'Error: failed to connect to /tmp/app-server-control.sock\nPermission denied (os error 13)']) {
+  test(`doctor preserves a real CLI failure: ${detail.split('\n')[0]}`, async () => {
+    const probes = defaultDoctorProbes({ command: () => ({ ok: false, spawned: true, detail }) });
+    assert.deepEqual(await probes.codexDaemon(), { ok: false, spawned: true, detail });
+  });
+}
