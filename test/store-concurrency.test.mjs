@@ -19,7 +19,7 @@ withFileLock(${JSON.stringify(file)},()=>{process.send('locked');Atomics.wait(ne
   const store = new DockOrderStore(file);
   store.saveWorkspace('/work/recovered', ['codex:recovered']);
   assert.deepEqual([...store.load()], [['/work/recovered', ['codex:recovered']]]);
-  assert.deepEqual(fs.readdirSync(root), ['state.json']);
+  assert.deepEqual(fs.readdirSync(root), ['state.json', 'state.json.lock']);
 });
 
 test('a failed store update releases its lock so a corrected file can be saved', t => {
@@ -30,7 +30,18 @@ test('a failed store update releases its lock so a corrected file can be saved',
   assert.throws(() => store.saveWorkspace('/work/retry', ['codex:proof']), { code: 'DOCK_ORDER_INVALID' });
   fs.unlinkSync(file); store.saveWorkspace('/work/retry', ['codex:proof']);
   assert.equal(store.load().size, 1);
-  assert.deepEqual(fs.readdirSync(root), ['state.json']);
+  assert.deepEqual(fs.readdirSync(root), ['state.json', 'state.json.lock']);
+});
+
+test('abandoned recovery files from an interrupted writer do not block later saves', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'waga-proof-store-recovery-')), file = path.join(root, 'state.json');
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // The former PID-based recovery could leave both files after SIGKILL.
+  fs.writeFileSync(`${file}.lock`, '2147483647');
+  fs.writeFileSync(`${file}.lock.recover`, '2147483647');
+  const store = new DockOrderStore(file);
+  store.saveWorkspace('/work/recovered', ['codex:proof']);
+  assert.deepEqual([...store.load()], [['/work/recovered', ['codex:proof']]]);
 });
 
 for (const [module, name, operation, initial, count] of [

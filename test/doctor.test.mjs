@@ -7,9 +7,9 @@ import { defaultDoctorProbes, runDoctor } from "../src/doctor.mjs";
 test("doctor reports each native boundary", async () => {
   let text = "";
   const ok = async () => ({ ok: true, detail: "ready" });
-  const result = await runDoctor({ output: { write(chunk) { text += chunk; } }, probes: { node: ok, tmux: ok, codexCli: ok, claudeCli: ok, codexAgents: ok, codexDaemon: ok, claudeAgents: ok } });
+  const result = await runDoctor({ output: { write(chunk) { text += chunk; } }, probes: { node: ok, flock: ok, tmux: ok, codexCli: ok, claudeCli: ok, codexAgents: ok, codexDaemon: ok, claudeAgents: ok } });
   assert.equal(result.exitCode, 0);
-  assert.equal(result.checks.length, 7);
+  assert.ok(result.checks.some(check => check.name === 'flock' && check.required));
   assert.match(text, /tmux \(optional\)/);
   assert.match(text, /Codex daemon/);
   assert.match(text, /Claude peer registry/);
@@ -19,13 +19,12 @@ test("doctor continues after required probes fail or throw", async () => {
   const ok = async () => ({ ok: true, detail: "ok" });
   let last = false;
   const result = await runDoctor({ output: { write() {} }, probes: {
-    node: ok, tmux: ok, codexCli: async () => { throw new Error("missing executable"); }, claudeCli: ok,
+    node: ok, flock: ok, tmux: ok, codexCli: async () => { throw new Error("missing executable"); }, claudeCli: ok,
     codexAgents: ok, codexDaemon: async () => ({ ok: false }), claudeAgents: async () => { last = true; return { ok: true }; },
   } });
   assert.equal(result.exitCode, 1);
-  assert.equal(result.checks.length, 7);
-  assert.equal(result.checks[2].detail, "missing executable");
-  assert.equal(result.checks[5].detail, "no detail");
+  assert.equal(result.checks.find(check => check.name === 'Codex CLI').detail, "missing executable");
+  assert.equal(result.checks.find(check => check.name === 'Codex daemon').detail, "no detail");
   assert.equal(last, true);
 });
 
@@ -34,7 +33,7 @@ test("doctor reports missing tmux without failing required checks", async () => 
   const missing = async () => ({ ok: false, detail: "not found" });
   const result = await runDoctor({
     output: { write() {} },
-    probes: { node: ok, tmux: missing, codexCli: ok, claudeCli: ok, codexAgents: ok, codexDaemon: ok, claudeAgents: ok },
+    probes: { node: ok, flock: ok, tmux: missing, codexCli: ok, claudeCli: ok, codexAgents: ok, codexDaemon: ok, claudeAgents: ok },
   });
   assert.equal(result.exitCode, 0);
   assert.equal(result.checks.find((check) => check.name.startsWith("tmux")).required, false);

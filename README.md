@@ -20,7 +20,7 @@ from one local dock or browser workspace. Native providers own session execution
 
 ## Requirements and install
 
-- Linux and Node.js 22+
+- Linux, Node.js 22+, and `flock` (util-linux) for concurrent local storage
 - Codex CLI and Claude Code with Agents support
 - Optional: tmux for reusable and shared terminal views
 

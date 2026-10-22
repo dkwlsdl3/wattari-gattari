@@ -14,6 +14,7 @@ function runCommand(args) {
 export function defaultDoctorProbes({ command = runCommand } = {}) {
   return {
     node: async () => ({ ok: Number(process.versions.node.split(".")[0]) >= 22, detail: process.version }),
+    flock: async () => command(["flock", "--version"]),
     tmux: async () => command(["tmux", "-V"]),
     codexCli: async () => command(["codex", "--version"]),
     claudeCli: async () => command(["claude", "--version"]),
@@ -44,7 +45,7 @@ export function defaultDoctorProbes({ command = runCommand } = {}) {
 }
 
 const CHECKS = [
-  ["Node", "node"], ["tmux (optional)", "tmux", false], ["Codex CLI", "codexCli"], ["Claude CLI", "claudeCli"],
+  ["Node", "node"], ["flock", "flock"], ["tmux (optional)", "tmux", false], ["Codex CLI", "codexCli"], ["Claude CLI", "claudeCli"],
   ["Codex Agents", "codexAgents"], ["Codex daemon", "codexDaemon"], ["Claude peer registry", "claudeAgents"],
 ];
 

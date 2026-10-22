@@ -15,11 +15,12 @@ for (const kind of ["order", "alias"]) {
     const save = (name) => kind === "order" ? store.saveWorkspace("/work", [name]) : store.set("claude:id", name);
     save("before");
     const original = fs.readFileSync(file, "utf8");
+    const filesBefore = fs.readdirSync(root);
     const failure = Object.assign(new Error("disk full"), { code: "ENOSPC" });
     t.mock.method(fs, "renameSync", () => { throw failure; });
     assert.throws(() => save("after"), (error) => error === failure);
     assert.equal(fs.readFileSync(file, "utf8"), original);
-    assert.deepEqual(fs.readdirSync(root), ["state.json"]);
+    assert.deepEqual(fs.readdirSync(root), filesBefore);
     assert.equal(fs.statSync(file).mode & 0o777, 0o600);
   });
 

@@ -20,7 +20,7 @@ Wattari Gattari(`waga`)는 Claude Code와 Codex의 활성 세션을 한 dock에�
 
 ## 요구 사항과 설치
 
-- Linux, Node.js 22 이상
+- Linux, Node.js 22 이상, 로컬 저장의 동시 갱신에 사용하는 `flock`(util-linux)
 - Agents 기능을 지원하는 Codex CLI와 Claude Code
 - 선택 사항: 화면 재사용과 공유를 위한 tmux
 
