@@ -1192,6 +1192,13 @@ export async function runOverview({
           force, knownNativeIds: allSessions.filter((session) => session.provider === "codex").map((session) => session.nativeId),
         });
       })
+      .then((result) => {
+        if (closed) return;
+        if (result?.signal && result.signal !== 'SIGINT' || result?.code && !result.signal) {
+          throw Error(`네이티브 CLI 종료: ${result.signal ?? `exit ${result.code}`}`);
+        }
+        notice = result?.code !== undefined ? `${target.name} 세션 연결을 해제했습니다.` : '';
+      })
       .catch((error) => {
         notice = `${target.name} F4 접속 실패: ${error.message}`;
         warnings = [{ provider: target.provider, message: `F4 접속 실패: ${error.message}` }];

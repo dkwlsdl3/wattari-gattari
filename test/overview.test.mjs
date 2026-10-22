@@ -844,6 +844,25 @@ test("F4 reports a permission failure before opening the native view", async () 
   assert.equal(await running, 0);
 });
 
+for (const code of [0, 23]) {
+  test(`overview reports a direct native exit ${code} instead of leaving a connecting notice`, async () => {
+    const input = ttyInput(), output = capturedOutput();
+    const running = runOverview({
+      bridge: { async discover() { return { sessions: [sessions[0]], warnings: [] }; } },
+      workspace: { async focusOrOpen() { return { code, signal: null }; }, async leave() { return { closeOverview: true }; } },
+      commandFor: async () => ({ command: 'codex', args: [], cwd: '/tmp' }),
+      defaultCwd: '/work/api', inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false,
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    input.emit('keypress', '', { name: 'down' }); input.emit('keypress', '', { name: 'f4' });
+    await waitFor(() => /종료|연결을 해제/.test(plain(output.writes.at(-1))));
+    const frame = plain(output.writes.at(-1));
+    if (code) assert.match(frame, /23/); else assert.doesNotMatch(frame, /접속 실패/);
+    assert.doesNotMatch(frame, /다시 연결하는 중/);
+    pressAlt(input, 'q'); assert.equal(await running, 0);
+  });
+}
+
 test("overview discovery is global unless a cwd filter is explicit", async () => {
   for (const [filterCwd, expected] of [[null, { includeUsage: true }], ["/tmp/project", { cwd: "/tmp/project", includeUsage: true }]]) {
     const input = Object.assign(new EventEmitter(), {

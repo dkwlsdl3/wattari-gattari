@@ -31,7 +31,8 @@ test("direct dock composes the overview with native detach guidance", async () =
   assert.equal(seen.workspace, workspace);
   assert.equal(seen.orderStore, orderStore);
   assert.equal(seen.settingsStore, settingsStore);
-  assert.match(seen.nativeHint, /Claude Ctrl\+Z/);
+  assert.match(seen.nativeHint, /Claude CLI.*prefix\+d/);
+  assert.match(seen.nativeHint, /BG.*Ctrl\+Z/);
   assert.match(seen.nativeHint, /Codex Ctrl\+D/);
 });
 

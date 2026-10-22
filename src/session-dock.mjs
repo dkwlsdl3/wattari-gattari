@@ -24,7 +24,7 @@ export async function enterDirectDock({
     errorOutput,
     orderStore,
     settingsStore,
-    nativeHint: "복귀: Claude Ctrl+Z   Codex Ctrl+D",
+    nativeHint: "복귀: Claude CLI prefix+d · BG Ctrl+Z · Codex Ctrl+D",
   });
   return { code, mode: "direct" };
 }
