@@ -19,6 +19,19 @@ import { ClaudeInteractive, interactiveUnavailable } from "./claude-interactive.
 const execFileAsync = promisify(execFile);
 const SHORT_ID = /^[0-9a-f]{8}$/i;
 const USAGE_CACHE_MS = 5 * 60_000;
+// Claude's peer identity is the real process PID, shared by all provider instances.
+let peerQueue = Promise.resolve();
+async function acquirePeer(deadline, now) {
+  const previous = peerQueue;
+  let release;
+  const turn = new Promise(resolve => { release = resolve; });
+  peerQueue = previous.then(() => turn);
+  try {
+    await readBeforeDeadline(() => previous, { deadline, now,
+      error: Object.assign(Error('Claude local peer queue timed out; message was not sent'), { code: 'TARGET_BUSY_TIMEOUT' }) });
+    return release;
+  } catch (error) { release(); throw error; }
+}
 
 async function defaultRun(args, { cwd, signal } = {}) {
   return execFileAsync("claude", args, { cwd, signal, encoding: "utf8", maxBuffer: 4 * 1024 * 1024, timeout: 30_000 });
@@ -219,11 +232,13 @@ export class ClaudeProvider {
     return { target: session.id, renamed: true, name: renamed, nameSync: "local" };
   }
 
-  async send(session, message, { requestId, onProgress = () => {} }) {
+  async send(session, message, { requestId, waitTimeoutMs = 30 * 60_000, onProgress = () => {} }) {
     if (!session.socketPath) throw Object.assign(new Error("Claude session has no native messaging socket"), { code: "TARGET_UNAVAILABLE" });
     const envelope = buildPeerEnvelope({ message, requestId, expectsReply: false });
-    const endpoint = this.#endpointFactory({ homeDirectory: this.#home, cwd: process.cwd() });
+    const release = await acquirePeer(this.#now() + waitTimeoutMs, this.#now);
+    let endpoint;
     try {
+      endpoint = this.#endpointFactory({ homeDirectory: this.#home, cwd: process.cwd() });
       await endpoint.start({ socketDirectory: path.dirname(session.socketPath) });
       onProgress({ state: "submitting", delivery: "unknown" });
       const messageId = await endpoint.send(session.socketPath, envelope);
@@ -232,7 +247,7 @@ export class ClaudeProvider {
       onProgress({ state: disposition.state, delivery: disposition.state, messageId });
       return { target: session.id, requestId, messageId, delivery: disposition.state };
     } finally {
-      await endpoint.stop();
+      try { await endpoint?.stop(); } finally { release(); }
     }
   }
 
@@ -240,15 +255,18 @@ export class ClaudeProvider {
     const fallbackTimeout = timeoutMs ?? 180_000;
     // Peer priority "next" queues natively even while Claude is working.
     const identityTimeout = waitTimeoutMs ?? fallbackTimeout;
+    const identityDeadline = this.#now() + identityTimeout;
     const identityError = Object.assign(new Error("Claude target lookup timed out; message was not sent"), { code: "TARGET_BUSY_TIMEOUT" });
-    const sessions = await readBeforeDeadline(signal => this.list({ cwd: session.projectCwd, signal }), {
-      deadline: this.#now() + identityTimeout, now: this.#now, error: identityError,
-    });
-    const current = sessions.find(candidate => candidate.id === session.id && candidate.sessionId === session.sessionId);
-    if (!current?.socketPath) throw Object.assign(new Error("Claude session has no native messaging socket"), { code: "TARGET_UNAVAILABLE" });
-    if (!current || !["idle", "working", "needs-input", "done"].includes(current.status)) throw Object.assign(new Error(`Claude target is unavailable: ${session.id}`), { code: "TARGET_UNAVAILABLE" });
-    const endpoint = this.#endpointFactory({ homeDirectory: this.#home, cwd: process.cwd() });
+    const release = await acquirePeer(identityDeadline, this.#now);
+    let endpoint;
     try {
+      const sessions = await readBeforeDeadline(signal => this.list({ cwd: session.projectCwd, signal }), {
+        deadline: identityDeadline, now: this.#now, error: identityError,
+      });
+      const current = sessions.find(candidate => candidate.id === session.id && candidate.sessionId === session.sessionId);
+      if (!current?.socketPath) throw Object.assign(new Error("Claude session has no native messaging socket"), { code: "TARGET_UNAVAILABLE" });
+      if (!["idle", "working", "needs-input", "done"].includes(current.status)) throw Object.assign(new Error(`Claude target is unavailable: ${session.id}`), { code: "TARGET_UNAVAILABLE" });
+      endpoint = this.#endpointFactory({ homeDirectory: this.#home, cwd: process.cwd() });
       await endpoint.start({ socketDirectory: path.dirname(current.socketPath) });
       const start = await claudeReplyOffset(current, this.#home);
       const since = Date.now();
@@ -272,7 +290,7 @@ export class ClaudeProvider {
       onProgress({ state: "replied", target: session.id, delivery: "accepted" });
       return { target: session.id, requestId, messageId, reply: reply.text, exchangeCount: 1, autoForwarded: false };
     } finally {
-      await endpoint.stop();
+      try { await endpoint?.stop(); } finally { release(); }
     }
   }
 

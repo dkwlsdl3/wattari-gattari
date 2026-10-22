@@ -12,6 +12,44 @@ function listen(server, socketPath) {
   return new Promise((resolve, reject) => { server.once("error", reject); server.listen(socketPath, resolve); });
 }
 
+test('independent Claude providers serialize the real PID endpoint without losing either send', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'waga-proof-peer-concurrent-'));
+  const targetPath = path.join(root, 'target.sock'), messages = [];
+  const target = net.createServer(socket => {
+    let data = ''; socket.setEncoding('utf8'); socket.on('data', chunk => { data += chunk; });
+    socket.on('end', () => messages.push(JSON.parse(data.trim()).message.content));
+  });
+  t.after(async () => { await new Promise(resolve => target.close(resolve)); fs.rmSync(root, { recursive: true, force: true }); });
+  await listen(target, targetPath);
+  const providers = [new ClaudeProvider({ homeDirectory: root }), new ClaudeProvider({ homeDirectory: root })];
+  const results = await Promise.allSettled(providers.map((provider, i) => provider.send({ id: `claude:proof-${i}`, socketPath: targetPath }, `message-${i}`, { requestId: `request-${i}` })));
+  assert.ok(results.every(result => result.status === 'fulfilled' && result.value.delivery === 'submitted'), JSON.stringify(results));
+  assert.equal(messages.length, 2); assert.match(messages[0], /message-0/); assert.match(messages[1], /message-1/);
+  assert.equal(fs.existsSync(path.join(root, `${process.pid}.sock`)), false);
+});
+
+test('a queued peer deadline sends nothing and does not release the active endpoint early', async () => {
+  let releaseFirst, submitted, factories = 0;
+  const hold = new Promise(resolve => { releaseFirst = resolve; });
+  const started = new Promise(resolve => { submitted = resolve; });
+  const provider = new ClaudeProvider({ endpointFactory: () => {
+    const index = ++factories;
+    return { async start() {}, async send() { return 'message'; },
+      async waitForDisposition() { if (index === 1) { submitted(); await hold; } return { state: 'accepted' }; }, async stop() {} };
+  } });
+  const target = { id: 'claude:proof', socketPath: '/tmp/waga-proof/target.sock' };
+  const first = provider.send(target, 'first', { requestId: 'first' });
+  await started;
+  try {
+    await assert.rejects(provider.send(target, 'expired', { requestId: 'expired', waitTimeoutMs: 5 }), { code: 'TARGET_BUSY_TIMEOUT' });
+    assert.equal(factories, 1);
+    const last = provider.send(target, 'last', { requestId: 'last' });
+    await new Promise(resolve => setImmediate(resolve)); assert.equal(factories, 1);
+    releaseFirst(); await first; assert.equal((await last).delivery, 'accepted');
+    assert.equal(factories, 2);
+  } finally { releaseFirst(); await first; }
+});
+
 test("peer stop closes idle inbound sockets and cancels outstanding waits", { timeout: 1500 }, async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-peer-stop-"));
   const endpoint = new ClaudePeerEndpoint({ homeDirectory: root });
