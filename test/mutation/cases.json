@@ -12,7 +12,7 @@
       {"id":"keep-old-preview-request","file":"src/session-preview.mjs","from":"this.#running?.abort();\n    }","to":";\n    }"},
       {"id":"read-foreign-claude-preview","file":"src/session-preview.mjs","from":"row.sessionId !== session.sessionId || ","to":""},
       {"id":"overwrite-latest-preview-answer","file":"src/providers/codex.mjs","from":"item?.type === \"agentMessage\" && !result.output","to":"item?.type === \"agentMessage\""},
-      {"id":"start-daemon-for-preview","file":"src/providers/codex.mjs","from":"const daemon = await this.daemonInfo();","to":"const daemon = await this.daemonInfo({ start: true });"}
+      {"id":"start-daemon-for-preview","file":"src/providers/codex.mjs","from":"// Unlike session operations, preview must never start a stopped daemon.\n    signal?.throwIfAborted();\n    const daemon = await this.daemonInfo();","to":"// Unlike session operations, preview must never start a stopped daemon.\n    signal?.throwIfAborted();\n    const daemon = await this.daemonInfo({ start: true });"}
     ]
   },
   "title": {
@@ -32,7 +32,7 @@
     "tests": ["test/codex-provider.test.mjs", "test/codex-app-server.test.mjs", "test/claude-peer.test.mjs", "test/claude-provider.test.mjs", "test/claude-usage.test.mjs", "test/provider-waiting.test.mjs"],
     "mutations": [
       {"id":"await-usage-before-list","file":"src/providers/codex.mjs","from":"if (includeUsage) void this.#refreshUsage();","to":"if (includeUsage) await this.#refreshUsage();"},
-      {"id":"reject-mixed-claude-agents","file":"src/providers/claude.mjs","from":"if (Array.isArray(rows)) rows = rows.filter((row) => row?.kind !== \"interactive\");","to":";"},
+      {"id":"reject-interactive-claude-agents","file":"src/providers/claude.mjs","from":"|| (row.kind !== \"interactive\" && !SHORT_ID.test(row.id))","to":"|| !SHORT_ID.test(row.id)"},
       {"id":"ignore-next-page","file":"src/providers/codex.mjs","from":"cursor = page.nextCursor;","to":"cursor = null;"},
       {"id":"ignore-approval-flag","file":"src/providers/codex.mjs","from":"[\"waitingOnApproval\", \"waitingOnUserInput\"].includes(flag)","to":"false"},
       {"id":"send-to-unloaded-thread","file":"src/providers/codex.mjs","from":"if (![\"active\", \"idle\"].includes(thread.status?.type))","to":"if (false)"},
@@ -41,8 +41,8 @@
       {"id":"accept-partial-snapshot","file":"src/providers/codex.mjs","from":"if (failed) throw failed.reason;","to":"if (false) throw failed.reason;"},
       {"id":"wrong-answer-turn","file":"src/providers/codex.mjs","from":"entry.turnId === turnId && entry.item?.type","to":"entry.item?.type"},
       {"id":"wrong-completion-turn","file":"src/providers/codex.mjs","from":"candidate.id === turnId","to":"true"},
-      {"id":"skip-initialize","file":"src/providers/codex.mjs","from":"await client.initialize();","to":";"},
-      {"id":"skip-client-close","file":"src/providers/codex.mjs","from":"return await operation(client);\n    } finally {\n      await client.close();","to":"return await operation(client);\n    } finally {\n      ;"},
+      {"id":"skip-initialize","file":"src/providers/codex.mjs","from":"await client.initialize();\n      return await operation(client, daemon);","to":";\n      return await operation(client, daemon);"},
+      {"id":"skip-client-close","file":"src/providers/codex.mjs","from":"return await operation(client, daemon);\n    } finally {\n      await client.close();","to":"return await operation(client, daemon);\n    } finally {\n      ;"},
       {"id":"keep-child-sessions","file":"src/providers/codex.mjs","from":"!thread.ephemeral && !thread.parentThreadId","to":"!thread.ephemeral"},
       {"id":"allow-late-rpc","file":"src/codex-app-server.mjs","from":"}, timeoutMs);","to":"}, 60000);"},
       {"id":"ignore-async-send-error","file":"src/codex-app-server.mjs","from":"if (error) this.#failAll(error);","to":"if (false) this.#failAll(error);"},
@@ -83,7 +83,7 @@
     ]
   },
   "cli": {
-    "tests": ["test/cli-options.test.mjs", "test/cli.test.mjs", "test/doctor.test.mjs", "test/event-log.test.mjs"],
+    "tests": ["test/cli-options.test.mjs", "test/cli.test.mjs", "test/doctor.test.mjs", "test/event-log.test.mjs", "test/local-router-client.test.mjs"],
     "mutations": [
       {"id":"accept-timeout-overflow","file":"src/cli-options.mjs","from":"if (!Number.isSafeInteger(milliseconds))","to":"if (false)"},
       {"id":"allow-negative-timeout","file":"src/cli-options.mjs","from":"!Number.isFinite(seconds) || seconds <= 0","to":"!Number.isFinite(seconds)"},
@@ -94,7 +94,8 @@
       {"id":"overwrite-log-provenance","file":"src/event-log.mjs","from":"{ ...details, timestamp, pid: this.#processId, event }","to":"{ timestamp, pid: this.#processId, event, ...details }"},
       {"id":"follow-log-symlink","file":"src/event-log.mjs","from":" | fs.constants.O_NOFOLLOW","to":""},
       {"id":"leak-log-descriptor","file":"src/event-log.mjs","from":"fs.closeSync(descriptor);","to":";"},
-      {"id":"discard-log-lines","file":"src/event-log.mjs","from":"fs.writeFileSync(descriptor, line);","to":";"}
+      {"id":"discard-log-lines","file":"src/event-log.mjs","from":"fs.writeFileSync(descriptor, line);","to":";"},
+      {"id":"router-cli-empty-stdout","file":"src/local-router-template/src/cli.mjs","from":"output.write(`${JSON.stringify(routing)}\\n`);","to":"output.write(\"{}\\n\");"}
     ]
   },
   "overview": {

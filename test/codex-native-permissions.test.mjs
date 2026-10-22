@@ -35,18 +35,7 @@ function rolloutFor(home, threadId) {
   throw new Error(`native rollout not found for ${threadId}`);
 }
 
-function stopTemporaryDaemon(home) {
-  for (const entry of fs.readdirSync("/proc")) {
-    if (!/^\d+$/.test(entry)) continue;
-    let command;
-    try { command = fs.readFileSync(`/proc/${entry}/cmdline`, "utf8").replaceAll("\0", " "); } catch { continue; }
-    if (command.startsWith(`${home}/packages/app-server-daemon/`) && command.includes(" pid-update-loop")) {
-      process.kill(Number(entry), "SIGTERM");
-    }
-  }
-}
-
-// Opt in: this proof needs installed Codex 0.156.0, tmux, and credentials for two real turns.
+// Opt in: needs the installed Codex CLI, tmux, and credentials for real turns.
 test("one F4 after a managed TUI reattach applies verified permissions before the first turn", {
   skip: process.env.WAGA_CODEX_NATIVE_PROOF !== "1",
   timeout: 120_000,
@@ -72,13 +61,14 @@ test("one F4 after a managed TUI reattach applies verified permissions before th
   try {
     await codex(["app-server", "daemon", "start"]);
     const version = JSON.parse((await codex(["app-server", "daemon", "version"])).stdout);
-    assert.equal(version.appServerVersion, "0.156.0");
+    assert.equal(version.appServerVersion, version.cliVersion, 'the isolated daemon must run the installed CLI version');
     const completed = new Map();
     client = await CodexAppServerClient.connectUnixWebSocket({ socketPath: version.socketPath, onNotification({ method, params }) {
       if (method === "turn/completed") completed.get(params.turn.id)?.(params.turn);
     } });
     await client.initialize();
     const { thread } = await client.request("thread/start", { cwd, approvalPolicy: "on-request", permissions: ":workspace" });
+    await client.request("thread/name/set", { threadId: thread.id, name: 'waga-proof-permissions' });
     const session = { id: `codex:${thread.id}`, provider: "codex", nativeId: thread.id, cwd, name: "waga-proof-permissions" };
     const first = await client.request("turn/start", { threadId: thread.id, input: [{ type: "text", text: "Reply OK.", textElements: [] }] });
     const initial = new Promise((resolve, reject) => {
@@ -170,7 +160,10 @@ test("one F4 after a managed TUI reattach applies verified permissions before th
     if (server) await new Promise((resolve) => server.close(resolve));
     if (tmuxStarted) await tmux(["kill-server"]);
     await client?.close();
-    stopTemporaryDaemon(home);
+    // The packaged PID updater can outlive `daemon stop`; target only this proof's private installation.
+    await execFileAsync("pkill", ["-f", "--", `${home}/packages/app-server-daemon/`]).catch(error => {
+      if (error.code !== 1) throw error;
+    });
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

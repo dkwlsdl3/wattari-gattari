@@ -137,6 +137,21 @@ test("missing router project is copied, while a nonempty directory is never over
   assert.equal(await fs.readFile(path.join(occupied, "keep.txt"), "utf8"), "keep");
 });
 
+test("bootstrapped router CLI stdout is accepted by the real Waga client for both providers", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'waga-proof-router-cli-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const dir = path.join(root, 'router');
+  const client = new LocalRouterClient({ dir });
+  for (const provider of ['codex', 'claude']) {
+    const routing = await client.route({ provider, prompt: 'hello', cwd: root });
+    assert.equal(routing.contractVersion, 1);
+    assert.equal(routing.provider, provider);
+    assert.equal(routing.cwd, root);
+    assert.ok(routing.model.length > 0);
+    assert.deepEqual(routing.issues, []);
+  }
+});
+
 test("router forwards actual CLI progress before completion with the extended judge budget", async () => {
   const { PassThrough } = await import("node:stream");
   const { runRouter } = await import("../src/local-router-client.mjs");
