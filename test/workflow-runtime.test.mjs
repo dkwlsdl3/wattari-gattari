@@ -3,7 +3,8 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
 import { promisify } from "node:util";
 import test from "node:test";
 import { RunStore, validateRun } from "../src/run-store.mjs";
@@ -31,6 +32,66 @@ async function fixture(t, spec = manifest) {
   return { root, repo, file, store, workStore, session, web, options: { url: web.url, root: path.join(root, "runtime"), intervalMs: 20, output: { write() {} } } };
 }
 const capacity = () => ({ at: Date.now(), availableGiB: 20, cpuPercent: 10 });
+for (const recovery of ['unchanged', 'changed', 'legacy']) {
+  test(`durable completed checks after coordinator SIGKILL: ${recovery} workspace`, async t => {
+    const f = await fixture(t, { ...manifest, nodes: [manifest.nodes[0]] });
+    const bin = path.join(f.root, 'bin'), marker = path.join(f.root, 'calls');
+    await fs.mkdir(bin);
+    await fs.writeFile(path.join(bin, 'claude.mjs'), `#!${process.execPath}\nimport fs from 'node:fs';
+const args=process.argv.slice(2),review=args.includes('--json-schema');
+fs.appendFileSync(${JSON.stringify(marker)},'call\\n');
+if(!review)fs.writeFileSync('a.mjs','export default 2;\\n');
+console.log(JSON.stringify({session_id:args[args.indexOf('--session-id')+1],result:'fixture',...(review?{structured_output:{verdict:'pass',reason:'independent fixture inspection'}}:{})}));`, { mode: 0o700 });
+    await fs.symlink('claude.mjs', path.join(bin, 'claude'));
+    const coordinator = path.join(f.root, 'coordinator.mjs');
+    await fs.writeFile(coordinator, `import {runWorkflow} from ${JSON.stringify(new URL('../src/workflow-runtime.mjs', import.meta.url).href)}; await runWorkflow(${JSON.stringify(f.file)},{...${JSON.stringify({ ...f.options, output: undefined, intervalMs: 1000 })},sample:()=>({availableGiB:20,cpuPercent:0})});`);
+    const child = spawn(process.execPath, [coordinator], { env: { ...process.env, PATH: bin + path.delimiter + process.env.PATH }, stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = ''; child.stderr.on('data', chunk => { stderr += chunk; });
+    const exited = once(child, 'exit');
+    t.after(async () => { if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL'); await exited; });
+    let saved, jobs, completed = false;
+    for (let i = 0; i < 4500; i++) {
+      const row = f.store.list(f.repo)[0];
+      if (row) {
+        saved = f.store.read(row.id); jobs = path.join(f.options.root, row.id, 'jobs');
+        try { await fs.access(path.join(jobs, 'a-1-review.json.result')); completed = true; break; } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      }
+      assert.equal(child.exitCode, null, stderr); assert.equal(child.signalCode, null, stderr);
+      await wait(10);
+    }
+    assert.ok(completed, `durable reviewer did not finish: ${stderr}`);
+    child.kill('SIGKILL'); await exited;
+    saved = f.store.read(saved.id); assert.equal(saved.nodes[0].attempts.length, 0);
+    if (recovery === 'changed') await fs.writeFile(path.join(saved.nodes[0].workspace, 'a.mjs'), 'export default 999;\n');
+    if (recovery === 'legacy') {
+      const file = path.join(jobs, 'a-1-check.json'), job = JSON.parse(await fs.readFile(file, 'utf8'));
+      delete job.targetFingerprint; await fs.writeFile(file, JSON.stringify(job));
+    }
+    if (recovery === 'unchanged') {
+      const resumed = await runWorkflow(f.file, { ...f.options, resume: saved.id, sample: capacity });
+      assert.equal(resumed.state, 'review_required'); assert.equal(resumed.nodes[0].attempts[0].passed, true);
+    } else {
+      await assert.rejects(runWorkflow(f.file, { ...f.options, resume: saved.id, sample: capacity }), /재계획/);
+      const stopped = f.store.read(saved.id);
+      assert.equal(stopped.state, 'needs-replan'); assert.equal(stopped.nodes[0].state, 'stale');
+      assert.equal(stopped.nodes[0].attempts.length, 0);
+    }
+    assert.equal(await fs.readFile(marker, 'utf8'), 'call\ncall\n');
+  });
+}
+
+test('resuming an uncertain final attempt never submits another worker', async t => {
+  const f = await fixture(t, { ...manifest, maxAttempts: 1, nodes: [manifest.nodes[0]] });
+  let calls = 0;
+  const processRunner = async () => { calls++; return { exitCode: null, stdout: '', stderr: 'uncertain delivery' }; };
+  const first = await runWorkflow(f.file, { ...f.options, sample: capacity, processRunner });
+  assert.equal(first.nodes[0].attempts.length, 1);
+  assert.equal(first.nodes[0].state, 'interrupted');
+  const resumed = await runWorkflow(f.file, { ...f.options, resume: first.id, sample: capacity, processRunner });
+  assert.equal(calls, 1); assert.equal(resumed.state, 'needs-replan');
+  assert.equal(resumed.nodes[0].state, 'needs-replan'); assert.equal(resumed.nodes[0].attempts.length, 1);
+});
+
 test('missing project dependencies stop before any model call instead of entering a repair loop', async t => {
   const f=await fixture(t),native=fakeAgents();
   await fs.writeFile(path.join(f.repo,'package.json'),JSON.stringify({dependencies:{'proof-missing':'1.0.0'}}));

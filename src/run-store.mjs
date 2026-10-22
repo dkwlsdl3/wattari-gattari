@@ -153,7 +153,8 @@ export class RunStore {
       if (!node || ['passed','skipped'].includes(node.state) || !dependencies.length || !dependencies.every(other => ['passed','skipped'].includes(other.state)) || !dependencies.some(other => other.state === 'skipped') || dependenciesReady(node, row.nodes)) throw fail(409, '선행 경로 제외로 실행하지 않는 단계만 건너뛸 수 있습니다.');
       node.state = 'skipped'; node.blockedReason = '선행 경로가 선택되지 않아 실행하지 않았습니다.';
     } else if (input.type === "phase") {
-      if (!node || ['passed','skipped'].includes(node.state) || !["waiting-resource", "paused", "working", "checking", "verifying", "interrupted"].includes(input.state)) throw fail(409, "작업 상태를 바꿀 수 없습니다.");
+      if (!node || ['passed','skipped'].includes(node.state) || !["waiting-resource", "paused", "working", "checking", "verifying", "interrupted", "needs-replan"].includes(input.state)) throw fail(409, "작업 상태를 바꿀 수 없습니다.");
+      if (input.state === 'needs-replan' && node.attempts.length < row.maxAttempts && node.stalls < 2) throw fail(409, '수정 한도에 도달한 작업만 재계획으로 전환합니다.');
       if (['working','checking','verifying'].includes(input.state) && (!dependenciesReady(node, row.nodes) || node.when && !node.decision?.selected)) throw fail(409, '선행 검사·분기 선택을 확인한 뒤 실행해야 합니다.');
       node.state = input.state; if (input.workspace) node.workspace = text(input.workspace, 2000);
     } else if (input.type === "session") {

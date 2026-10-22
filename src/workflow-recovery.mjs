@@ -17,15 +17,16 @@ export async function acquireLock(file) {
     } finally { await guard.close(); await fs.rm(`${file}.recover`, { force: true }); }
   }
 }
-export async function durableProcess(file, argv, { cwd, env = {}, reserveGiB = 6, maxCpuPercent = 80, poolDirectory = path.join(path.dirname(file), "slots"), monitor = async () => {}, intervalMs = 1000, timeoutMs = 180000 } = {}) {
+export async function durableProcess(file, argv, { cwd, env = {}, targetFingerprint, reserveGiB = 6, maxCpuPercent = 80, poolDirectory = path.join(path.dirname(file), "slots"), monitor = async () => {}, intervalMs = 1000, timeoutMs = 180000 } = {}) {
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   let job = await readJson(file);
   if (!job) {
-    job = { argv, cwd, env, reserveGiB, maxCpuPercent, poolDirectory, timeoutMs, preparedAt: Date.now() };
+    job = { argv, cwd, env, targetFingerprint, reserveGiB, maxCpuPercent, poolDirectory, timeoutMs, preparedAt: Date.now() };
     await fs.writeFile(file, JSON.stringify(job), { mode: 0o600, flag: 'wx' });
     const child = spawn(process.execPath, [new URL('./workflow-job.mjs', import.meta.url).pathname, file], { detached: true, stdio: 'ignore' }); child.unref();
     await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
   } else if (job.cwd !== cwd || JSON.stringify(job.argv) !== JSON.stringify(argv)) throw Error('저장된 실행 요청과 재개 요청이 다릅니다. 자동 재전송하지 않습니다.');
+  if (targetFingerprint !== undefined && job.targetFingerprint !== targetFingerprint) throw Object.assign(Error('저장된 검사·검토의 대상 지문이 없거나 변경됐습니다. 재계획이 필요합니다.'), { code: 'STALE_EVIDENCE' });
   for (;;) {
     const result = await readJson(`${file}.result`); if (result) return result;
     const owner = await readJson(`${file}.owner`);

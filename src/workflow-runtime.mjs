@@ -128,7 +128,15 @@ export async function runWorkflow(manifestFile, { url = process.env.WAGA_WEB_URL
   }
   async function execute(node, phase, argv, options) {
     const file = path.join(home, 'jobs', `${node.id}-${node.attempts.length + 1}-${phase}.json`);
-    if (processRunner === guardedProcess) return durableProcess(file, (await readJson(file))?.argv ?? argv, { ...options, reserveGiB: run.resources.reserveGiB, maxCpuPercent: run.resources.maxCpuPercent, poolDirectory: path.join(root, "slots") });
+    if (processRunner === guardedProcess) {
+      const targetFingerprint = phase === 'worker' ? undefined : (await workspaceEvidence({ ...node, workspace: options.cwd })).fingerprint;
+      try {
+        return await durableProcess(file, (await readJson(file))?.argv ?? argv, { ...options, targetFingerprint, reserveGiB: run.resources.reserveGiB, maxCpuPercent: run.resources.maxCpuPercent, poolDirectory: path.join(root, "slots") });
+      } catch (error) {
+        if (error.code === 'STALE_EVIDENCE') await event({ type: 'invalidate', nodes: [node.id] });
+        throw error;
+      }
+    }
     return processRunner(argv, options);
   }
   const telemetry = { CLAUDE_CODE_ENABLE_TELEMETRY: "1", CLAUDE_CODE_ENHANCED_TELEMETRY_BETA: "1", OTEL_TRACES_EXPORTER: "otlp", OTEL_LOGS_EXPORTER: "none", OTEL_METRICS_EXPORTER: "none", OTEL_EXPORTER_OTLP_TRACES_PROTOCOL: "http/json", OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `${credential.origin}/api/runs/${run.id}/traces`, OTEL_EXPORTER_OTLP_TRACES_HEADERS: `Authorization=Bearer ${credential.secret}`, OTEL_TRACES_EXPORT_INTERVAL: "1000", OTEL_LOG_TOOL_DETAILS: run.includeContent ? "1" : "0", OTEL_LOG_TOOL_CONTENT: run.includeContent ? "1" : "0", CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS: "1" };
@@ -178,6 +186,10 @@ export async function runWorkflow(manifestFile, { url = process.env.WAGA_WEB_URL
       await event({ type: "phase", nodeId: node.id, state: "working", workspace });
       while (run.nodes.find(row => row.id === node.id).state !== "passed") {
         const current = run.nodes.find(row => row.id === node.id); if (current.state === "needs-replan") break;
+        if (current.attempts.length >= run.maxAttempts || current.stalls >= 2) {
+          await event({ type: 'phase', nodeId: node.id, state: 'needs-replan' });
+          break;
+        }
         await gate(node.id);
         await prepareDependencies(source, workspace);
         const before = await git(workspace, ["diff", "--binary", "HEAD"]);
