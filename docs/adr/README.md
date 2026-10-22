@@ -73,7 +73,8 @@ loopback `127.0.0.1`만 지원하며 일반 CLI 실행마다 새 비밀 접속 �
 최초 지시 때 입력 화면이 없으면 같은 retained 이름으로 하나만 생성하고 이후 dock과 공유합니다.
 기존·종료된·대상이 변경된 화면은 웹에서 재시작하거나 교체하지 않습니다.
 
-Claude는 실제 frontend 자식 프로세스의 명령·인수를, Codex는 실제 thread-id 제목과
+Claude BG는 실제 frontend 자식 프로세스의 명령·인수를, 대화형 CLI는 retained host의
+직접 자식과 native 목록 PID의 일치를, Codex는 실제 thread-id 제목과
 입력 화면을 공급자별 기존 identity 검사로 확인한 뒤 tmux `send-keys`로 입력합니다.
 입력 화면의 PID·pane ID·Waga identity가 변경되거나 대상을 확인할 수 없으면 전송을 거부합니다.
 웹 종료는 화면 감시만 해제하며 네이티브 프런트엔드와 백그라운드 세션을 유지합니다.
@@ -255,9 +256,16 @@ assistant text 또는 원래 socket으로 보내는 SendMessage 본문에 있는
 
 ## Provider 경계
 
-- Claude: `claude agents --json`, native peer Unix socket, `claude --bg`,
-  `claude attach`, `claude rm`을 사용합니다.
-  JSON 목록에 섞인 `interactive` 항목은 제외하고 attach 가능한 background 세션만 연결합니다.
+- Claude: `claude agents --json`의 background·interactive 항목을 모두 발견합니다.
+  CLI는 전체 UUID를 identity로 사용하며 peer socket이 없어도 목록에서 숨기지 않습니다.
+  native 목록 등록 전의 시작 승인 화면은 Waga retained marker와 실제 자식 PID에서 발견해
+  입력 대기로 표시합니다. native 행이 나타나면 해당 상태·이름·peer socket 정보를 우선합니다.
+  messaging은 현재 PID·UUID와 연결된 native peer Unix socket이 있을 때만 허용합니다.
+  새 세션 기본값은 tmux의 분리된 retained 터미널에서 일반 `claude --session-id <uuid>`를
+  실행하는 대화형 CLI입니다. 실행 설정의 BG 선택은 기존 `claude --bg`, `claude attach`,
+  `claude rm` 경로를 유지합니다. 외부 CLI는 발견·기록 조회만 하며 원래 터미널의 화면을
+  탈취하거나 resume으로 복제하지 않습니다. Desktop 전체 발견은 보장하지 않습니다.
+  tmux가 없으면 대화형 생성은 실패하고, BG로 자동 전환하지 않습니다.
 - Claude 생성 시 실행별 `--settings`에 제목 훅을 추가합니다. 시작 훅은 기능을 등록하고,
   `UserPromptSubmit`은 UUID별 이름 변경 요청을 한 번 전달합니다. 전달 전에는 대기 이름,
   전달 후에는 native 목록 이름을 표시합니다. 전달은 적용 확인이 아니므로 실패 시 F2로
@@ -340,13 +348,16 @@ provider가 소유합니다. 사용법과 단축키는 [README](../../README.ko.
   기존 사용자 tmux server와 Codex 실행 환경에는 추가하지 않습니다.
 - Claude 창은 선택 시 Linux `/proc`의 frontend 명령이 요청한 `attach`와 일치하는지 확인합니다.
   native Agents View로 이동했거나 식별할 수 없으면 해당 창만 재접속합니다. 주기적 감시는 없습니다.
+  이 교체 규칙은 BG attach에만 적용합니다. 대화형 CLI는 Waga marker·전체 UUID·실제 자식
+  PID를 확인한 원래 프로세스만 연결합니다. F4도 같은 프로세스를 유지하며, 종료·대상 불일치 시
+  재실행하지 않습니다. 발견 목록에서 일시 누락되어도 대화형 창을 정리하지 않습니다.
 - Codex 창은 실행별 `tui.terminal_title=["thread-id"]`와 선택 시 화면 상단 두 줄로 식별합니다.
   0.153.2의 UUID 29자+`...` 제목은 알려진 목록과 접두사 충돌 시 확인 불가로 취급합니다. 제목은 재사용
   힌트일 뿐 메시지 대상은 항상 전체 ID입니다. 전역 설정과 transcript는 수정하지 않습니다.
   화면은 같은 세션·다른 세션·확인 불가로 구분합니다. 조회가 성공하고 `Agent command center`나
   다른 세션 ID가 확인된 경우 재접속합니다. 제목 미확정·조회 실패·빈 응답에서는 살아 있는
   화면을 유지해 진행 중인 복원을 끊지 않습니다. 필요하면 F4로 명시적으로 재접속합니다.
-- 종료된 창과 강제 재접속은 선택한 세션의 `attach`/`resume`으로 frontend를 교체합니다.
+- 종료된 BG·Codex 창과 강제 재접속은 선택한 세션의 `attach`/`resume`으로 frontend를 교체합니다.
 - 격리 tmux server의 `Alt+A`는 세션 window와 분리된 provider Agents View를 열고,
   `Alt+G`는 Dock으로 돌아갑니다.
 - Waga session에만 mouse mode를 적용합니다. provider가 휠을 처리하면 전달하고,
@@ -356,6 +367,10 @@ provider가 소유합니다. 사용법과 단축키는 [README](../../README.ko.
 
 tmux는 화면 배치와 전환만 소유합니다. provider daemon, 세션, transcript와 작업은
 Waga dock 또는 tmux window의 수명과 독립적입니다.
+대화형 Claude는 retained tmux pane 자체에서 실행하므로 그 pane을 종료하면 CLI도 종료됩니다.
+단순 client·WezTerm·dock 종료는 retained pane을 유지합니다. Claude 자체의 사용량 한도 대기는
+프로세스 안에 남으며 Waga는 대기 타이머나 자동 재시작 정책을 소유하지 않습니다.
+전원 종료·재부팅·로그아웃 복구는 다루지 않습니다.
 
 진단 이벤트는 세션 ID·loaded 목록 변화·tmux 창 조작·화면 식별 결과와 조회 종료 코드·native TUI 종료 결과만 기록하며
 프롬프트와 transcript는 제외합니다. 30일 보관용 logrotate·timer 설정은 [integrations](../../integrations/)에 둡니다.

@@ -13,7 +13,8 @@ import { defaultClaudeAliasPath, SessionAliasCatalog } from "../session-alias-ca
 import { ClaudePeerEndpoint } from "./claude-peer.mjs";
 import { claudeReplyOffset, readClaudeReply, readClaudeReceipt, waitForClaudeReply } from "./claude-reply.mjs";
 import { ClaudePreviewReader, readClaudeHistory, watchClaudeHistory } from "../session-preview.mjs";
-import { applyClaudeExecutionSettings } from "../provider-execution.mjs";
+import { applyClaudeExecutionSettings, normalizeProviderExecutionSettings } from "../provider-execution.mjs";
+import { ClaudeInteractive, interactiveUnavailable } from "./claude-interactive.mjs";
 
 const execFileAsync = promisify(execFile);
 const SHORT_ID = /^[0-9a-f]{8}$/i;
@@ -45,9 +46,9 @@ export function parseClaudeAgents(stdout) {
   try { rows = JSON.parse(stdout); } catch (cause) {
     throw Object.assign(new Error("Claude agents did not return valid JSON", { cause }), { code: "CLAUDE_AGENTS_INVALID" });
   }
-  // `agents --json` also lists interactive terminals; only background jobs support attach/rm.
-  if (Array.isArray(rows)) rows = rows.filter((row) => row?.kind !== "interactive");
-  if (!Array.isArray(rows) || rows.some((row) => !row || !SHORT_ID.test(row.id) || typeof row.sessionId !== "string" || typeof row.cwd !== "string")) {
+  if (!Array.isArray(rows) || rows.some((row) => !row
+    || (row.kind !== undefined && !["interactive", "background"].includes(row.kind))
+    || (row.kind !== "interactive" && !SHORT_ID.test(row.id)) || typeof row.sessionId !== "string" || typeof row.cwd !== "string")) {
     throw Object.assign(new Error("Claude agents JSON does not match the expected session array"), { code: "CLAUDE_AGENTS_INVALID" });
   }
   return rows;
@@ -84,8 +85,10 @@ export class ClaudeProvider {
   #usageCache = null;
   #usageRefresh = null;
   #previewReader = new ClaudePreviewReader();
+  #interactive;
 
-  constructor({ homeDirectory = os.homedir(), run = defaultRun, endpointFactory, aliasCatalog = null, titleSync = null, now = Date.now, usageReader = null, usageCacheMs = USAGE_CACHE_MS } = {}) {
+  constructor({ homeDirectory = os.homedir(), run = defaultRun, interactive = new ClaudeInteractive(), endpointFactory, aliasCatalog = null, titleSync = null, now = Date.now, usageReader = null, usageCacheMs = USAGE_CACHE_MS } = {}) {
+    this.#interactive = interactive;
     this.#home = homeDirectory;
     this.#run = run;
     this.#endpointFactory = endpointFactory ?? ((options) => new ClaudePeerEndpoint(options));
@@ -107,16 +110,22 @@ export class ClaudeProvider {
     for (const row of parseClaudeAgents(stdout)) {
       if (!processAlive(row.pid)) continue;
       let registry;
-      try { registry = JSON.parse(fs.readFileSync(path.join(this.#home, ".claude", "sessions", `${row.pid}.json`), "utf8")); } catch { continue; }
-      if (registry.pid !== row.pid || registry.sessionId !== row.sessionId || registry.peerProtocol !== 1) continue;
-      if (typeof registry.messagingSocketPath !== "string" || !path.isAbsolute(registry.messagingSocketPath)) continue;
-      try { if (!fs.lstatSync(registry.messagingSocketPath).isSocket()) continue; } catch { continue; }
+      try { registry = JSON.parse(fs.readFileSync(path.join(this.#home, ".claude", "sessions", `${row.pid}.json`), "utf8")); } catch { registry = {}; }
+      if (registry?.pid !== row.pid || registry.sessionId !== row.sessionId) registry = {};
+      if (registry.entrypoint === "waga-bridge") continue;
+      let socketPath;
+      if (registry.pid === row.pid && registry.sessionId === row.sessionId && registry.peerProtocol === 1
+        && typeof registry.messagingSocketPath === "string" && path.isAbsolute(registry.messagingSocketPath)) {
+        try { if (fs.lstatSync(registry.messagingSocketPath).isSocket()) socketPath = registry.messagingSocketPath; } catch { /* discovery does not require messaging */ }
+      }
       const sessionCwd = canonical(row.cwd);
-      const nativeName = row.name ?? registry.name ?? row.id;
+      const nativeName = row.name ?? registry.name ?? row.id ?? row.sessionId;
       const synced = this.#titleSync.display(row.sessionId, nativeName);
       sessions.push({
         id: `claude:${row.sessionId}`,
-        nativeId: row.id,
+        nativeId: row.kind === "interactive" ? row.sessionId : row.id,
+        kind: row.kind ?? "background",
+        pid: row.pid,
         sessionId: row.sessionId,
         provider: this.name,
         name: synced?.name ?? aliases.get(`claude:${row.sessionId}`) ?? nativeName,
@@ -125,8 +134,15 @@ export class ClaudeProvider {
         projectCwd: expectedCwd ?? claudeProjectCwd(sessionCwd),
         status: statusOf(row),
         updatedAt: Number(row.startedAt ?? registry.updatedAt ?? 0),
-        socketPath: registry.messagingSocketPath,
+        socketPath,
       });
+    }
+    for (const managed of await this.#interactive.list?.() ?? []) {
+      const projectCwd = claudeProjectCwd(managed.cwd);
+      if (sessions.some(session => session.id === managed.id || session.pid === managed.pid)
+        || (expectedCwd && projectCwd !== expectedCwd && canonical(managed.cwd) !== expectedCwd)) continue;
+      const synced = this.#titleSync.display(managed.sessionId, managed.name);
+      sessions.push({ ...managed, projectCwd: expectedCwd ?? projectCwd, name: synced?.name ?? aliases.get(managed.id) ?? managed.name });
     }
     return sessions;
   }
@@ -173,16 +189,19 @@ export class ClaudeProvider {
 
   async create(prompt, { cwd = process.cwd(), model, effort, executionSettings } = {}) {
     const workspace = canonical(cwd);
-    const args = ["--bg"];
+    const settings = normalizeProviderExecutionSettings("claude", executionSettings);
+    const args = settings.launchMode === "background" ? ["--bg"] : [];
     if (typeof model === "string" && model.trim()) args.push("--model", model.trim());
     if (typeof effort === "string" && effort.trim()) args.push("--effort", effort.trim());
     if (executionSettings) applyClaudeExecutionSettings(args, executionSettings);
     args.push("--settings", this.#titleSync.settings(), "--append-system-prompt", WAGA_SESSION_INSTRUCTIONS, "--", prompt);
+    if (settings.launchMode === "interactive") return this.#interactive.create(args, workspace);
     const { stdout } = await this.#run(args, { cwd: workspace });
     return { provider: this.name, nativeId: parseClaudeBackgroundId(stdout) };
   }
 
   async archive(session) {
+    if (session.kind === "interactive") throw interactiveUnavailable();
     if (!SHORT_ID.test(session.nativeId)) {
       throw Object.assign(new Error(`Claude background id is invalid: ${session.nativeId}`), { code: "CLAUDE_BACKGROUND_INVALID" });
     }
@@ -201,6 +220,7 @@ export class ClaudeProvider {
   }
 
   async send(session, message, { requestId, onProgress = () => {} }) {
+    if (!session.socketPath) throw Object.assign(new Error("Claude session has no native messaging socket"), { code: "TARGET_UNAVAILABLE" });
     const envelope = buildPeerEnvelope({ message, requestId, expectsReply: false });
     const endpoint = this.#endpointFactory({ homeDirectory: this.#home, cwd: process.cwd() });
     try {
@@ -225,6 +245,7 @@ export class ClaudeProvider {
       deadline: this.#now() + identityTimeout, now: this.#now, error: identityError,
     });
     const current = sessions.find(candidate => candidate.id === session.id && candidate.sessionId === session.sessionId);
+    if (!current?.socketPath) throw Object.assign(new Error("Claude session has no native messaging socket"), { code: "TARGET_UNAVAILABLE" });
     if (!current || !["idle", "working", "needs-input", "done"].includes(current.status)) throw Object.assign(new Error(`Claude target is unavailable: ${session.id}`), { code: "TARGET_UNAVAILABLE" });
     const endpoint = this.#endpointFactory({ homeDirectory: this.#home, cwd: process.cwd() });
     try {

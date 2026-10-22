@@ -24,6 +24,10 @@ from one local dock or browser workspace. Native providers own session execution
 - Codex CLI and Claude Code with Agents support
 - Optional: tmux for reusable and shared terminal views
 
+New Claude sessions require tmux by default: Waga starts a normal interactive
+`claude` in a detached retained terminal. `Alt+S` → Claude launch mode → BG
+keeps the previous `claude --bg` path available, including without tmux.
+
 Run `waga doctor` to check the connection environment after provider upgrades.
 
 ```bash
@@ -139,7 +143,7 @@ sessions. Use `Tab` to switch providers, `↑` / `↓` to select a row, and `Spa
 change it. Radio groups allow one choice; checkbox groups allow several. `Enter` saves,
 while `Esc` or `Alt+S` cancels.
 
-- Claude: choose a permission mode (`default`, `manual`, `acceptEdits`, `auto`,
+- Claude: choose interactive CLI (default) or BG, then a permission mode (`default`, `manual`, `acceptEdits`, `auto`,
   `dontAsk`, `plan`, `bypassPermissions`) and optional `dangerously-skip-permissions`,
   `restricted`, `bare`, `disable-slash-commands`, and `strict-mcp-config` flags.
 - Codex: choose an approval policy (`default`, `untrusted`, `on-request`, `never`,
@@ -193,9 +197,18 @@ agent window shares that window's screen and input. Closing one dock preserves t
 other docks and retained agent windows. Existing docks keep their previous behavior;
 independent views apply to newly launched docks.
 
+Claude rows distinguish CLI and BG. Waga-created CLI sessions keep the same
+process when reopened, including F4; closing a terminal or dock leaves them
+running in tmux. This preserves Claude's native usage-limit wait, when enabled
+for the subscription. Waga does not implement a retry scheduler. See
+[Claude's usage-limit waiting rules](https://code.claude.com/docs/en/interactive-mode#wait-for-a-usage-limit-to-reset).
+External CLI sessions appear in the list but their original terminal remains
+responsible for the screen. Desktop sessions appear only if exposed by
+`claude agents --json`. Reboot, logout and power-off recovery are outside scope.
+
 - Waga's isolated tmux: `Alt+G` for the dock; `Alt+A` for a separate provider Agents View
 - Inside existing tmux: prefix then `0` for the dock
-- Direct: Claude `Ctrl+Z` or Codex `Ctrl+D` to exit/detach the native view
+- Direct: Claude BG `Ctrl+Z`, Claude CLI tmux prefix then `d`, or Codex `Ctrl+D` to exit/detach the native view
 
 After internal navigation with Claude's `←` or Codex's `/agents`, selecting a
 session in the dock returns to that session. See the [ADR](docs/adr/README.md)
@@ -205,7 +218,7 @@ for view-reuse rules.
   Claude sessions created by Waga. Without the hook, Claude uses a local alias;
   the save notice distinguishes these cases.
 - **Archive:** logs are preserved. Codex moves to archived sessions; Claude cleans
-  up the background job and managed worktree.
+  up the BG job and managed worktree. End interactive Claude in its original screen.
 
 If old output overwrites a resumed Codex 0.153.4 screen, `/raw on` provides a
 workaround with simpler formatting and unchanged logs. A new TUI may need it again;

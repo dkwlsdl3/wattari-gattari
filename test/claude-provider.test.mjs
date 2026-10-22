@@ -31,7 +31,7 @@ test("Claude discovery and dock distinguish inactive tasks, input waits, complet
     fs.writeFileSync(path.join(registryDirectory, `${process.pid}.json`), JSON.stringify({
       ...row, peerProtocol: 1, messagingSocketPath: socketPath,
     }));
-    const provider = new ClaudeProvider({ homeDirectory: root, run: async () => ({ stdout: JSON.stringify([row]) }) });
+    const provider = new ClaudeProvider({ interactive: { list: async () => [] }, homeDirectory: root, run: async () => ({ stdout: JSON.stringify([row]) }) });
     const sessions = await provider.list();
     assert.equal(sessions.length, 1);
     assert.equal(sessions[0].status, expected[index], row.name);
@@ -47,7 +47,7 @@ test("Claude discovery and dock distinguish inactive tasks, input waits, complet
 
 test("Claude completed sessions remain eligible for a new peer query", async () => {
   let sent = 0;
-  const provider = new ClaudeProvider({ endpointFactory: () => ({
+  const provider = new ClaudeProvider({ interactive: { list: async () => [] }, endpointFactory: () => ({
     async start() {}, async send() { sent++; return "message-1"; },
     async waitForDisposition() { return { state: "accepted" }; },
     async waitForReply() { return { text: "OK" }; }, async stop() {},
@@ -60,8 +60,8 @@ test("Claude completed sessions remain eligible for a new peer query", async () 
 });
 
 test("mixed native agents output preserves background sessions when an interactive row has no id", () => {
-  assert.deepEqual(parseClaudeAgents(JSON.stringify(mixedAgents)), mixedAgents.slice(0, 2));
-  assert.deepEqual(parseClaudeAgents(JSON.stringify([mixedAgents[2]])), []);
+  assert.deepEqual(parseClaudeAgents(JSON.stringify(mixedAgents)), mixedAgents);
+  assert.deepEqual(parseClaudeAgents(JSON.stringify([mixedAgents[2]])), [mixedAgents[2]]);
   for (const row of [null, {}, { ...mixedAgents[0], id: undefined }, { ...mixedAgents[2], kind: "unknown" }]) {
     assert.throws(() => parseClaudeAgents(JSON.stringify([mixedAgents[0], row])), { code: "CLAUDE_AGENTS_INVALID" });
   }
@@ -69,6 +69,26 @@ test("mixed native agents output preserves background sessions when an interacti
 
 test("Claude agents parser rejects drifted output", () => {
   assert.throws(() => parseClaudeAgents("{}"), { code: "CLAUDE_AGENTS_INVALID" });
+});
+
+test("interactive discovery uses the full native UUID without requiring a peer socket", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-interactive-list-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const row = { ...mixedAgents[2], cwd: root, pid: process.pid, status: "idle" };
+  const provider = new ClaudeProvider({ interactive: { list: async () => [] }, homeDirectory: root, run: async () => ({ stdout: JSON.stringify([row]) }) });
+  const [session] = await provider.list();
+  assert.equal(session.id, `claude:${row.sessionId}`);
+  assert.equal(session.nativeId, row.sessionId);
+  assert.equal(session.kind, "interactive");
+  assert.equal(session.socketPath, undefined);
+  await assert.rejects(provider.send(session, "hello", { requestId: "proof" }), { code: "TARGET_UNAVAILABLE" });
+  await assert.rejects(provider.ask(session, "hello", { requestId: "proof" }), { code: "TARGET_UNAVAILABLE" });
+  const frame = buildOverviewFrame({ sessions: [session], width: 140, height: 24 }).replace(/\x1b\[[0-9;]*m/g, "");
+  assert.match(frame, /CLI · waga-proof-interactive/);
+  const directory = path.join(root, ".claude", "sessions");
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, `${process.pid}.json`), JSON.stringify({ ...row, entrypoint: "waga-bridge" }));
+  assert.deepEqual(await provider.list(), [], "ephemeral Waga peer endpoints must not become user sessions");
 });
 
 test("Claude background parser accepts the measured CLI output", () => {
@@ -85,14 +105,14 @@ test("Claude background parser accepts the measured CLI output", () => {
 
 test("Claude create starts an official background agent in the requested workspace", async () => {
   let invocation;
-  const provider = new ClaudeProvider({
+  const provider = new ClaudeProvider({ interactive: { list: async () => [] },
     titleSync: { settings: () => '{"hooks":{}}' },
     run: async (args, options) => {
       invocation = { args, options };
       return { stdout: "backgrounded · 1234abcd · task\n" };
     },
   });
-  const result = await provider.create("review this change", { cwd: "/work/project" });
+  const result = await provider.create("review this change", { cwd: "/work/project", executionSettings: { launchMode: "background" } });
   assert.deepEqual(result, { provider: "claude", nativeId: "1234abcd" });
   assert.deepEqual(invocation, {
     args: ["--bg", "--settings", '{"hooks":{}}', "--append-system-prompt", WAGA_SESSION_INSTRUCTIONS, "--", "review this change"],
@@ -102,7 +122,7 @@ test("Claude create starts an official background agent in the requested workspa
 
 test("Claude create applies the routed model and effort to the new background agent", async () => {
   let invocation;
-  const provider = new ClaudeProvider({
+  const provider = new ClaudeProvider({ interactive: { list: async () => [] },
     titleSync: { settings: () => '{"hooks":{}}' },
     run: async (args, options) => {
       invocation = { args, options };
@@ -113,6 +133,7 @@ test("Claude create applies the routed model and effort to the new background ag
     cwd: "/work/sample-app",
     model: "fable",
     effort: "high",
+    executionSettings: { launchMode: "background" },
   });
   assert.deepEqual(invocation, {
     args: ["--bg", "--model", "fable", "--effort", "high", "--settings", '{"hooks":{}}', "--append-system-prompt", WAGA_SESSION_INSTRUCTIONS, "--", "inspect the issue"],
@@ -122,7 +143,7 @@ test("Claude create applies the routed model and effort to the new background ag
 
 test("Claude create applies provider execution settings to the new background agent", async () => {
   let invocation;
-  const provider = new ClaudeProvider({
+  const provider = new ClaudeProvider({ interactive: { list: async () => [] },
     titleSync: { settings: () => '{"hooks":{}}' },
     run: async (args, options) => {
       invocation = { args, options };
@@ -132,6 +153,7 @@ test("Claude create applies provider execution settings to the new background ag
   await provider.create("run the configured task", {
     cwd: "/work/sample-app",
     executionSettings: {
+      launchMode: "background",
       permissionMode: "acceptEdits",
       options: { bare: true, strictMcpConfig: true },
     },
@@ -144,7 +166,7 @@ test("Claude create applies provider execution settings to the new background ag
 
 test("Claude archive removes only the Agents background job through the native CLI", async () => {
   let invocation;
-  const provider = new ClaudeProvider({
+  const provider = new ClaudeProvider({ interactive: { list: async () => [] },
     run: async (args, options) => {
       invocation = { args, options };
       return { stdout: "" };
@@ -164,7 +186,7 @@ test("Claude rename stores a Waga display alias", async () => {
     load() { return new Map(); },
     set(id, name) { calls.push([id, name]); },
   };
-  const provider = new ClaudeProvider({ aliasCatalog });
+  const provider = new ClaudeProvider({ interactive: { list: async () => [] }, aliasCatalog });
   const result = await provider.rename({ id: "claude:full-id" }, "  review UI  ");
   assert.deepEqual(result, { target: "claude:full-id", renamed: true, name: "review UI", nameSync: "local" });
   assert.deepEqual(calls, [["claude:full-id", "review UI"]]);
@@ -182,7 +204,7 @@ test("Claude provider joins agents JSON to the live peer registry", async (t) =>
   fs.writeFileSync(path.join(sessions, `${process.pid}.json`), JSON.stringify({ ...row, peerProtocol: 1, messagingSocketPath: socketPath }));
   const endpointCalls = [];
   const endpoint = { async start(value) { endpointCalls.push(["start", value]); }, async send(_socket, text) { endpointCalls.push(["send", text]); return "message-1"; }, async waitForDisposition() { return { state: "accepted" }; }, async waitForReply() { return { text: "OK" }; }, async stop() { endpointCalls.push(["stop"]); } };
-  const provider = new ClaudeProvider({
+  const provider = new ClaudeProvider({ interactive: { list: async () => [] },
     homeDirectory: root,
     run: async () => ({ stdout: JSON.stringify([row, mixedAgents[2]]) }),
     endpointFactory: () => endpoint,
@@ -209,7 +231,7 @@ test("Claude discovery shows pending titles then follows native names instead of
   fs.mkdirSync(path.join(root, ".claude", "sessions"), { recursive: true });
   fs.writeFileSync(path.join(root, ".claude", "sessions", `${process.pid}.json`), JSON.stringify({ ...row, peerProtocol: 1, messagingSocketPath: socketPath }));
   const titleSync = new ClaudeTitleSync(path.join(root, "sync"));
-  const provider = new ClaudeProvider({ homeDirectory: root, titleSync, aliasCatalog: { load: () => new Map([[`claude:${sessionId}`, "legacy"]]) }, run: async () => ({ stdout: JSON.stringify([row]) }) });
+  const provider = new ClaudeProvider({ interactive: { list: async () => [] }, homeDirectory: root, titleSync, aliasCatalog: { load: () => new Map([[`claude:${sessionId}`, "legacy"]]) }, run: async () => ({ stdout: JSON.stringify([row]) }) });
   assert.equal((await provider.list())[0].name, "legacy");
   titleSync.hook({ session_id: sessionId, hook_event_name: "SessionStart" });
   const ready = (await provider.list())[0];
@@ -230,7 +252,7 @@ test("Claude discovery shows pending titles then follows native names instead of
 test("Claude provider fetches optional usage at most once per cache window", async () => {
   let now = 1_000;
   let reads = 0;
-  const provider = new ClaudeProvider({
+  const provider = new ClaudeProvider({ interactive: { list: async () => [] },
     run: async () => ({ stdout: "[]" }),
     now: () => now,
     usageCacheMs: 5 * 60_000,
@@ -256,7 +278,7 @@ test("Claude provider fetches optional usage at most once per cache window", asy
 test("Claude provider shares an in-flight usage request across concurrent discovery", async () => {
   let resolveUsage;
   let reads = 0;
-  const provider = new ClaudeProvider({
+  const provider = new ClaudeProvider({ interactive: { list: async () => [] },
     run: async () => ({ stdout: "[]" }),
     usageReader: async () => {
       reads += 1;
@@ -281,7 +303,7 @@ test("Claude send checks immediate peer disposition before reporting submission"
     async waitForDisposition(id, options) { calls.push(`disposition:${id}:${options.timeoutMs}`); return { state: "submitted" }; },
     async stop() { calls.push("stop"); },
   };
-  const provider = new ClaudeProvider({ endpointFactory: () => endpoint });
+  const provider = new ClaudeProvider({ interactive: { list: async () => [] }, endpointFactory: () => endpoint });
   const result = await provider.send({ id: "claude:x", socketPath: "/private/target.sock" }, "notice", { requestId: "r" });
   assert.equal(result.delivery, "submitted");
   assert.deepEqual(calls, ["start", "send", "disposition:message-1:150", "stop"]);
@@ -301,7 +323,7 @@ test("Claude provider mirrors the active Agents view and keeps its worktrees in 
   const row = { id: "1234abcd", sessionId: "worktree-id", cwd: worktree, pid: process.pid, name: "issue", status: "idle", startedAt: 7 };
   fs.writeFileSync(path.join(sessions, `${process.pid}.json`), JSON.stringify({ ...row, peerProtocol: 1, messagingSocketPath: socketPath }));
   let invocation;
-  const provider = new ClaudeProvider({
+  const provider = new ClaudeProvider({ interactive: { list: async () => [] },
     homeDirectory: root,
     run: async (args, options) => { invocation = { args, options }; return { stdout: JSON.stringify([row]) }; },
   });
@@ -316,7 +338,7 @@ test("Claude provider mirrors the active Agents view and keeps its worktrees in 
 
 test("Claude ask queues while busy and uses the reply deadline after submission", async () => {
   const events = [];
-  const provider = new ClaudeProvider({
+  const provider = new ClaudeProvider({ interactive: { list: async () => [] },
     endpointFactory: () => ({
       async start() { events.push("start"); },
       async send() { events.push("send"); return "message-1"; },
@@ -339,7 +361,7 @@ test("Claude ask queues while busy and uses the reply deadline after submission"
 
 test("Claude held peer request fails without resending and closes the endpoint", async () => {
   let sent = 0, stopped = 0;
-  const provider = new ClaudeProvider({ endpointFactory: () => ({
+  const provider = new ClaudeProvider({ interactive: { list: async () => [] }, endpointFactory: () => ({
     async start() {}, async send() { sent++; return "message-1"; },
     async waitForDisposition() { throw Object.assign(new Error("approval required"), { code: "MESSAGE_HELD" }); },
     async stop() { stopped++; },

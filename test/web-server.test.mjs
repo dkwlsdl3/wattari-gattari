@@ -393,6 +393,27 @@ test("new sessions accept only discovered project folders and retain native defa
   await tick(); assert.equal(received.options.cwd, session.cwd); assert.deepEqual(received.options.routing, {});
 });
 
+test("web Claude creation uses the saved launch mode and exposes CLI and BG kinds", async t => {
+  const cli = { ...session, provider: "claude", kind: "interactive", id: `claude:${session.nativeId}` };
+  const bg = { ...cli, kind: "background", id: "claude:background", nativeId: "abcd1234" };
+  const received = [];
+  let launchMode = "interactive";
+  const f = await fixture(t, {
+    discover: async () => ({ sessions: [cli, bg], warnings: [] }),
+    create: async (_provider, _message, options) => { received.push(options.executionSettings); return { provider: "claude", nativeId: cli.nativeId }; },
+  }, { settingsStore: { load: () => ({ providers: { claude: { launchMode } } }) } });
+  const listed = (await (await f.get("/api/sessions")).json()).sessions;
+  assert.equal(listed.find(row => row.id === cli.id).canArchive, false);
+  assert.equal(listed.find(row => row.id === bg.id).canArchive, true);
+  assert.equal(listed.find(row => row.id === cli.id).kind, "interactive");
+  for (const mode of ["interactive", "background"]) {
+    launchMode = mode;
+    assert.equal((await f.post("/api/create", { operationId: crypto.randomUUID(), provider: "claude", message: "proof", workspace: cli.cwd })).status, 202);
+    await tick();
+    assert.equal(received.at(-1).launchMode, mode);
+  }
+});
+
 test("session execution views show only explicit native identity matches across project folders", async t => {
   const { ExecutionStore } = await import("../src/execution-store.mjs");
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "waga-proof-web-context-"));

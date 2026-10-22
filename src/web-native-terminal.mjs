@@ -45,6 +45,7 @@ export async function sharedNativeTerminal(spec, { target, observe = false, sock
   }
   let binding = await locate();
   if (!binding && observe) return null;
+  if (!binding && spec.reuseOnly) throw new Error("Claude interactive terminal is unmanaged or has exited; it cannot be restarted here.");
   if (!binding) {
     const command = shellCommand("env", ["WAGA_WAIT_FOR_VISIBLE=0", "CLAUDE_CODE_TMUX_TRUECOLOR=1",
       process.execPath, host, provider, target, "--", spec.command, ...spec.args]);

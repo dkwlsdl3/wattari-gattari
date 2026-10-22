@@ -19,6 +19,7 @@ import { ExecutionStore } from "./execution-store.mjs";
 import { WorkflowStore } from "./workflow-store.mjs";
 import { installWebTerminal } from "./web-terminal.mjs";
 import { historyStreams } from "./history-stream.mjs";
+import { WagaSettingsStore } from "./waga-settings.mjs";
 
 const ASSETS = new Map([
   ["/", ["index.html", "text/html; charset=utf-8"]],
@@ -69,12 +70,13 @@ const workspaceOf = session => path.resolve(session.projectCwd || session.cwd);
 
 function publicSession(session) {
   const { id, provider, name, cwd, status, updatedAt } = session;
-  return { id, provider, name, cwd, workspace: workspaceOf(session), status, updatedAt, canControl: true };
+  return { id, provider, name, cwd, workspace: workspaceOf(session), status, updatedAt, canControl: true,
+    ...(session.kind ? { kind: session.kind, canArchive: session.kind !== "interactive" } : {}) };
 }
 
 // Native providers own sessions and decisions; the web attaches their frontend.
 export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, port = 4317,
-  token = crypto.randomBytes(32).toString("hex"), now = Date.now, workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore(), workStore = new WorkStore(), orderStore = new DockOrderStore(), launch = launchWorkflow, running = workflowRunning, assistant = new WorkAssistant({ store: workStore }), terminalFactory } = {}) {
+  token = crypto.randomBytes(32).toString("hex"), now = Date.now, settingsStore = new WagaSettingsStore(), workflowStore = new WorkflowStore(), executionStore = new ExecutionStore(), runStore = new RunStore(), workStore = new WorkStore(), orderStore = new DockOrderStore(), launch = launchWorkflow, running = workflowRunning, assistant = new WorkAssistant({ store: workStore }), terminalFactory } = {}) {
   if (!bridge) throw new TypeError("A session bridge is required");
   const assets = new Map(await Promise.all([...ASSETS].map(async ([route, [file, type]]) =>
     [route, { type, data: await fs.readFile(file instanceof URL ? file : new URL(`./web/${file}`, import.meta.url)) }])));
@@ -456,7 +458,9 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
             cwd: filterCwd, waitTimeoutMs: 30_000, replyTimeoutMs: kind === "instruct" ? 30 * 60_000 : 180_000, onProgress: progress,
           });
           else if (kind === "create") {
-            const created = await bridge.create(input.provider, input.message, { cwd: createCwd, routing: {}, onProgress: progress });
+            const executionSettings = input.provider === "claude" ? settingsStore.load().providers.claude : undefined;
+            const created = await bridge.create(input.provider, input.message, { cwd: createCwd, routing: {}, onProgress: progress,
+              ...(executionSettings ? { executionSettings } : {}) });
             job.result = { provider: created.provider, nativeId: created.nativeId, turnId: created.turnId,
               session: created.session ? publicSession(created.session) : undefined };
             job.target = created.session?.id ?? `${created.provider}:${created.nativeId}`;

@@ -125,8 +125,9 @@ export class SessionBridge {
 
   async connection(target, { cwd } = {}) {
     const { provider, session } = await this.#resolve(target, cwd);
-    const { command, args, cwd: workspace } = await nativeSessionCommand(session, { codexProvider: provider, startDaemon: false });
-    return { command, args, cwd: workspace };
+    const spec = await nativeSessionCommand(session, { codexProvider: provider, startDaemon: false });
+    return { command: spec.command, args: spec.args, cwd: spec.cwd,
+      ...(spec.reuseOnly ? { reuseOnly: true, interactivePid: spec.interactivePid, interactiveId: spec.interactiveId } : {}) };
   }
 
   async archive(target, { cwd } = {}) {

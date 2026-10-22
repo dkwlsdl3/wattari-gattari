@@ -567,9 +567,11 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     const [symbol, status, statusColor] = statusView(session.status);
     const providerName = wide ? (session.provider === "claude" ? "CLAUDE" : "CODEX ") : (session.provider === "claude" ? "CLAUDE" : "CODEX");
     const providerColor = session.provider === "claude" ? THEME.claude : THEME.codex;
+    const displayName = session.provider === "claude" && session.kind
+      ? `${session.kind === "interactive" ? "CLI" : "BG"} · ${session.name}` : session.name;
     const row = wide
-      ? `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)}  ${fit(session.name, nameWidth)}  ${color(statusColor, fit(status, 11))}`
-      : `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)} ${fit(session.name, nameWidth)} ${color(statusColor, fit(status, 8))}`;
+      ? `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)}  ${fit(displayName, nameWidth)}  ${color(statusColor, fit(status, 11))}`
+      : `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)} ${fit(displayName, nameWidth)} ${color(statusColor, fit(status, 8))}`;
     lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
   }
   if (split) {
@@ -1050,6 +1052,11 @@ export async function runOverview({
   };
 
   const archiveSession = (target) => {
+    if (target.provider === "claude" && target.kind === "interactive") {
+      notice = "대화형 Claude는 원래 화면에서 종료하세요. Waga는 BG 세션만 보관합니다.";
+      render();
+      return;
+    }
     if (pendingArchiveId !== target.id) {
       pendingArchiveId = target.id;
       notice = target.provider === "claude"

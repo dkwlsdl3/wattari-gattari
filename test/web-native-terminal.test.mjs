@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { sharedNativeTerminal } from "../src/web-native-terminal.mjs";
 import { retainedSessionName, shellCommand } from "../src/tmux-workspace.mjs";
 import { nativeQuestion } from "../src/web/native-question.mjs";
+import { claudeInteractivePid } from "../src/providers/claude-view.mjs";
 
 const exec = promisify(execFile);
 const hasTmux = spawnSync("tmux", ["-V"], { stdio: "ignore" }).status === 0;
@@ -34,6 +35,30 @@ test("observing an unopened session creates neither a tmux server nor a provider
   const f = await fixture(t);
   assert.equal(await f.open({ observe: true }), null);
   await assert.rejects(f.call("has-session", "-t", f.retained));
+});
+
+test("interactive web input keeps the CLI and refuses to create a missing terminal", { skip: !hasTmux }, async t => {
+  const f = await fixture(t);
+  f.spec.reuseOnly = true;
+  f.spec.interactiveId = f.target;
+  await assert.rejects(f.open(), /unmanaged or has exited/);
+  await assert.rejects(f.call("has-session", "-t", f.retained));
+  const host = new URL("../src/native-session-host.mjs", import.meta.url).pathname;
+  await f.call("new-session", "-d", "-s", f.retained, "-c", f.root,
+    shellCommand(process.execPath, [host, "claude", f.target, "--", f.spec.command, ...f.spec.args]),
+    ";", "set-window-option", "-t", f.retained, "@waga_session_id", f.target);
+  await until(async () => (await f.call("capture-pane", "-p", "-t", f.retained)).includes("waga-proof-ready"));
+  const hostPid = (await f.call("display-message", "-p", "-t", f.retained, "#{pane_pid}")).trim();
+  f.spec.interactivePid = await claudeInteractivePid(hostPid);
+  assert.ok(f.spec.interactivePid);
+  const terminal = await f.open(); t.after(() => terminal.kill());
+  await terminal.write("preserve this CLI\r");
+  await until(async () => (await f.input()).includes("preserve this CLI\r"));
+  f.spec.interactivePid = process.pid;
+  await assert.rejects(terminal.write("wrong CLI\r"), /변경/);
+  assert.equal((await f.input()).includes("wrong CLI"), false);
+  terminal.kill();
+  assert.equal((await f.call("display-message", "-p", "-t", f.retained, "#{pane_pid}")).trim(), hostPid);
 });
 
 for (const provider of ["claude", "codex"]) test(`${provider}: web shares one frontend, cannot resize it, and disconnect leaves it running`, { skip: !hasTmux }, async t => {

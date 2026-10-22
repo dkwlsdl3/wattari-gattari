@@ -63,6 +63,13 @@ export async function runNativeSessionHost(args = process.argv.slice(2), {
   waitForTerminal = process.env.WAGA_WAIT_FOR_VISIBLE === "1" ? waitForVisibleTerminal : null,
 } = {}) {
   const { provider, sessionId, command, commandArgs } = parseArgs(args);
+  if (provider === "claude" && process.env.WAGA_CLAUDE_LAUNCH) {
+    const launchArgs = JSON.parse(process.env.WAGA_CLAUDE_LAUNCH);
+    delete process.env.WAGA_CLAUDE_LAUNCH;
+    if (!Array.isArray(launchArgs) || launchArgs.some(arg => typeof arg !== "string")
+      || launchArgs[0] !== "--session-id" || `claude:${launchArgs[1]}` !== sessionId) throw new Error("Invalid Claude launch identity");
+    commandArgs.push(...launchArgs);
+  }
   const context = { provider, sessionId, hostPid: processId };
   try {
     if (waitForTerminal) await waitForTerminal();

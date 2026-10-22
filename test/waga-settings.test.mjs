@@ -47,6 +47,21 @@ test("Waga settings migrate the legacy toggle and persist both provider profiles
   assert.equal(loaded.providers.codex.summary, "detailed");
 });
 
+test("old settings default to interactive Claude while an explicit BG choice survives reload", t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-launch-settings-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, "settings.json");
+  fs.writeFileSync(file, JSON.stringify({ version: 2, providers: { claude: { permissionMode: "acceptEdits" }, codex: {} } }));
+  const store = new WagaSettingsStore(file);
+  assert.equal(store.load().providers.claude.launchMode, "interactive");
+  store.setProviderExecutionSettings("claude", { ...store.load().providers.claude, launchMode: "background" });
+  const saved = new WagaSettingsStore(file).load();
+  assert.equal(saved.providers.claude.launchMode, "background");
+  assert.equal(saved.providers.claude.permissionMode, "acceptEdits");
+  assert.throws(() => store.setProviderExecutionSettings("claude", { launchMode: "invented" }));
+  assert.equal(store.load().providers.claude.launchMode, "background");
+});
+
 test("Waga settings reject corrupt state without overwriting it", (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "waga-settings-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));

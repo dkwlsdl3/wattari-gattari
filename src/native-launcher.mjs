@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 
 import { CodexProvider } from "./providers/codex.mjs";
+import { ClaudeInteractive, interactiveRetainedName } from "./providers/claude-interactive.mjs";
 
 function defaultLaunch(command, args, options) {
   return new Promise((resolve, reject) => {
@@ -24,7 +25,7 @@ export function nativeAgentsCommand(provider, { cwd = process.cwd() } = {}) {
   return { command, args, cwd: workspace };
 }
 
-export async function nativeSessionCommand(session, { codexProvider = new CodexProvider(), codexExecutionMode = "default", startDaemon = true } = {}) {
+export async function nativeSessionCommand(session, { codexProvider = new CodexProvider(), claudeInteractive = new ClaudeInteractive(), codexExecutionMode = "default", startDaemon = true } = {}) {
   if (!session || !["claude", "codex"].includes(session.provider)) {
     throw Object.assign(new Error("Native session requires a known provider"), { code: "PROVIDER_NOT_FOUND" });
   }
@@ -37,6 +38,12 @@ export async function nativeSessionCommand(session, { codexProvider = new CodexP
 
   const cwd = path.resolve(session.cwd);
   if (session.provider === "claude") {
+    if (session.kind === "interactive") {
+      await claudeInteractive.verify(session);
+      const prefix = process.env.TMUX ? [] : ["-L", `waga-${typeof process.getuid === "function" ? process.getuid() : "user"}`];
+      return { command: "tmux", args: [...prefix, "attach-session", "-t", interactiveRetainedName(session.id)], cwd,
+        reuseOnly: true, interactivePid: session.pid, interactiveId: session.id };
+    }
     return { command: "claude", args: ["attach", session.nativeId], cwd };
   }
 

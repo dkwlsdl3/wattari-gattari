@@ -305,6 +305,9 @@ test("Alt+S opens the provider settings screen and saves radio and checkbox choi
   assert.match(plain(output.writes.at(-1)), /WAGA · 실행 설정/);
   assert.match(plain(output.writes.at(-1)), /승인 권한/);
   input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", " ", { sequence: " " }); // Claude BG launch mode
+  input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", "", { name: "down" });
   input.emit("keypress", "", { name: "down" });
   input.emit("keypress", " ", { sequence: " " }); // Claude acceptEdits radio
   for (let index = 0; index < 7; index += 1) input.emit("keypress", "", { name: "down" });
@@ -316,6 +319,7 @@ test("Alt+S opens the provider settings screen and saves radio and checkbox choi
   input.emit("keypress", " ", { sequence: " " }); // Codex danger-full-access radio
   input.emit("keypress", "", { name: "return" });
   assert.equal(saved.claude.permissionMode, "acceptEdits");
+  assert.equal(saved.claude.launchMode, "background");
   assert.equal(saved.claude.options.bare, true);
   assert.equal(saved.codex.approvalPolicy, "never");
   assert.equal(saved.codex.sandbox, "danger-full-access");
@@ -326,6 +330,7 @@ test("Alt+S opens the provider settings screen and saves radio and checkbox choi
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(created.provider, "claude");
   assert.equal(created.options.executionSettings.permissionMode, "acceptEdits");
+  assert.equal(created.options.executionSettings.launchMode, "background");
   assert.equal(created.options.executionSettings.options.bare, true);
   input.emit("end");
   assert.equal(await running, 0);

@@ -7,6 +7,7 @@ const CODEX_REVIEWER_VALUES = new Set(["default", "user", "auto_review", "guardi
 const CODEX_SUMMARY_VALUES = new Set(["default", "auto", "concise", "detailed", "none"]);
 
 const CLAUDE_DEFAULTS = {
+  launchMode: "interactive",
   permissionMode: "default",
   options: {
     dangerouslySkipPermissions: false,
@@ -36,6 +37,10 @@ const CODEX_DEFAULTS = {
 
 export const PROVIDER_EXECUTION_GROUPS = Object.freeze({
   claude: Object.freeze([
+    Object.freeze({ type: "radio", field: "launchMode", title: "Claude 실행 방식", options: Object.freeze([
+      Object.freeze({ value: "interactive", label: "대화형 CLI (기본)", description: "tmux에서 유지하며 Claude의 사용량 한도 자동 재개 기능을 사용합니다." }),
+      Object.freeze({ value: "background", label: "백그라운드 (BG)", description: "Claude Agents에서 관리합니다. 사용량 한도 자동 재개는 지원하지 않습니다." }),
+    ]) }),
     Object.freeze({
       type: "radio",
       field: "permissionMode",
@@ -157,6 +162,7 @@ export function normalizeProviderExecutionSettings(provider, value = {}) {
       options: { ...CLAUDE_DEFAULTS.options, ...(value?.options && typeof value.options === "object" ? value.options : {}) },
     };
     if (!CLAUDE_PERMISSION_VALUES.has(settings.permissionMode)) throw invalid("Unknown Claude permission mode");
+    if (!["interactive", "background"].includes(settings.launchMode)) throw invalid("Unknown Claude launch mode");
     for (const key of Object.keys(CLAUDE_DEFAULTS.options)) settings.options[key] = bool(settings.options[key], CLAUDE_DEFAULTS.options[key]);
     // These CLI flags are mutually exclusive with bypass/restricted execution.
     if (settings.permissionMode === "bypassPermissions") {
@@ -232,7 +238,7 @@ export function providerExecutionSummary(provider, value) {
       ? "dangerously-skip-permissions"
       : settings.permissionMode === "default" ? "기본 승인" : settings.permissionMode;
     const options = Object.entries(settings.options).filter(([, enabled]) => enabled).map(([key]) => key);
-    return `Claude 승인: ${permission}${options.length ? ` · ${options.join(", ")}` : ""}`;
+    return `Claude ${settings.launchMode === "background" ? "BG" : "tmux interactive"} 승인: ${permission}${options.length ? ` · ${options.join(", ")}` : ""}`;
   }
   const approval = settings.approvalPolicy === "default" ? "기본 승인" : settings.approvalPolicy;
   const sandbox = settings.sandbox === "default" ? "기본 샌드박스" : settings.sandbox;

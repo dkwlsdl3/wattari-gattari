@@ -91,7 +91,7 @@ function renderSidebar() {
       line.dataset.id = row.id;
       const button = el("button", undefined, "session-choice"); button.dataset.sessionId = row.id; button.dataset.action = "select"; button.setAttribute("aria-current", String(row.id === directSessionId));
       button.title = `${row.name}
-${row.cwd}`; button.append(el("span", row.name, "session-name"), el("small", `${row.provider === "claude" ? "Claude" : "Codex"} · ${nativeStates[row.status] ?? "상태 미확인"}`, `session-state state-${row.status}`));
+${row.cwd}`; button.append(el("span", row.name, "session-name"), el("small", `${row.provider === "claude" ? `Claude${row.kind === "interactive" ? " CLI" : row.kind === "background" ? " BG" : ""}` : "Codex"} · ${nativeStates[row.status] ?? "상태 미확인"}`, `session-state state-${row.status}`));
       button.addEventListener("click", () => { void selectSession(row.id); }); line.append(button);
       list.append(line);
     });
@@ -154,7 +154,7 @@ function renderDetail() {
   const selected = session();
   renderSessionStatus();
   const pending = pendingForSession();
-  $("#connect-session").disabled = !selected; $("#rename-session").disabled = !selected; $("#archive-session").disabled = !selected || Boolean(pending) || selected.status === "working";
+  $("#connect-session").disabled = !selected; $("#rename-session").disabled = !selected; $("#archive-session").disabled = !selected || selected.canArchive === false || Boolean(pending) || selected.status === "working";
   renderConversation();
   const record = directRequests.get(directSessionId)?.at(-1), status = $("#operation-status"); status.replaceChildren();
   status.hidden = !pending && (!record || record.reply !== undefined || record.state === "created");

@@ -24,6 +24,9 @@ Wattari Gattari(`waga`)는 Claude Code와 Codex의 활성 세션을 한 dock에�
 - Agents 기능을 지원하는 Codex CLI와 Claude Code
 - 선택 사항: 화면 재사용과 공유를 위한 tmux
 
+새 Claude를 기본 대화형 방식으로 실행하려면 tmux가 필요합니다.
+tmux 없이 생성하려면 `Alt+S`에서 Claude 실행 방식을 BG로 선택합니다.
+
 provider 업데이트 뒤에는 `waga doctor`로 연결 환경을 확인하십시오.
 
 ```bash
@@ -140,7 +143,7 @@ Dock에서 `Alt+S`를 누르면 새 세션에 적용할 Claude·Codex 실행 설
 라디오 그룹은 하나만 선택되고 체크박스 그룹은 여러 항목을 선택할 수 있습니다.
 `Enter`는 저장, `Esc` 또는 `Alt+S`는 취소입니다.
 
-- Claude: 승인 권한(`default`, `manual`, `acceptEdits`, `auto`, `dontAsk`, `plan`,
+- Claude: 대화형 CLI(기본) 또는 BG 실행 방식과 승인 권한(`default`, `manual`, `acceptEdits`, `auto`, `dontAsk`, `plan`,
   `bypassPermissions`)과 `dangerously-skip-permissions`, `restricted`, `bare`,
   `disable-slash-commands`, `strict-mcp-config` 실행 옵션을 설정합니다.
 - Codex: 승인 정책(`default`, `untrusted`, `on-request`, `never`, `granular`),
@@ -193,7 +196,7 @@ version 1 Codex 전환 설정은 읽을 때 provider 설정으로 변환되며, 
 
 - Waga 격리 tmux: `Alt+G`로 dock, `Alt+A`로 별도 provider Agents View
 - 기존 tmux 안: prefix 뒤 `0`으로 dock
-- direct: Claude `Ctrl+Z`, Codex `Ctrl+D`로 native view 종료·분리
+- direct: Claude BG는 `Ctrl+Z`, Claude CLI는 tmux prefix 뒤 `d`, Codex는 `Ctrl+D`로 native view 종료·분리
 
 Claude `←`나 Codex `/agents`로 내부 이동해도, dock에서 다시 선택하면 해당 세션으로
 연결합니다. 창 재사용 판정은 [ADR](docs/adr/README.md)에 있습니다.
@@ -201,7 +204,16 @@ Claude `←`나 Codex `/agents`로 내부 이동해도, dock에서 다시 선택
 - **이름 변경:** Codex는 즉시, Waga에서 만든 훅 지원 Claude 세션은 다음 프롬프트 때
   한 번 반영합니다. 훅 없는 Claude 세션은 로컬 별칭이며 저장 안내로 구분합니다.
 - **보관:** 대화 로그는 남깁니다. Codex는 archived sessions로 옮기고,
-  Claude는 background job과 관리 worktree를 정리합니다.
+  Claude는 BG job과 관리 worktree를 정리합니다. 대화형 CLI는 원래 화면에서 종료합니다.
+
+새 Claude는 tmux의 분리된 터미널에서 일반 `claude`로 실행합니다. tmux가 필요하며,
+`Alt+S` → Claude 실행 방식 → BG를 고르면 기존 `claude --bg`도 계속 사용할 수 있습니다.
+목록에는 CLI와 BG를 구분해 표시합니다. Waga가 만든 CLI는 재접속·F4에도 같은 프로세스를
+유지하며, WezTerm이나 dock을 닫아도 tmux에서 계속 실행합니다. 이를 통해 구독과 설정이
+지원하는 Claude 자체의 사용량 한도 대기를 유지합니다. Waga가 재시도 스케줄러를 추가하지는
+않습니다. 자세한 조건은 [Claude 공식 문서](https://code.claude.com/docs/en/interactive-mode#wait-for-a-usage-limit-to-reset)를 참고하세요.
+외부 CLI도 발견하지만 화면은 원래 터미널에서 관리합니다. Desktop은
+`claude agents --json`에 노출되는 세션만 대상입니다. 전원 종료·재부팅·로그아웃 복구는 범위 밖입니다.
 
 Codex 0.153.4의 재접속 화면이 예전 출력으로 덮이면 `/raw on`으로 우회할 수 있습니다.
 서식만 단순해지고 로그는 유지됩니다. 새 TUI에서는 다시 필요할 수 있으며,

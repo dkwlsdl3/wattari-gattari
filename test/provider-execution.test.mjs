@@ -12,7 +12,7 @@ import {
 test("provider execution settings expose radio groups and independent checkboxes", () => {
   const settings = defaultProviderExecutionSettings();
   const claudeRows = providerExecutionRows("claude", settings.claude);
-  assert.equal(claudeRows.filter((row) => row.kind === "radio").length, 7);
+  assert.equal(claudeRows.filter((row) => row.kind === "radio").length, 9);
   assert.equal(claudeRows.filter((row) => row.kind === "checkbox").length, 5);
   const codexRows = providerExecutionRows("codex", settings.codex);
   assert.equal(codexRows.filter((row) => row.kind === "radio").length, 18);

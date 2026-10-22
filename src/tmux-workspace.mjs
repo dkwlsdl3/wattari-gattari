@@ -9,6 +9,7 @@ import { EventLog } from "./event-log.mjs";
 import { nativeAgentsCommand } from "./native-launcher.mjs";
 import { retainedClaudeViewMatches } from "./providers/claude-view.mjs";
 import { retainedCodexViewState } from "./providers/codex-view.mjs";
+import { interactiveUnavailable } from "./providers/claude-interactive.mjs";
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_SOCKET = `waga-${typeof process.getuid === "function" ? process.getuid() : "user"}`;
@@ -186,13 +187,21 @@ export class TmuxWorkspace {
   async focusOrOpen(session, commandSpec, { force = false, knownNativeIds = [] } = {}) {
     const sessionName = this.#env.WAGA_TMUX_SESSION || (await this.#call(["display-message", "-p", "#{session_name}"])).stdout.trim();
     if (!sessionName) throw Object.assign(new Error("Waga tmux session is unavailable"), { code: "TMUX_SESSION_UNAVAILABLE" });
-    const shared = this.#env.WAGA_TMUX_INDEPENDENT === "1";
+    const shared = commandSpec.reuseOnly || this.#env.WAGA_TMUX_INDEPENDENT === "1";
     const storageName = shared ? retainedSessionName(session.id) : sessionName;
     const listed = await this.#call(["list-windows", "-t", storageName, "-F", "#{window_id}\t#{@waga_session_id}\t#{pane_dead}"], { check: !shared });
     const existing = shared
       ? parseWindows(listed.code === 0 ? listed.stdout : "")[0]
       : parseWindows(listed.stdout).find((entry) => entry.sessionId === session.id);
     const select = (windowId) => this.#selectView(sessionName, windowId, shared);
+    if (commandSpec.reuseOnly) {
+      if (!existing || existing.paneDead || existing.sessionId !== session.id) throw interactiveUnavailable();
+      const pane = await this.#call(["display-message", "-p", "-t", existing.windowId, "#{pane_pid}"], { check: false });
+      if (pane.code !== 0 || !await this.#claudeViewMatches(pane.stdout.trim(), commandSpec)) throw interactiveUnavailable();
+      await this.#setSessionWindowName(existing.windowId, session);
+      await select(existing.windowId);
+      return { reused: true, windowId: existing.windowId };
+    }
     const stagedCodex = (session.provider ?? session.id.split(":", 1)[0]) === "codex"
       && typeof commandSpec.afterAttach === "function";
     const finish = async (windowId, launched) => {
@@ -378,13 +387,17 @@ export class TmuxWorkspace {
       const provider = separator > 0 ? sessionId.slice(0, separator) : null;
       return provider && healthy.has(provider) && !activeIds.has(sessionId);
     });
+    const closed = [];
     for (const entry of stale) {
+      const interactive = await this.#call(["show-options", "-w", "-v", "-t", entry.windowId, "@waga_interactive"], { check: false });
+      if (interactive.stdout.trim() === "1") continue;
       const details = { sessionId: entry.sessionId, windowId: entry.windowId, reason: "provider_missing_from_loaded_set" };
       this.#eventLog.record("session_view_close_requested", details);
       await this.#call(["kill-window", "-t", entry.windowId]);
       this.#eventLog.record("session_view_closed", details);
+      closed.push(entry.sessionId);
     }
-    return { closed: stale.map((entry) => entry.sessionId) };
+    return { closed };
   }
 
   async shouldRefreshOverview() {
