@@ -106,10 +106,8 @@ function labelsFrom(issue) {
 }
 
 function notesFrom(issue) {
-  const direct = issue?.notes ?? issue?.comments ?? [];
-  if (Array.isArray(direct)) return direct;
-  if (!Array.isArray(issue?.discussions)) return [];
-  return issue.discussions.flatMap((discussion) => Array.isArray(discussion?.notes) ? discussion.notes : []);
+  const notes = issue?.Notes ?? issue?.notes ?? issue?.comments;
+  return Array.isArray(notes) ? notes : [];
 }
 
 function noteBody(note) {

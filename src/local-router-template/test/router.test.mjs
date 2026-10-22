@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
+import fs from 'node:fs';
 
 import {
   DEFAULT_CONFIG,
@@ -45,6 +46,14 @@ test("normalizes title, labels, description, and non-system comments", () => {
   assert.match(issue.text, /Example recovery/);
   assert.match(issue.text, /재현 로그/);
   assert.doesNotMatch(issue.text, /label changed/);
+});
+
+test('includes user comments from measured glab JSON and excludes system activity', () => {
+  const fixture = JSON.parse(fs.readFileSync(new URL('./fixtures/glab-issue-comments.json', import.meta.url), 'utf8'));
+  const issue = normalizeIssue(fixture);
+  assert.equal(issue.commentCount, 1);
+  assert.match(issue.text, /Recovery comment from a user/);
+  assert.doesNotMatch(issue.text, /Redacted system activity/);
 });
 
 test("passes the abort signal and normalized cwd to glab issue lookup", async () => {

@@ -1,0 +1,18 @@
+{
+  "iid": 264,
+  "title": "Redacted issue title",
+  "description": "Redacted issue description",
+  "labels": [
+    "fixture"
+  ],
+  "Notes": [
+    {
+      "body": "Redacted system activity",
+      "system": true
+    },
+    {
+      "body": "Recovery comment from a user",
+      "system": false
+    }
+  ]
+}
