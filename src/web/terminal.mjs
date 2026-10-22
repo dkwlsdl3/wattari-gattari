@@ -39,7 +39,7 @@ export function initTerminal({ api, selected, onChange = () => {}, onActivity = 
     const screen = lines();
     const next = nativeQuestion(screen, session.provider);
     if (next?.signature !== question?.signature) {
-      question = next; if (next) answered = ""; panel.hidden = !next;
+      question = next; answered = ""; panel.hidden = !next;
       choices.replaceChildren();
       if (next) {
         text.textContent = next.text;
