@@ -61,6 +61,25 @@ function storeFor(t) {
 }
 function output() { return { value: '', write(text) { this.value += text; } }; }
 
+test('late send progress cannot erase a receipt recovered while the send is still completing', async t => {
+  const store = storeFor(t), target = { id: 'claude:proof', provider: 'claude' };
+  let release, submitted, requestId;
+  const waiting = new Promise(resolve => { submitted = resolve; });
+  const hold = new Promise(resolve => { release = resolve; });
+  const bridge = new SessionBridge({ requestStore: store, providers: [{ name: 'claude', list: async () => [target],
+    async send(_session, _message, { onProgress }) {
+      onProgress({ state: 'submitted', delivery: 'submitted', messageId: 'native-message' }); submitted(); await hold;
+      onProgress({ state: 'accepted', delivery: 'accepted' }); return { delivery: 'accepted' };
+    }, async result() { return { state: 'accepted', delivery: 'accepted', receipt: 'consumed' }; },
+  }] });
+  const sending = bridge.send(target.id, 'notification', { onProgress: event => { requestId = event.requestId; } });
+  await waiting;
+  try { assert.equal((await bridge.result(requestId)).receipt, 'consumed'); }
+  finally { release(); await sending; }
+  assert.equal(store.read(requestId).receipt, 'consumed');
+  assert.equal((await bridge.result(requestId)).receipt, 'consumed');
+});
+
 test('timeout preserves request identity and result never resends', async t => {
   const store = storeFor(t);
   let sends = 0;

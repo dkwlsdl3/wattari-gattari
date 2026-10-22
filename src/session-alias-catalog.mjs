@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { APP_ID } from "./product.mjs";
+import { withFileLock } from './file-lock.mjs';
 
 const VERSION = 1;
 
@@ -39,9 +40,11 @@ export class SessionAliasCatalog {
   set(sessionId, alias) {
     if (typeof sessionId !== "string" || !sessionId) throw new TypeError("Session id is required");
     if (typeof alias !== "string" || !alias.trim()) throw new TypeError("Session alias is required");
-    const document = this.#read();
-    document.aliases[sessionId] = alias.trim();
-    this.#write(document);
+    withFileLock(this.filePath, () => {
+      const document = this.#read();
+      document.aliases[sessionId] = alias.trim();
+      this.#write(document);
+    });
   }
 
   #read() {

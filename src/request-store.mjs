@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { APP_ID } from "./product.mjs";
+import { withFileLock } from './file-lock.mjs';
 
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const fail = (code, message) => Object.assign(new Error(message), { code });
@@ -88,14 +89,17 @@ export class RequestStore {
   }
 
   update(record, fields) {
-    Object.assign(record, fields, { updatedAt: Date.now() });
     const file = this.file(record.requestId);
-    const temporary = `${file}.${crypto.randomUUID()}.tmp`;
-    try {
-      fs.writeFileSync(temporary, JSON.stringify(record), { flag: "wx", mode: 0o600 });
-      fs.renameSync(temporary, file);
-    } finally { fs.rmSync(temporary, { force: true }); }
-    return record;
+    return withFileLock(file, () => {
+      const consumed = this.read(record.requestId).receipt === 'consumed';
+      Object.assign(record, fields, { updatedAt: Date.now() }, consumed ? { receipt: 'consumed' } : {});
+      const temporary = `${file}.${crypto.randomUUID()}.tmp`;
+      try {
+        fs.writeFileSync(temporary, JSON.stringify(record), { flag: "wx", mode: 0o600 });
+        fs.renameSync(temporary, file);
+      } finally { fs.rmSync(temporary, { force: true }); }
+      return record;
+    });
   }
 
   reply(id, value) {

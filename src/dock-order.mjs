@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { APP_ID } from "./product.mjs";
+import { withFileLock } from './file-lock.mjs';
 
 const VERSION = 1;
 
@@ -62,11 +63,13 @@ export class DockOrderStore {
       || new Set(sessionOrder).size !== sessionOrder.length
     ) throw new TypeError("Dock session order must contain unique session ids");
 
-    const document = this.#read();
-    const workspace = document.workspaces.find((entry) => entry.path === canonicalPath);
-    if (workspace) workspace.sessionOrder = [...sessionOrder];
-    else document.workspaces.push({ path: canonicalPath, sessionOrder: [...sessionOrder] });
-    this.#write(document);
+    withFileLock(this.filePath, () => {
+      const document = this.#read();
+      const workspace = document.workspaces.find((entry) => entry.path === canonicalPath);
+      if (workspace) workspace.sessionOrder = [...sessionOrder];
+      else document.workspaces.push({ path: canonicalPath, sessionOrder: [...sessionOrder] });
+      this.#write(document);
+    });
   }
 
   #read() {
