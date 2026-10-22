@@ -16,8 +16,8 @@ The web session list uses SortableJS 1.15.7:
 - Copyright (c) 2019 All contributors to Sortable
 - MIT License (included in the installed sortablejs package)
 
-The native web control surface uses xterm.js 6.0.0, its FitAddon 0.11.0,
-and node-pty 1.1.0:
+The native web control surface and direct Codex attachment use xterm.js 6.0.0,
+its headless package 6.0.0, FitAddon 0.11.0, and node-pty 1.1.0:
 
 - https://github.com/xtermjs/xterm.js — Copyright (c) The xterm.js authors, MIT License
 - https://github.com/microsoft/node-pty — Copyright (c) Microsoft Corporation, MIT License

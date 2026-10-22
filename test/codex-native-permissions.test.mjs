@@ -6,6 +6,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
+import pty from 'node-pty';
+import xterm from '@xterm/headless';
 
 import { CodexAppServerClient } from "../src/codex-app-server.mjs";
 import { nativeSessionCommand } from "../src/native-launcher.mjs";
@@ -36,10 +38,10 @@ function rolloutFor(home, threadId) {
 }
 
 // Opt in: needs the installed Codex CLI, tmux, and credentials for real turns.
-test("one F4 after a managed TUI reattach applies verified permissions before the first turn", {
+test("tmux and direct reconnect apply verified permissions before the first turn", {
   skip: process.env.WAGA_CODEX_NATIVE_PROOF !== "1",
-  timeout: 120_000,
-}, async () => {
+  timeout: 180_000,
+}, async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-permissions-"));
   const home = path.join(root, "codex");
   const cwd = path.join(root, "waga-proof-work");
@@ -58,13 +60,28 @@ test("one F4 after a managed TUI reattach applies verified permissions before th
   let tmuxStarted = false;
   let client;
   let server;
-  try {
+  let direct, directExit, directScreen;
+  t.after(async () => {
+    direct?.kill();
+    await directExit;
+    directScreen?.dispose();
+    if (server) await new Promise((resolve) => server.close(resolve));
+    if (tmuxStarted) await tmux(["kill-server"]);
+    await client?.close();
+    // The packaged PID updater can outlive `daemon stop`; target only this proof's private installation.
+    await execFileAsync("pkill", ["-f", "--", `${home}/packages/app-server-daemon/`]).catch(error => {
+      if (error.code !== 1) throw error;
+    });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5 });
+  });
+  {
     await codex(["app-server", "daemon", "start"]);
     const version = JSON.parse((await codex(["app-server", "daemon", "version"])).stdout);
     assert.equal(version.appServerVersion, version.cliVersion, 'the isolated daemon must run the installed CLI version');
     const completed = new Map();
+    const nativeTurns = [];
     client = await CodexAppServerClient.connectUnixWebSocket({ socketPath: version.socketPath, onNotification({ method, params }) {
-      if (method === "turn/completed") completed.get(params.turn.id)?.(params.turn);
+      if (method === "turn/completed") { nativeTurns.push(params.turn); completed.get(params.turn.id)?.(params.turn); }
     } });
     await client.initialize();
     const { thread } = await client.request("thread/start", { cwd, approvalPolicy: "on-request", permissions: ":workspace" });
@@ -156,14 +173,55 @@ test("one F4 after a managed TUI reattach applies verified permissions before th
     const newView = await workspace.focusOrOpen(session, await nativeSessionCommand(session, { codexProvider: provider, codexExecutionMode: "yolo" }));
     assert.equal(newView.reused, false);
     assert.equal((await client.request("thread/resume", { threadId: thread.id, excludeTurns: true })).sandbox.type, "dangerFullAccess");
-  } finally {
-    if (server) await new Promise((resolve) => server.close(resolve));
-    if (tmuxStarted) await tmux(["kill-server"]);
-    await client?.close();
-    // The packaged PID updater can outlive `daemon stop`; target only this proof's private installation.
-    await execFileAsync("pkill", ["-f", "--", `${home}/packages/app-server-daemon/`]).catch(error => {
-      if (error.code !== 1) throw error;
-    });
-    fs.rmSync(root, { recursive: true, force: true });
+    await tmux(["kill-session", "-t", retainedSessionName(session.id)]);
+
+    for (const mode of ['default', 'yolo']) {
+      const ready = path.join(root, `direct-${mode}-ready`);
+      const runner = path.join(root, `direct-${mode}.mjs`);
+      fs.writeFileSync(runner, `
+        import fs from 'node:fs';
+        import { DirectWorkspace } from ${JSON.stringify(new URL('../src/direct-workspace.mjs', import.meta.url).href)};
+        import { nativeSessionCommand } from ${JSON.stringify(new URL('../src/native-launcher.mjs', import.meta.url).href)};
+        const session = ${JSON.stringify(session)};
+        const spec = await nativeSessionCommand(session, { codexExecutionMode: '${mode}' });
+        const prepare = spec.afterAttach;
+        spec.afterAttach = async () => { await prepare(); fs.writeFileSync(${JSON.stringify(ready)}, 'verified'); };
+        await new DirectWorkspace({ eventLog: { record() {} } }).focusOrOpen(session, spec);
+        process.stdin.pause();`);
+      direct = pty.spawn(process.execPath, [runner], { cwd, env, name: 'xterm-256color', cols: 110, rows: 35 });
+      const frontend = direct;
+      directScreen = new xterm.Terminal({ cols: 110, rows: 35, allowProposedApi: true });
+      const screen = directScreen;
+      screen.onData(data => frontend.write(data));
+      for (const osc of [10, 11]) screen.parser.registerOscHandler(osc, body => {
+        if (body === '?') frontend.write(`\x1b]${osc};rgb:${osc === 10 ? 'ffff/ffff/ffff' : '0000/0000/0000'}\x07`);
+        return true;
+      });
+      let frame = '', exited = false;
+      direct.onData(data => { frame += data; screen.write(data); });
+      const exit = new Promise(resolve => direct.onExit(() => { exited = true; resolve(); }));
+      directExit = exit;
+      await until(() => { assert.equal(exited, false, frame); return fs.existsSync(ready); });
+      const count = nativeTurns.length;
+      const directMarker = path.join(root, 'direct-outside-workspace.txt');
+      const prompt = mode === 'default' ? 'Reply DIRECT_DEFAULT.'
+        : `Run this shell command exactly: curl --fail --silent ${url} > ${directMarker} ; then reply DIRECT_YOLO.`;
+      direct.write(`\x1b[200~${prompt}\x1b[201~`);
+      await until(() => Array.from({ length: screen.buffer.active.length }, (_, i) => screen.buffer.active.getLine(i).translateToString(true)).join('').replace(/\s/g, '').includes(prompt.replace(/\s/g, '')));
+      direct.write('\r');
+      const turn = await until(() => nativeTurns[count]);
+      assert.equal(turn.status, 'completed');
+      const entries = fs.readFileSync(rolloutFor(home, thread.id), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+      const policy = entries.find(row => row.type === 'turn_context' && row.payload?.turn_id === turn.id)?.payload;
+      assert.equal(policy?.approval_policy, mode === 'yolo' ? 'never' : 'on-request');
+      assert.equal(policy?.sandbox_policy?.type, mode === 'yolo' ? 'danger-full-access' : 'workspace-write');
+      if (mode === 'yolo') assert.equal(fs.readFileSync(directMarker, 'utf8'), 'NETWORK_OK');
+      else assert.equal(policy.sandbox_policy.network_access, false);
+      direct.write('\x04');
+      await Promise.race([exit, new Promise(resolve => setTimeout(resolve, 1000))]);
+      if (!exited) { direct.kill(); await exit; }
+      direct = null;
+      screen.dispose(); directScreen = null;
+    }
   }
 });

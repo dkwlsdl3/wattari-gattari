@@ -364,6 +364,10 @@ provider가 소유합니다. 사용법과 단축키는 [README](../../README.ko.
   아니면 tmux scrollback을 사용합니다.
 - `direct`는 현재 terminal을 네이티브 TUI에 넘긴 뒤 detach 또는 종료 시 dock을
   복원합니다. window 재사용, 공통 복귀 키와 화면 공유는 제공하지 않습니다.
+  Codex는 PTY와 xterm의 Node 구현으로 실제 스레드 제목·입력 화면을 확인하고,
+  tmux와 같은 접속 후 정책 적용·검증을 마친 뒤 사용자 입력을 전달합니다.
+  준비 중에도 실제 terminal의 커서·색상·기능 응답은 전달합니다. 접속·정책 확인 실패는
+  해당 frontend를 닫고 dock에 오류를 표시하며 owning daemon이나 스레드를 중단하지 않습니다.
 
 tmux는 화면 배치와 전환만 소유합니다. provider daemon, 세션, transcript와 작업은
 Waga dock 또는 tmux window의 수명과 독립적입니다.
