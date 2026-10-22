@@ -7,14 +7,13 @@ import { initHistoryStream } from "./history-stream.mjs";
 import { initWorks } from "./works.mjs";
 const $ = selector => document.querySelector(selector);
 const nativeStates = { idle: "대기 중", working: "작업 중", "needs-input": "입력 대기", done: "완료", error: "오류", unavailable: "연결 불가" };
-const transport = { starting: "접수 중", "waiting-local": "앞선 요청 대기", waiting: "전송 대기", submitting: "전송 중", submitted: "답변 대기", accepted: "답변 대기", "reply-received": "답변 수신", replied: "답변 수신", error: "질의 실패", created: "세션 생성됨", "not-sent": "미전송", "result-unknown": "결과 미확정" };
 let sessions = [], refreshing = false, ready = false;
 let createOperationId = "";
 let sending = false, activityTimer, streamWarning = "";
 let directSessionId = "", composerRecipient = "", previewKey = "", previewIdentity = "", warning = "";
 let browserStorage; try { browserStorage = localStorage; } catch { browserStorage = { getItem() {}, setItem() {} }; }
-const histories = new Map(), sentMessages = new Map(), drafts = new DraftStore(browserStorage);
-const operations = new Map(), directRequests = new Map();
+const histories = new Map(), drafts = new DraftStore(browserStorage);
+const operations = new Map();
 let refreshExecutions = async () => {};
 let followUpWork = null, contextWork = null;
 const works = initWorks({ api, selected: () => session(), changed: renderConversation, notice, graph: (row, runId) => { void refreshExecutions.openWork?.(row, runId).catch(error => notice(error.message)); }, handoff: row => {
@@ -124,7 +123,7 @@ const session = () => sessions.find(row => row.id === directSessionId);
 const activeKey = () => `direct:${directSessionId}`;
 const recipientKey = () => `${activeKey()}:${directSessionId || "unassigned"}`;
 function resizeComposer() { const input = $("#message"); input.style.height = "auto"; input.style.height = `${Math.min(120, Math.max(50, input.scrollHeight))}px`; }
-const pendingForSession = () => [...operations.values()].find(row => row.target && row.target === directSessionId) ?? operations.get(activeKey());
+const pendingForSession = () => operations.get(activeKey());
 function el(tag, text, className) {
   const item = document.createElement(tag); if (text !== undefined) item.textContent = text; if (className) item.className = className; return item;
 }
@@ -156,23 +155,16 @@ function renderDetail() {
   const pending = pendingForSession();
   $("#connect-session").disabled = !selected; $("#rename-session").disabled = !selected; $("#archive-session").disabled = !selected || selected.canArchive === false || Boolean(pending) || selected.status === "working";
   renderConversation();
-  const record = directRequests.get(directSessionId)?.at(-1), status = $("#operation-status"); status.replaceChildren();
-  status.hidden = !pending && (!record || record.reply !== undefined || record.state === "created");
-  if (pending) status.append(el("span", pending.kind === "create" ? "세션 생성 중…" : transport[pending.state] ?? "답변 대기 중…"));
-  else if (!status.hidden) {
-    status.append(el("span", record.error ?? "아직 답변을 확인하지 못했습니다."));
-    if (record.requestId) {
-      const recover = el("button", "답변 다시 확인"); recover.addEventListener("click", () => { void submitOperation("recover", { requestId: record.requestId, target: directSessionId }); }); status.append(recover);
-    }
-  }
+  const status = $("#operation-status");
+  status.hidden = !pending;
+  status.textContent = pending ? "세션 생성 중…" : "";
 }
 function renderConversation() {
   if ($("#conversation-workspace").hidden) return;
   const selected = session(), messages = $("#messages");
   const identity = selected ? `${selected.id}:${selected.cwd}` : activeKey();
-  const records = directRequests.get(directSessionId) ?? [];
   const history = histories.get(identity);
-  const items = [...conversationItems({ history: history?.messages ?? [], records, inputs: sentMessages, pending: pendingForSession() }).map(works.display), ...works.items()];
+  const items = [...conversationItems({ history: history?.messages ?? [] }).map(works.display), ...works.items()];
   const key = JSON.stringify([identity, history?.nextCursor, history?.loading, items, works.rows()]); if (key === previewKey) return;
   const scrollTop = messages.scrollTop;
   const changed = identity !== previewIdentity;
@@ -276,17 +268,10 @@ async function refresh() {
         notice(error.message); continue;
       }
       if (job.storageError) notice(job.storageError);
-      if (!job.workflowId) {
-        const target = job.target ?? operation.target;
-        if (job.kind === "create" && job.finished && job.target && key === activeKey()) {
-          if (job.result?.session && !sessions.some(row => row.id === job.target)) sessions.push(job.result.session);
-          directSessionId = job.target;
-          try { browserStorage.setItem("waga:selected-session", directSessionId); } catch {}
-        }
-        if (target) {
-          const records = directRequests.get(target) ?? [];
-          directRequests.set(target, [...records.filter(row => row.operationId !== job.operationId), { operationId: job.operationId, requestId: job.requestId, sessionId: target, state: job.state, reply: job.result?.reply, turnId: job.result?.turnId, error: job.error?.message, at: job.createdAt }].slice(-100));
-        }
+      if (job.finished && job.target && key === activeKey()) {
+        if (job.result?.session && !sessions.some(row => row.id === job.target)) sessions.push(job.result.session);
+        directSessionId = job.target;
+        try { browserStorage.setItem("waga:selected-session", directSessionId); } catch {}
       }
       if (job.operationId === createOperationId) {
         $("#create-error").textContent = job.error?.message ?? (job.finished ? "" : "세션 생성 중…");
@@ -314,18 +299,6 @@ async function refresh() {
     if (warning) notice(warning);
   } catch (error) { $("#connection").textContent = "갱신 실패"; notice(error.message); }
   finally { refreshing = false; }
-}
-async function submitOperation(kind, input) {
-  const key = activeKey();
-  if (pendingForSession()) return;
-  const operationId = crypto.randomUUID(); operations.set(key, { operationId, kind, target: input.target, state: "starting" });
-  if (kind === "instruct") sentMessages.set(operationId, input.message);
-  while (sentMessages.size > 100) sentMessages.delete(sentMessages.keys().next().value);
-  renderDetail();
-  try {
-    await api(kind, { ...input, operationId });
-    await refresh();
-  } catch (error) { operations.delete(key); notice(`${error.message} · 자동 재전송하지 않았습니다.`); renderDetail(); }
 }
 document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => $(`#${button.dataset.close}`).close()));
 $("#session-search").addEventListener("input", renderSidebar);
