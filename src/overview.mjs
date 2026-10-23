@@ -537,11 +537,14 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     { text: formatCodexUsage(providerUsage.codex), color: THEME.codex },
   ].filter(({ text }) => text);
   const editorHeight = newTask ? Math.min(5, String(newTask.prompt).split("\n").length) : 1;
-  const visibleRows = Math.max(1, height - (usageLabels.length ? 10 : 9) - (newTask ? editorHeight + 3 : 0));
   const safeSelected = Math.max(0, Math.min(selected, Math.max(0, nodes.length - 1)));
+  const selectedSession = nodes[safeSelected]?.session;
+  const identityLines = !newTask && !renameTask && selectedSession
+    ? wrapPreviewLines(safeText(selectedSession.id), usableWidth) : [];
+  const visibleRows = Math.max(1, height - (usageLabels.length ? 10 : 9) - identityLines.length - (newTask ? editorHeight + 3 : 0));
   const offset = Math.max(0, Math.min(safeSelected - Math.floor(visibleRows / 2), Math.max(0, nodes.length - visibleRows)));
   const wide = listWidth >= 64;
-  const nameWidth = wide ? Math.max(12, listWidth - 31) : Math.max(1, listWidth - 21);
+  const nameWidth = wide ? Math.max(12, listWidth - 31) : Math.max(1, listWidth - 22);
   const lines = [];
   const title = wide ? "WATTARI GATTARI  Claude + Codex session dock" : "WAGA · session dock";
   lines.push(`  ${color(THEME.title, fit(title, usableWidth))}`);
@@ -569,9 +572,24 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     const providerColor = session.provider === "claude" ? THEME.claude : THEME.codex;
     const displayName = session.provider === "claude" && session.kind
       ? `${session.kind === "interactive" ? "CLI" : "BG"} · ${session.name}` : session.name;
+    const nativeId = safeText(session.id).replace(`${session.provider}:`, "");
+    let prefixLength = Math.min(8, nativeId.length);
+    // Only visible rows need labels; compare canonical IDs within their provider.
+    for (const other of nameWidth >= prefixLength + 15 ? sessions : []) {
+      if (other.provider !== session.provider || other.id === session.id) continue;
+      const otherId = safeText(other.id).replace(`${other.provider}:`, "");
+      let common = 0;
+      while (common < nativeId.length && common < otherId.length && nativeId[common] === otherId[common]) common++;
+      prefixLength = Math.max(prefixLength, Math.min(nativeId.length, common + 1));
+    }
+    const label = ` [${nativeId.slice(0, prefixLength)}]`;
+    const labelWidth = widthOf(label);
+    const nameCell = nameWidth - labelWidth >= 12
+      ? `${fit(displayName, Math.min(widthOf(safeText(displayName)), nameWidth - labelWidth))}${color(THEME.muted, label)}${" ".repeat(Math.max(0, nameWidth - labelWidth - widthOf(safeText(displayName))))}`
+      : fit(displayName, nameWidth);
     const row = wide
-      ? `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)}  ${fit(displayName, nameWidth)}  ${color(statusColor, fit(status, 11))}`
-      : `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)} ${fit(displayName, nameWidth)} ${color(statusColor, fit(status, 8))}`;
+      ? `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)}  ${nameCell}  ${color(statusColor, fit(status, 11))}`
+      : `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)} ${nameCell} ${color(statusColor, fit(status, 8))}`;
     lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
   }
   if (split) {
@@ -589,7 +607,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     // width on Alt+D next to Alt+N instead.
     ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  F4 재접속  / 검색  Tab 필터", "F2 이름 변경  Alt+N 새 세션  Alt+D 기본값  Alt+Y Codex 실행  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기  PgUp/PgDn 응답"]
     : ["↑↓ 이동  Shift+↑↓ 순서  Enter 열기  Alt+Q 나가기", "F4 재접속  / 검색  Tab 필터  F2 이름  Alt+N 새 세션", "Alt+D 기본값  Alt+S 설정  Alt+Y 실행  Alt+R 갱신  Alt+X 보관"];
-  while (lines.length < height - helpLines.length - 4 - (newTask ? editorHeight + 1 : 0)) lines.push("");
+  while (lines.length < height - helpLines.length - (newTask || renameTask ? 4 : 3 + identityLines.length) - (newTask ? editorHeight + 1 : 0)) lines.push("");
   if (newTask) {
     const providerName = newTask.provider === "claude" ? "CLAUDE" : "CODEX";
     const providerSymbol = newTask.provider === "claude" ? "◆" : "■";
@@ -627,6 +645,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     lines.push(`  ${editorLine(renameTask.name, renameTask.cursor, usableWidth)}`);
     lines.push("");
   } else {
+    for (const identity of identityLines) lines.push(`  ${color(THEME.muted, identity)}`);
     if (warnings.length) lines.push(`  ${color(THEME.warning, fit(`경고: ${safeText(warnings[0].provider)} · ${safeText(warnings[0].message)}`, usableWidth))}`);
     else lines.push(`  ${color(THEME.muted, fit(notice || "세션 상태는 자동으로 새로고침됩니다.", usableWidth))}`);
     for (const help of helpLines) lines.push(`  ${color(THEME.muted, fit(help, usableWidth))}`);
