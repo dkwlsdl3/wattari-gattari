@@ -22,7 +22,8 @@ test('independent Claude providers serialize the real PID endpoint without losin
   t.after(async () => { await new Promise(resolve => target.close(resolve)); fs.rmSync(root, { recursive: true, force: true }); });
   await listen(target, targetPath);
   const providers = [new ClaudeProvider({ homeDirectory: root }), new ClaudeProvider({ homeDirectory: root })];
-  const results = await Promise.allSettled(providers.map((provider, i) => provider.send({ id: `claude:proof-${i}`, socketPath: targetPath }, `message-${i}`, { requestId: `request-${i}` })));
+  for (const [i, provider] of providers.entries()) provider.list = async () => [{ id: `claude:proof-${i}`, sessionId: `proof-${i}`, socketPath: targetPath, status: 'working' }];
+  const results = await Promise.allSettled(providers.map((provider, i) => provider.send({ id: `claude:proof-${i}`, sessionId: `proof-${i}`, socketPath: targetPath }, `message-${i}`, { requestId: `request-${i}` })));
   assert.ok(results.every(result => result.status === 'fulfilled' && result.value.delivery === 'submitted'), JSON.stringify(results));
   assert.equal(messages.length, 2); assert.match(messages[0], /message-0/); assert.match(messages[1], /message-1/);
   assert.equal(fs.existsSync(path.join(root, `${process.pid}.sock`)), false);
@@ -37,7 +38,8 @@ test('a queued peer deadline sends nothing and does not release the active endpo
     return { async start() {}, async send() { return 'message'; },
       async waitForDisposition() { if (index === 1) { submitted(); await hold; } return { state: 'accepted' }; }, async stop() {} };
   } });
-  const target = { id: 'claude:proof', socketPath: '/tmp/waga-proof/target.sock' };
+  const target = { id: 'claude:proof', sessionId: 'proof', socketPath: '/tmp/waga-proof/target.sock', status: 'working' };
+  provider.list = async () => [target];
   const first = provider.send(target, 'first', { requestId: 'first' });
   await started;
   try {
@@ -170,7 +172,8 @@ test("provider cleanup after peer identity collision preserves the existing sock
   t.after(async () => { await new Promise((resolve) => server.close(resolve)); fs.rmSync(root, { recursive: true, force: true }); });
   await listen(server, socketPath);
   const provider = new ClaudeProvider({ homeDirectory: home });
-  await assert.rejects(provider.send({ socketPath }, "do not send", { requestId: "proof" }), { code: "CLAUDE_PEER_COLLISION" });
+  provider.list = async () => [{ id: "claude:proof", sessionId: "proof", socketPath, status: "working" }];
+  await assert.rejects(provider.send({ id: "claude:proof", sessionId: "proof", socketPath }, "do not send", { requestId: "proof" }), { code: "CLAUDE_PEER_COLLISION" });
   assert.equal(fs.existsSync(socketPath), true, "existing socket must survive failed start + finally stop");
   assert.equal(fs.readFileSync(registryPath, "utf8"), original);
 });
@@ -270,4 +273,24 @@ test("failed identity write closes the descriptor and removes partially created 
   assert.equal(endpoint.socketPath, null);
   assert.equal(fs.existsSync(path.join(root, `${process.pid}.sock`)), false);
   assert.deepEqual(fs.readdirSync(path.join(root, ".claude", "sessions")), []);
+});
+
+
+test('send revalidates a queued target and never submits to an old session after native continuation', async () => {
+  let release, started, sends = 0, available = true;
+  const held = new Promise(resolve => { release = resolve; });
+  const active = new Promise(resolve => { started = resolve; });
+  const target = { id: 'claude:proof', sessionId: 'proof', socketPath: '/tmp/waga-proof/old.sock', status: 'working' };
+  const provider = new ClaudeProvider({ endpointFactory: () => ({
+    async start() {}, async send() { sends++; return 'message'; },
+    async waitForDisposition() { started(); await held; return { state: 'accepted' }; }, async stop() {},
+  }) });
+  provider.list = async () => available ? [target] : [{ ...target, id: 'claude:successor', sessionId: 'successor' }];
+  const first = provider.send(target, 'first', { requestId: 'first' });
+  await active;
+  const second = assert.rejects(provider.send(target, 'second', { requestId: 'second' }), { code: 'TARGET_UNAVAILABLE' });
+  await new Promise(resolve => setImmediate(resolve));
+  available = false; release();
+  try { await first; await second; assert.equal(sends, 1); }
+  finally { release(); }
 });

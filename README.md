@@ -268,7 +268,14 @@ from either socket or log wins, and log polling stops with the request.
 For a Claude `send`, `result` recovers and saves late receipt evidence from the exact
 native session: `receipt=queued` means native queue acceptance, and `receipt=consumed`
 means the original message was included in the conversation. Neither proves understanding,
-task completion, or approval. Codex requests keep polling their original turn within the
+task completion, or approval. If the original Claude log records a native session continuation
+before consumption is confirmed, `result` reports `result-unknown`, the successor's
+`continuedTo` ID and a warning (exit 3), preserving any queue receipt. `ask` reports
+`CLAUDE_SESSION_CONTINUED` when this occurs while waiting for an answer. Known replies
+and confirmed consumption take precedence; continuation metadata survives later log loss.
+Waga never copies the peer queue, borrows a successor's answer or automatically resends.
+A queued `send` revalidates its exact native target before submission.
+Codex requests keep polling their original turn within the
 reply deadline when its initial status is `interrupted`; persistent interruption fails
 without resubmission or following another turn.
 Requests sent by older versions have no recovery record.

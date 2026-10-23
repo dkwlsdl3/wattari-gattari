@@ -11,7 +11,7 @@ import { ClaudeTitleSync } from "../claude-title-sync.mjs";
 import { WAGA_SESSION_INSTRUCTIONS } from "../managed-session-instructions.mjs";
 import { defaultClaudeAliasPath, SessionAliasCatalog } from "../session-alias-catalog.mjs";
 import { ClaudePeerEndpoint } from "./claude-peer.mjs";
-import { claudeReplyOffset, readClaudeReply, readClaudeReceipt, waitForClaudeReply } from "./claude-reply.mjs";
+import { claudeReplyOffset, readClaudeContinuation, readClaudeReply, readClaudeReceipt, waitForClaudeReply } from "./claude-reply.mjs";
 import { ClaudePreviewReader, readClaudeHistory, watchClaudeHistory } from "../session-preview.mjs";
 import { applyClaudeExecutionSettings, normalizeProviderExecutionSettings } from "../provider-execution.mjs";
 import { ClaudeInteractive } from "./claude-interactive.mjs";
@@ -19,6 +19,7 @@ import { ClaudeInteractive } from "./claude-interactive.mjs";
 const execFileAsync = promisify(execFile);
 const SHORT_ID = /^[0-9a-f]{8}$/i;
 const USAGE_CACHE_MS = 5 * 60_000;
+const CONTINUED_WARNING = "Claude session continued in a new session; processing of this request is unconfirmed. Do not resend automatically.";
 // Claude's peer identity is the real process PID, shared by all provider instances.
 let peerQueue = Promise.resolve();
 async function acquirePeer(deadline, now) {
@@ -235,16 +236,27 @@ export class ClaudeProvider {
     return { target: session.id, renamed: true, name: renamed, nameSync: "local" };
   }
 
+  async #currentTarget(session, deadline, error = Object.assign(new Error("Claude target lookup timed out; message was not sent"), { code: "TARGET_BUSY_TIMEOUT" })) {
+    const sessions = await readBeforeDeadline(signal => this.list({ cwd: session.projectCwd, signal }), { deadline, now: this.#now, error });
+    const current = sessions.find(candidate => candidate.id === session.id && candidate.sessionId === session.sessionId);
+    if (!current?.socketPath) throw Object.assign(new Error("Claude session has no native messaging socket"), { code: "TARGET_UNAVAILABLE" });
+    if (!["idle", "working", "needs-input", "done"].includes(current.status)) throw Object.assign(new Error(`Claude target is unavailable: ${session.id}`), { code: "TARGET_UNAVAILABLE" });
+    return current;
+  }
+
   async send(session, message, { requestId, waitTimeoutMs = 30 * 60_000, onProgress = () => {} }) {
     if (!session.socketPath) throw Object.assign(new Error("Claude session has no native messaging socket"), { code: "TARGET_UNAVAILABLE" });
     const envelope = buildPeerEnvelope({ message, requestId, expectsReply: false });
-    const release = await acquirePeer(this.#now() + waitTimeoutMs, this.#now);
+    const deadline = this.#now() + waitTimeoutMs;
+    const release = await acquirePeer(deadline, this.#now);
     let endpoint;
     try {
+      // The local queue wait may outlive the target; never submit to a stale socket.
+      const current = await this.#currentTarget(session, deadline);
       endpoint = this.#endpointFactory({ homeDirectory: this.#home, cwd: process.cwd() });
-      await endpoint.start({ socketDirectory: path.dirname(session.socketPath) });
+      await endpoint.start({ socketDirectory: path.dirname(current.socketPath) });
       onProgress({ state: "submitting", delivery: "unknown" });
-      const messageId = await endpoint.send(session.socketPath, envelope);
+      const messageId = await endpoint.send(current.socketPath, envelope);
       onProgress({ state: "submitted", delivery: "submitted", messageId });
       const disposition = await endpoint.waitForDisposition(messageId, { timeoutMs: 150 });
       onProgress({ state: disposition.state, delivery: disposition.state, messageId });
@@ -263,12 +275,7 @@ export class ClaudeProvider {
     const release = await acquirePeer(identityDeadline, this.#now);
     let endpoint;
     try {
-      const sessions = await readBeforeDeadline(signal => this.list({ cwd: session.projectCwd, signal }), {
-        deadline: identityDeadline, now: this.#now, error: identityError,
-      });
-      const current = sessions.find(candidate => candidate.id === session.id && candidate.sessionId === session.sessionId);
-      if (!current?.socketPath) throw Object.assign(new Error("Claude session has no native messaging socket"), { code: "TARGET_UNAVAILABLE" });
-      if (!["idle", "working", "needs-input", "done"].includes(current.status)) throw Object.assign(new Error(`Claude target is unavailable: ${session.id}`), { code: "TARGET_UNAVAILABLE" });
+      const current = await this.#currentTarget(session, identityDeadline, identityError);
       endpoint = this.#endpointFactory({ homeDirectory: this.#home, cwd: process.cwd() });
       await endpoint.start({ socketDirectory: path.dirname(current.socketPath) });
       const start = await claudeReplyOffset(current, this.#home);
@@ -303,6 +310,9 @@ export class ClaudeProvider {
         deadline: this.#now() + 10_000, now: this.#now,
         error: Object.assign(new Error("Claude receipt lookup timed out"), { code: "RESULT_TIMEOUT" }),
       });
+      if (receipt === "consumed") return { state: "accepted", delivery: "accepted", receipt };
+      const continuedTo = await this.#continuation(record);
+      if (continuedTo) return { state: "result-unknown", ...(receipt ? { delivery: "accepted", receipt } : {}), continuedTo, warning: CONTINUED_WARNING };
       return receipt ? { state: "accepted", delivery: "accepted", receipt } : {};
     }
     // After the ephemeral reply socket closes, read only an explicitly tagged
@@ -310,7 +320,16 @@ export class ClaudeProvider {
     const reply = record.reply ?? await readClaudeReply(record.session, record.requestId, {
       homeDirectory: this.#home, since: record.createdAt, fromSocket: record.fromSocket,
     });
-    if (!reply) return { state: "result-unknown" };
-    return { state: "replied", reply };
+    if (reply) return { state: "replied", reply };
+    const continuedTo = await this.#continuation(record);
+    return continuedTo ? { state: "result-unknown", continuedTo, warning: CONTINUED_WARNING } : { state: "result-unknown" };
+  }
+
+  async #continuation(record) {
+    const next = await readBeforeDeadline(signal => readClaudeContinuation(record.session, { homeDirectory: this.#home, since: record.createdAt, signal }), {
+      deadline: this.#now() + 10_000, now: this.#now,
+      error: Object.assign(new Error("Claude continuation lookup timed out"), { code: "RESULT_TIMEOUT" }),
+    });
+    return next ? `claude:${next}` : record.continuedTo ?? null;
   }
 }

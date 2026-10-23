@@ -192,7 +192,7 @@ export class SessionBridge {
       return { ...result, requestId: record.requestId };
     } catch (error) {
       if (["MESSAGE_HELD", "MESSAGE_REFUSED"].includes(error.code)) record.delivery = error.code === "MESSAGE_HELD" ? "held" : "refused";
-      try { this.#requests.update(record, { finished: true, error: { code: error.code ?? "REQUEST_FAILED", message: error.message } }); }
+      try { this.#requests.update(record, { finished: true, error: { code: error.code ?? "REQUEST_FAILED", message: error.message }, ...(error.continuedTo ? { state: "result-unknown", continuedTo: error.continuedTo, warning: error.message } : {}) }); }
       catch (storageError) { error.message += `; request record update failed: ${storageError.message}`; }
       Object.assign(error, { requestId: record.requestId, target: session.id, delivery: record.delivery });
       throw error;
@@ -202,22 +202,30 @@ export class SessionBridge {
   async result(requestId) {
     if (!this.#requests) throw new BridgeError("REQUEST_STORE_UNAVAILABLE", "Request storage is unavailable");
     const record = this.#requests.read(requestId);
-    const base = { requestId, target: record.target, delivery: record.delivery, state: record.state, lastError: record.error, turnId: record.turnId, messageId: record.messageId, ...(record.kind === "send" ? { kind: "send" } : {}), ...(record.receipt ? { receipt: record.receipt } : {}) };
+    const base = { requestId, target: record.target, delivery: record.delivery, state: record.state, lastError: record.error, turnId: record.turnId, messageId: record.messageId, ...(record.kind === "send" ? { kind: "send" } : {}), ...(record.receipt ? { receipt: record.receipt } : {}), ...(record.continuedTo && record.receipt !== "consumed" ? { continuedTo: record.continuedTo, warning: record.warning } : {}) };
     const cached = this.#requests.reply(requestId);
-    if (cached) return { ...base, ...cached };
-    if (record.state === "replied" && record.reply !== undefined) return { ...base, reply: record.reply };
+    if (cached || (record.state === "replied" && record.reply !== undefined)) {
+      delete base.continuedTo; delete base.warning;
+      return { ...base, ...(cached ?? { reply: record.reply }) };
+    }
     if (record.delivery === "not-sent") return { ...base, state: this.#requests.active(record) ? record.state : "not-sent" };
     if (["held", "refused"].includes(record.delivery)) return { ...base, state: record.delivery };
     const provider = this.#provider(record.session.provider);
     if (record.kind === "send") {
       if (provider.name !== "claude" || record.receipt === "consumed") return base;
-      const result = await provider.result(record);
+      let result = await provider.result(record);
       const current = this.#requests.read(requestId);
-      if (current.receipt === "consumed") return { ...base, state: current.state, delivery: current.delivery, receipt: current.receipt };
-      if (result.receipt) this.#requests.update(record, result);
+      const saved = current.receipt === "consumed" ? current
+        : result.receipt || result.continuedTo ? this.#requests.update(record, result) : current;
+      if (saved.receipt === "consumed") {
+        delete base.continuedTo; delete base.warning;
+        result = { state: saved.state, delivery: saved.delivery, receipt: saved.receipt };
+      }
       return { ...base, ...result };
     }
     const result = await provider.result(record);
+    if (result.state === "replied") { delete base.continuedTo; delete base.warning; }
+    if (result.continuedTo) this.#requests.update(record, { state: result.state, continuedTo: result.continuedTo, warning: result.warning });
     return { ...base, ...(result.state === "replied" ? this.#requests.reply(requestId, { ...result, delivery: "accepted" }) : result) };
   }
 

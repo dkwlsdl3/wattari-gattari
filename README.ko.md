@@ -276,6 +276,12 @@ Claude 요청에는 `SendMessage`와 `uds:` 회신 주소를 명시합니다. �
 Claude `send`의 접수 확인이 늦으면 `waga result <request-id>`로 native 로그를 다시 조회합니다.
 `receipt=queued`는 큐 접수, `receipt=consumed`는 원래 메시지가 대화에 편입됐다는 뜻입니다.
 확인 결과는 저장되며, 메시지 이해·작업 완료·승인을 보장하지 않습니다.
+Claude의 원래 로그에 세션 전환이 기록됐지만 메시지 편입을 확인하지 못하면 `result`는
+큐 접수 증거를 유지하면서 `result-unknown`·`continuedTo`·처리 미확인 경고를 반환합니다(종료 코드 3).
+답변 대기 중 전환을 감지한 `ask`는 `CLAUDE_SESSION_CONTINUED` 오류로 알립니다.
+이미 확인한 답변·메시지 편입이 우선하며, 전환 정보는 이후 로그가 없어져도 유지합니다.
+Waga는 peer 큐를 복사하거나 새 세션의 답변을 대신 회수하거나 자동 재전송하지 않습니다.
+로컬 대기열에서 기다린 `send`도 제출 직전에 정확한 native 대상을 다시 확인합니다.
 Codex가 제출 직후 같은 turn을 일시적으로 `interrupted`로 표시해도 답변 제한 시간 안에서
 완료 여부를 다시 확인합니다. 중단이 지속되면 실패하며 다른 turn으로 바꾸거나 재전송하지 않습니다.
 표식·로그가 없거나 원래 Codex turn을 식별하지 못하면 `result-unknown`으로 남깁니다.

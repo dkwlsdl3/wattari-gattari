@@ -82,7 +82,8 @@ export class RequestStore {
         const answer = this.reply(id);
         records.push({ requestId: id, target: row.target, kind: row.kind, state: answer?.state ?? row.state,
           delivery: answer?.delivery ?? row.delivery, receipt: row.receipt, createdAt: row.createdAt,
-          updatedAt: row.updatedAt ?? row.createdAt, reply: answer?.reply ?? row.reply, error: row.error });
+          updatedAt: row.updatedAt ?? row.createdAt, reply: answer?.reply ?? row.reply, error: row.error,
+          ...(row.continuedTo && row.receipt !== "consumed" && !answer && row.state !== "replied" ? { continuedTo: row.continuedTo, warning: row.warning } : {}) });
       } catch { /* A malformed or concurrently removed record must not hide other requests. */ }
     }
     return { records, limited };
@@ -91,8 +92,9 @@ export class RequestStore {
   update(record, fields) {
     const file = this.file(record.requestId);
     return withFileLock(file, () => {
-      const consumed = this.read(record.requestId).receipt === 'consumed';
-      Object.assign(record, fields, { updatedAt: Date.now() }, consumed ? { receipt: 'consumed' } : {});
+      const current = this.read(record.requestId);
+      Object.assign(record, fields, { updatedAt: Date.now() }, current.receipt === 'consumed'
+        ? { receipt: 'consumed', state: current.state, delivery: current.delivery } : {});
       const temporary = `${file}.${crypto.randomUUID()}.tmp`;
       try {
         fs.writeFileSync(temporary, JSON.stringify(record), { flag: "wx", mode: 0o600 });

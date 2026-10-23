@@ -25,13 +25,16 @@ export async function waitForClaudeReply(session, requestId, { socketReply, sign
       // A tool call record precedes delivery; do not close its destination early.
       const text = await readClaudeReply(session, requestId, { ...options, includeToolReplies: false, signal: pollSignal });
       if (text) return { text };
+      const continuedTo = await readClaudeContinuation(session, { ...options, signal: pollSignal });
+      if (continuedTo) throw Object.assign(new Error(`Claude session continued in ${continuedTo}; processing of this request is unconfirmed and it was not resent`),
+        { code: "CLAUDE_SESSION_CONTINUED", continuedTo: `claude:${continuedTo}` });
       await delay(250, undefined, { signal: pollSignal });
     }
   };
   try {
     // An inaccessible native log must not disable the primary socket reply path.
     return await Promise.race([socketReply, transcriptReply().catch(error => {
-      if (pollSignal.aborted) throw error;
+      if (pollSignal.aborted || error.code === "CLAUDE_SESSION_CONTINUED") throw error;
       return socketReply;
     })]);
   } finally { cleanup.abort(); }
@@ -68,6 +71,16 @@ export async function readClaudeReceipt(record, options) {
     return null;
   });
   return consumed ?? receipt;
+}
+
+// Native `continued-in` record shape was measured in Keeper on 2026-10-23. Only the
+// exact session's own record is read; the successor's log is never opened.
+export async function readClaudeContinuation(session, { homeDirectory, since, start = 0, signal } = {}) {
+  return readClaudeLog(session, { homeDirectory, since, start, signal }, row => {
+    const next = row.continuedInSessionId;
+    return row.type === "continued-in" && typeof next === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(next)
+      && next.toLowerCase() !== session.sessionId.toLowerCase() ? next : null;
+  });
 }
 
 async function readClaudeLog(session, { homeDirectory, since, start = 0, signal }, visit) {

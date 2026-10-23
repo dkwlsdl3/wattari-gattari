@@ -304,7 +304,9 @@ test("Claude send checks immediate peer disposition before reporting submission"
     async stop() { calls.push("stop"); },
   };
   const provider = new ClaudeProvider({ interactive: { list: async () => [] }, endpointFactory: () => endpoint });
-  const result = await provider.send({ id: "claude:x", socketPath: "/private/target.sock" }, "notice", { requestId: "r" });
+  const session = { id: "claude:x", sessionId: "x", socketPath: "/private/target.sock", status: "working" };
+  provider.list = async () => [session];
+  const result = await provider.send(session, "notice", { requestId: "r" });
   assert.equal(result.delivery, "submitted");
   assert.deepEqual(calls, ["start", "send", "disposition:message-1:150", "stop"]);
 });

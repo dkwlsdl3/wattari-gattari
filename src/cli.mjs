@@ -222,7 +222,12 @@ export async function runCli(args = process.argv.slice(2), {
       stdout.write(options.json ? `${JSON.stringify(result)}\n` : `${result.reply}\n`);
     } else if (options.command === "result") {
       const result = await bridge.result(options.requestId);
-      stdout.write(options.json ? `${JSON.stringify(result)}\n` : result.state === "replied" ? `${result.reply}\n` : `${result.state}\t${result.target}\t${result.requestId}\tdelivery=${result.delivery}${result.receipt ? `\treceipt=${result.receipt}` : ""}\n`);
+      if (options.json) stdout.write(`${JSON.stringify(result)}\n`);
+      else if (result.state === "replied") stdout.write(`${result.reply}\n`);
+      else {
+        stdout.write(`${result.state}\t${result.target}\t${result.requestId}\tdelivery=${result.delivery}${result.receipt ? `\treceipt=${result.receipt}` : ""}${result.continuedTo ? `\tcontinuedTo=${result.continuedTo}` : ""}\n`);
+        if (result.warning) stdout.write(`warning: ${result.warning}\n`);
+      }
       return result.state === "replied" || (result.kind === "send" && result.state === "accepted") ? 0 : 3;
     } else if (options.command === "open") {
       const result = await launcher(options.provider, { cwd });
@@ -233,7 +238,7 @@ export async function runCli(args = process.argv.slice(2), {
     stderr.write(`${error.code ? `${error.code}: ` : ""}${error.message}\n`);
     if (error.requestId) {
       stderr.write(`request\t${error.requestId}\ttarget=${error.target}\tdelivery=${error.delivery}\nInspect without resending: ${CLI_NAME} result ${error.requestId}\n`);
-      if (options.json) stdout.write(`${JSON.stringify({ error: { code: error.code ?? "REQUEST_FAILED", message: error.message }, requestId: error.requestId, target: error.target, delivery: error.delivery })}\n`);
+      if (options.json) stdout.write(`${JSON.stringify({ error: { code: error.code ?? "REQUEST_FAILED", message: error.message }, requestId: error.requestId, target: error.target, delivery: error.delivery, ...(error.continuedTo ? { continuedTo: error.continuedTo } : {}) })}\n`);
     }
     return 1;
   } finally {

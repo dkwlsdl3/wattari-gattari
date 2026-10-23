@@ -211,6 +211,12 @@ Claude의 단방향 `send`는 짧은 native 접수 확인 이후 반환합니다
 요청 ID의 native 큐 접수를 `receipt=queued`, 원래 message ID의 `queued_command` 대화
 첨부를 `receipt=consumed`로 회수·저장합니다. 큐 제거만으로 대화 편입을 추정하지 않으며,
 접수·대화 편입은 이해·작업 완료·승인을 뜻하지 않습니다. 별도 ACK 요청이나 릴레이는 없습니다.
+정확한 원래 UUID의 구조화된 `continued-in` 기록은 세션 전환 증거로만 사용합니다.
+미편입 요청의 `result`는 `result-unknown`·`continuedTo`·처리 미확인 경고로 표시하며,
+접수 증거와 전환 정보는 저장합니다. 로그가 없어져도 확인한 전환 정보를 지우지 않습니다.
+답변 대기 중 전환을 확인한 `ask`는 `CLAUDE_SESSION_CONTINUED`로 알립니다.
+확인한 원래 답변·메시지 편입이 우선하고, 새 세션 로그 조회·큐 복사·자동 재전송은 없습니다.
+Claude `send`도 로컬 peer 대기열을 나온 뒤 정확한 UUID·현재 socket·상태를 다시 확인합니다.
 
 ### 질의 완료 계약
 

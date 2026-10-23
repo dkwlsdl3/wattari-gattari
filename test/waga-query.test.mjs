@@ -258,3 +258,136 @@ test("a genuinely interrupted Codex request stays bounded and is never resubmitt
   assert.equal(clock, 750);
   assert.equal(submissions, 1);
 });
+
+// Shape measured during Keeper's CLI -> BG handoff on 2026-10-23; identities are anonymized.
+function continuationCase(t, kind = 'send') {
+  const store = storeFor(t), home = store.directory;
+  const continuation = JSON.parse(fs.readFileSync(new URL('./fixtures/claude-session-continuation.jsonl', import.meta.url), 'utf8'));
+  const session = { id: `claude:${continuation.sessionId}`, sessionId: continuation.sessionId, provider: 'claude',
+    cwd: '/tmp/waga-proof-continuation', socketPath: '/proof/peer.sock', status: 'working' };
+  const record = store.create(session, { kind });
+  store.update(record, { state: 'submitted', delivery: 'submitted', finished: true, messageId: '9669d5f1-a37f-409e-825b-4599e940481d' });
+  continuation.timestamp = new Date(record.createdAt + 1).toISOString();
+  const rows = fs.readFileSync(new URL('./fixtures/claude-send-receipt.jsonl', import.meta.url), 'utf8').trim().split('\n').map(line => {
+    const row = JSON.parse(line.replaceAll('97b45169-cf5c-4a61-b197-7cd340cb13ed', record.requestId));
+    row.sessionId = session.sessionId; row.timestamp = continuation.timestamp; return row;
+  });
+  const directory = path.join(home, '.claude/projects', session.cwd.replace(/[^a-zA-Z0-9]/g, '-'));
+  fs.mkdirSync(directory, { recursive: true });
+  const file = path.join(directory, `${session.sessionId}.jsonl`);
+  const write = (...entries) => fs.writeFileSync(file, entries.map(row => JSON.stringify(row)).join('\n') + (entries.length ? '\n' : ''));
+  const provider = new ClaudeProvider({ homeDirectory: home, run: async () => { throw Error('No native lookup or retransmission during recovery'); } });
+  const bridge = new SessionBridge({ providers: [provider], requestStore: store });
+  return { store, session, record, continuation, rows, file, write, provider, bridge };
+}
+
+test('queued send becomes pending on native continuation, survives offline, and yields to confirmed consumption', async t => {
+  const c = continuationCase(t), { record, bridge, continuation } = c;
+  c.write(c.rows[0]);
+  assert.equal((await bridge.result(record.requestId)).state, 'accepted');
+  c.write(c.rows[0], continuation);
+  const result = await bridge.result(record.requestId);
+  assert.equal(result.state, 'result-unknown');
+  assert.equal(result.receipt, 'queued');
+  assert.equal(result.delivery, 'accepted');
+  assert.equal(result.continuedTo, `claude:${continuation.continuedInSessionId}`);
+  assert.match(result.warning, /unconfirmed/i);
+  for (const json of [false, true]) {
+    const stdout = output();
+    assert.equal(await runCli(['result', record.requestId, ...(json ? ['--json'] : [])], { bridge, stdout, stderr: output() }), 3);
+    if (json) assert.equal(JSON.parse(stdout.value).continuedTo, result.continuedTo);
+    else { assert.match(stdout.value, /result-unknown/); assert.match(stdout.value, /processing.*unconfirmed/i); }
+  }
+  fs.unlinkSync(c.file);
+  assert.equal((await bridge.result(record.requestId)).state, 'result-unknown');
+  assert.equal((await bridge.result(record.requestId)).continuedTo, result.continuedTo);
+  assert.equal((await c.store.recent()).records[0].continuedTo, result.continuedTo);
+  const stale = c.store.read(record.requestId);
+  c.write(...c.rows, continuation);
+  const consumed = await bridge.result(record.requestId);
+  assert.equal(consumed.receipt, 'consumed');
+  assert.equal(consumed.state, 'accepted');
+  assert.equal(consumed.warning, undefined, 'consumption resolves an earlier continuation warning immediately');
+  c.store.update(stale, { state: 'result-unknown', delivery: 'submitted', receipt: 'queued', continuedTo: result.continuedTo, warning: result.warning });
+  assert.equal((await bridge.result(record.requestId)).state, 'accepted', 'a delayed queued observation cannot undo confirmed consumption');
+  assert.equal((await c.store.recent()).records[0].warning, undefined);
+  fs.unlinkSync(c.file);
+  assert.equal((await bridge.result(record.requestId)).receipt, 'consumed');
+});
+
+test('continuation without a receipt is still pending and persisted; successor replies are never borrowed', async t => {
+  const c = continuationCase(t);
+  c.write(c.continuation);
+  const successor = path.join(path.dirname(c.file), `${c.continuation.continuedInSessionId}.jsonl`);
+  fs.writeFileSync(successor, JSON.stringify({ type: 'assistant', sessionId: c.continuation.continuedInSessionId,
+    timestamp: c.continuation.timestamp, message: { content: [{ type: 'text', text: `[WAGA REPLY ${c.record.requestId}] OTHER_SESSION` }] } }) + '\n');
+  const result = await c.bridge.result(c.record.requestId);
+  assert.equal(result.state, 'result-unknown');
+  assert.equal(result.receipt, undefined);
+  assert.equal(result.delivery, 'submitted');
+  assert.equal(result.continuedTo, `claude:${c.continuation.continuedInSessionId}`);
+  fs.unlinkSync(c.file);
+  assert.equal((await c.bridge.result(c.record.requestId)).continuedTo, result.continuedTo);
+});
+
+test('malformed, self, foreign, old, sidechain and quoted continuations cannot change request status', async t => {
+  const c = continuationCase(t);
+  for (const altered of [
+    { continuedInSessionId: '../outside' }, { continuedInSessionId: c.session.sessionId.toUpperCase() },
+    { sessionId: c.continuation.continuedInSessionId }, { isSidechain: true },
+    { timestamp: new Date(c.record.createdAt - 1).toISOString() },
+    { type: 'assistant', message: { content: JSON.stringify(c.continuation) } },
+  ]) {
+    c.write(c.rows[0], { ...c.continuation, ...altered });
+    const result = await c.bridge.result(c.record.requestId);
+    assert.equal(result.state, 'accepted'); assert.equal(result.continuedTo, undefined);
+  }
+});
+
+test('original tagged answer wins over continuation and stays recoverable offline', async t => {
+  const c = continuationCase(t, 'ask');
+  c.write(c.continuation, { type: 'assistant', sessionId: c.session.sessionId, timestamp: c.continuation.timestamp,
+    message: { content: [{ type: 'text', text: `[WAGA REPLY ${c.record.requestId}] ANSWER` }] } });
+  assert.match((await c.bridge.result(c.record.requestId)).reply, /ANSWER$/);
+  fs.unlinkSync(c.file);
+  assert.equal((await c.bridge.result(c.record.requestId)).state, 'replied');
+});
+
+for (const answer of [false, true]) {
+  test(`live ask ${answer ? 'returns an original answer despite' : 'reports'} native continuation without retransmission`, { timeout: 3000 }, async t => {
+    const c = continuationCase(t, 'ask');
+    c.write();
+    let sends = 0, stopped = 0, rejectSocket;
+    const provider = new ClaudeProvider({ homeDirectory: c.store.directory, endpointFactory: () => ({
+      socketPath: '/proof/origin.sock', async start() {},
+      async send(_socket, envelope) {
+        sends++;
+        const requestId = /request_id: ([a-f0-9-]+)/.exec(envelope)[1];
+        setTimeout(() => {
+          const now = new Date().toISOString();
+          c.write({ ...c.continuation, timestamp: now }, ...(answer ? [{ type: 'assistant', sessionId: c.session.sessionId,
+            timestamp: now, message: { content: [{ type: 'text', text: `[WAGA REPLY ${requestId}] ANSWER` }] } }] : []));
+        }, 10);
+        return 'live-message';
+      },
+      async waitForDisposition() { return { state: 'accepted' }; },
+      waitForReply() { return new Promise((_, reject) => { rejectSocket = reject; }); },
+      async stop() { stopped++; rejectSocket?.(Error('closed')); },
+    }) });
+    provider.list = async () => [c.session];
+    const bridge = new SessionBridge({ providers: [provider], requestStore: c.store });
+    const stdout = output(), stderr = output();
+    const code = await runCli(['ask', c.session.id, 'proof', '--json', '--reply-timeout', '2'], { bridge, stdout, stderr });
+    const result = JSON.parse(stdout.value);
+    if (answer) { assert.equal(code, 0); assert.match(result.reply, /ANSWER$/); }
+    else {
+      assert.equal(code, 1); assert.equal(result.error.code, 'CLAUDE_SESSION_CONTINUED');
+      assert.equal(result.continuedTo, `claude:${c.continuation.continuedInSessionId}`);
+      const recovered = await bridge.result(result.requestId);
+      assert.equal(recovered.state, 'result-unknown'); assert.equal(recovered.continuedTo, result.continuedTo);
+      fs.unlinkSync(c.file);
+      assert.equal((await bridge.result(result.requestId)).continuedTo, result.continuedTo);
+    }
+    assert.equal(sends, 1); assert.equal(stopped, 1);
+  });
+}
