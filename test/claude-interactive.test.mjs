@@ -40,8 +40,9 @@ process.stdin.on('data', chunk => { if (String(chunk).trim() === '/exit') proces
     fs.rmSync(root, { recursive: true, force: true });
   });
   const interactive = new ClaudeInteractive({ env: { ...env, TMUX: "test-server" }, run: args => call(args) });
+  let agents = [];
   const provider = new ClaudeProvider({ homeDirectory: root, interactive, titleSync: { settings: () => '{"hooks":{}}', display: () => null },
-    run: async args => { assert.equal(args[0], "agents", "interactive creation must not run --bg"); return { stdout: "[]" }; } });
+    run: async args => { assert.equal(args[0], "agents", "interactive creation must not run --bg"); return { stdout: JSON.stringify(agents) }; } });
   const prompt = "한글 ' \" ; $(touch injected) `touch injected2`\nsecond line";
   const created = await provider.create(prompt, { cwd: root, model: "sonnet", effort: "high", executionSettings: { permissionMode: "acceptEdits" } });
   const recorded = await eventually(() => fs.existsSync(recordPath) && JSON.parse(fs.readFileSync(recordPath)));
@@ -96,6 +97,24 @@ process.stdin.on('data', chunk => { if (String(chunk).trim() === '/exit') proces
   await assert.rejects(provider.archive(session), { code: "CLAUDE_INTERACTIVE_UNAVAILABLE" });
   assert.doesNotThrow(() => process.kill(recorded.pid, 0));
   assert.deepEqual(await provider.list({ cwd: root }), [], "native navigation cannot leave an old UUID pointing at a different session");
+  fs.rmSync(path.join(registry, `${session.pid}.json`));
+  // Native Left on the empty CLI parks it: the original stays alive with its own
+  // UUID while discovery reports only the new background job.
+  const parked = { pid: session.pid, sessionId: created.sessionId, kind: "interactive", entrypoint: "cli", name: "waga-proof-original", parkedJobId: "87654321" };
+  const backgroundId = "claude:00000000-0000-4000-8000-000000000001";
+  fs.writeFileSync(path.join(registry, `${session.pid}.json`), JSON.stringify(parked));
+  agents = [{ id: "87654321", kind: "background", pid: process.pid, sessionId: backgroundId.slice(7), cwd: root, name: "waga-proof-original", status: "idle" }];
+  assert.deepEqual((await provider.list({ cwd: root })).map(row => row.id), [backgroundId], "a parked original must not reappear as a CLI session");
+  await assert.rejects(nativeSessionCommand(session, { claudeInteractive: interactive }), { code: "CLAUDE_INTERACTIVE_UNAVAILABLE" });
+  await assert.rejects(interactive.verify(session), { code: "CLAUDE_INTERACTIVE_UNAVAILABLE" });
+  await assert.rejects(provider.archive(session), { code: "CLAUDE_INTERACTIVE_UNAVAILABLE" });
+  assert.doesNotThrow(() => process.kill(recorded.pid, 0));
+  assert.doesNotThrow(() => process.kill(process.pid, 0));
+  // Without the parked marker the original is accepted again once discovery is lost.
+  agents = [];
+  fs.writeFileSync(path.join(registry, `${session.pid}.json`), JSON.stringify({ ...parked, parkedJobId: undefined }));
+  assert.deepEqual((await provider.list({ cwd: root })).map(row => row.id), [session.id]);
+  await interactive.verify(session);
   fs.rmSync(path.join(registry, `${session.pid}.json`));
   // Old sessions used remain-on-exit on. Closing one must remove every link,
   // without ending the overview process in either independent view.

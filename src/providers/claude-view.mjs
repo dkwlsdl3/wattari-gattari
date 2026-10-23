@@ -10,7 +10,8 @@ export async function claudeInteractiveRegistryMatches(id, pid, env = process.en
   const directory = env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
   try {
     const registry = JSON.parse(await fs.readFile(path.join(directory, "sessions", `${pid}.json`), "utf8"));
-    return registry.pid === Number(pid) && `claude:${registry.sessionId}` === id;
+    // A parked original keeps its UUID after native Left; the job now owns the conversation.
+    return registry.pid === Number(pid) && `claude:${registry.sessionId}` === id && !registry.parkedJobId;
   } catch (error) { return error.code === "ENOENT"; } // Startup prompts precede the native registry.
 }
 
