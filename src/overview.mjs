@@ -571,7 +571,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     }
     const session = node.session;
     const [symbol, status, statusColor] = statusView(session.status);
-    const providerName = wide ? (session.provider === "claude" ? "CLAUDE" : "CODEX ") : (session.provider === "claude" ? "CLAUDE" : "CODEX");
+    const providerName = session.provider === "claude" ? "CLAUDE" : "CODEX ";
     const providerColor = session.provider === "claude" ? THEME.claude : THEME.codex;
     const displayName = session.provider === "claude" && session.kind
       ? `${session.kind === "interactive" ? "CLI" : "BG"} · ${session.name}` : session.name;
@@ -585,14 +585,14 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
       while (common < nativeId.length && common < otherId.length && nativeId[common] === otherId[common]) common++;
       prefixLength = Math.max(prefixLength, Math.min(nativeId.length, common + 1));
     }
-    const label = ` [${nativeId.slice(0, prefixLength)}]`;
+    const label = `[${nativeId.slice(0, prefixLength)}] `;
     const labelWidth = widthOf(label);
-    const nameCell = nameWidth - labelWidth >= 12
-      ? `${fit(displayName, Math.min(widthOf(safeText(displayName)), nameWidth - labelWidth))}${color(THEME.muted, label)}${" ".repeat(Math.max(0, nameWidth - labelWidth - widthOf(safeText(displayName))))}`
-      : fit(displayName, nameWidth);
+    const showLabel = nameWidth - labelWidth >= 12;
+    const idCell = showLabel ? color(THEME.muted, label) : "";
+    const nameCell = fit(displayName, nameWidth - (showLabel ? labelWidth : 0));
     const row = wide
-      ? `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)}  ${nameCell}  ${color(statusColor, fit(status, 11))}`
-      : `${marker}   ${color(statusColor, symbol)} ${color(providerColor, providerName)} ${nameCell} ${color(statusColor, fit(status, 8))}`;
+      ? `${marker}   ${color(statusColor, symbol)} ${idCell}${color(providerColor, providerName)}  ${nameCell}  ${color(statusColor, fit(status, 11))}`
+      : `${marker}   ${color(statusColor, symbol)} ${idCell}${color(providerColor, providerName)} ${nameCell} ${color(statusColor, fit(status, 8))}`;
     lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
   }
   if (split) {

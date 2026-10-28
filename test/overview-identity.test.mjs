@@ -19,10 +19,10 @@ function render(rows = sessions, options = {}) {
 
 test("Dock labels use canonical IDs for Claude CLI, BG and Codex", () => {
   const frame = render();
-  assert.match(frame, /CLI · Interactive \[12345678-a\]/);
-  assert.match(frame, /BG · Background \[12345678-b\]/);
+  assert.match(frame, /\[12345678-a\] CLAUDE\s+CLI · Interactive/);
+  assert.match(frame, /\[12345678-b\] CLAUDE\s+BG · Background/);
   // Claude's colliding prefix must not lengthen the Codex label.
-  assert.match(frame, /CODEX\s+Codex \[12345678\]/);
+  assert.match(frame, /\[12345678\] CODEX\s+Codex/);
   assert.doesNotMatch(frame, /short-command/);
   assert.ok(frame.indexOf(sessions[0].id) < frame.indexOf("NOTICE"));
 });
@@ -30,13 +30,15 @@ test("Dock labels use canonical IDs for Claude CLI, BG and Codex", () => {
 test("labels survive rename and reorder and distinguish offscreen discovered IDs", () => {
   const renamed = sessions.map(session => ({ ...session, name: `Renamed ${session.provider}` })).reverse();
   const frame = render(renamed);
-  assert.match(frame, /BG · Renamed claude \[12345678-b\]/);
-  assert.match(frame, /CLI · Renamed claude \[12345678-a\]/);
-  assert.match(frame, /Renamed codex \[12345678\]/);
+  assert.match(frame, /\[12345678-b\] CLAUDE\s+BG · Renamed claude/);
+  assert.match(frame, /\[12345678-a\] CLAUDE\s+CLI · Renamed claude/);
+  assert.match(frame, /\[12345678\] CODEX\s+Renamed codex/);
   const offscreen = render(sessions, { nodes: [{ type: "session", session: sessions[0] }] });
-  assert.match(offscreen, /Interactive \[12345678-a\]/);
+  assert.match(offscreen, /\[12345678-a\] CLAUDE\s+CLI · Interactive/);
   const independent = render([sessions[0], sessions[2]]);
-  assert.match(independent, /Interactive \[12345678\]/);
+  assert.match(independent, /\[12345678\] CLAUDE\s+CLI · Interactive/);
+  const longName = render([{ ...sessions[2], name: "Long session name ".repeat(20) }]);
+  assert.match(longName, /○ \[12345678\] CODEX\s+Long session name/);
 });
 
 test("selected canonical IDs wrap and leave notice and help in bounded frames", () => {
@@ -63,7 +65,7 @@ test("selected canonical IDs wrap and leave notice and help in bounded frames", 
 
 test("workspace selection has no stale full identity and simple IDs need no nativeId", () => {
   const simple = [{ ...sessions[2], id: "codex:1", name: "Simple" }];
-  assert.match(render(simple), /Simple \[1\]/);
+  assert.match(render(simple), /\[1\] CODEX\s+Simple/);
   assert.match(render(simple), /codex:1/);
   const frame = render(sessions, {
     nodes: [{ type: "workspace", name: "work", cwd: "/work", sessionCount: 3 }, ...sessions.map(session => ({ type: "session", session }))],
