@@ -1,4 +1,14 @@
 {
+  "messaging": {
+    "tests": ["test/message-delivery.test.mjs"],
+    "mutations": [
+      {"id":"corrupt-pending-body","file":"src/message-delivery.mjs","from":"durable: true, payload, origin, sequence","to":"durable: true, payload: payload + ' corrupted', origin, sequence"},
+      {"id":"drop-worker-ownership","file":"src/message-delivery.mjs","from":"if (lock.status === 1) return;\n      if (lock.status !== 0) throw fail('DELIVERY_LOCK_FAILED', 'Cannot acquire delivery ownership');","to":";"},
+      {"id":"retain-unknown-body","file":"src/session-bridge.mjs","from":"if (record.durable && event.state === 'submitting') fields.payload = undefined;","to":";"},
+      {"id":"restart-queue-deadline","file":"src/session-bridge.mjs","from":"record.waitTimeoutMs - (Date.now() - record.createdAt)","to":"record.waitTimeoutMs"},
+      {"id":"count-dead-submitted-workers","file":"src/message-delivery.mjs","from":" && (row.delivery === 'not-sent' || this.store.active(row))","to":""}
+    ]
+  },
   "preview": {
     "tests": ["test/session-preview.test.mjs", "test/overview-preview.test.mjs", "test/codex-provider.test.mjs", "test/session-bridge.test.mjs"],
     "mutations": [

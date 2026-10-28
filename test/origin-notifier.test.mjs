@@ -34,3 +34,10 @@ test("origin notification truncates long replies and requires acceptance", async
   assert.equal((message.match(/😀/g) ?? []).length, 4_000);
   assert.match(message, /Full reply: waga result request-2 --json/);
 });
+
+test('origin notification preserves local queue receipt without claiming native acceptance', async () => {
+  const result = await notifyOrigin({ origin: 'claude:11111111-1111-1111-1111-111111111111', requestId: 'request', target: 'codex:peer', reply: 'received' }, {
+    execute: async () => ({ stdout: JSON.stringify({ requestId: 'notification', delivery: 'local-queued' }) }),
+  });
+  assert.deepEqual(result, { requestId: 'notification', delivery: 'local-queued' });
+});

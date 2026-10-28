@@ -6,9 +6,7 @@
 
 ## 메시지 접수·결과 회수 런타임 검증
 
-- Unix socket 및 native provider 접근이 허용된 환경에서 `waga-proof-*` 세션으로
-  busy Claude 접수·표식 답변, Codex 동시 요청·완료 응답, timeout 후 `waga result`를 검증합니다.
-- 전체 `npm run check`를 통과시키고 미리보기 벤치마크 기준 초과를 별도로 진단합니다.
+- `waga-proof-*` Claude 대화형 세션이 작업 중일 때 접수·요청 표식 회신을 실측합니다.
 
 ## 독립 tmux 화면 런타임 검증
 

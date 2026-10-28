@@ -165,11 +165,23 @@ export class SessionBridge {
     return provider.instruct(session, message, { ...options, requestId: crypto.randomUUID() });
   }
 
-  async #exchange(provider, session, message, options) {
-    const record = this.#requests.create(session, options);
+  async deliverStored(record) {
+    if (!record.durable || record.finished || record.delivery !== 'not-sent' || typeof record.payload !== 'string' || Buffer.byteLength(record.payload) > 64000 || !['send', 'ask'].includes(record.kind)) throw new BridgeError('DELIVERY_RECORD_INVALID', 'Request cannot be dispatched');
+    const { provider, session } = await this.#resolve(record.target);
+    if (session.id !== record.target || session.nativeId !== record.session.nativeId || session.sessionId !== record.session.sessionId) throw new BridgeError('TARGET_CHANGED', 'Native target identity changed');
+    const waitTimeoutMs = record.waitTimeoutMs - (Date.now() - record.createdAt);
+    if (waitTimeoutMs <= 0) throw new BridgeError('TARGET_BUSY_TIMEOUT', 'Queued delivery expired before submission');
+    return this.#exchange(provider, session, record.payload, { kind: record.kind, waitTimeoutMs, replyTimeoutMs: record.replyTimeoutMs }, record);
+  }
+
+  async #exchange(provider, session, message, options, savedRecord) {
+    const record = savedRecord ?? this.#requests.create(session, options);
+    if (savedRecord) this.#requests.claim(record);
     const progress = (event) => {
       const fields = { ...event };
       delete fields.target;
+      if (provider.name === 'codex' && event.state === 'submitted') fields.transmissionFinished = true;
+      if (record.durable && event.state === 'submitting') fields.payload = undefined;
       if (fields.reply !== undefined) {
         const answer = this.#requests.reply(record.requestId, { state: "replied", delivery: "accepted", reply: fields.reply });
         Object.assign(fields, answer);
@@ -188,11 +200,11 @@ export class SessionBridge {
       if (result.reply !== undefined) result = { ...result, ...this.#requests.reply(record.requestId, { state: "replied", delivery: "accepted", reply: result.reply }) };
       const { reply, ...metadata } = result;
       if (reply !== undefined) delete record.reply;
-      this.#requests.update(record, { ...metadata, state: reply !== undefined ? "replied" : result.delivery, finished: true });
+      this.#requests.update(record, { ...metadata, payload: undefined, state: reply !== undefined ? "replied" : result.delivery, finished: true });
       return { ...result, requestId: record.requestId };
     } catch (error) {
       if (["MESSAGE_HELD", "MESSAGE_REFUSED"].includes(error.code)) record.delivery = error.code === "MESSAGE_HELD" ? "held" : "refused";
-      try { this.#requests.update(record, { finished: true, error: { code: error.code ?? "REQUEST_FAILED", message: error.message }, ...(error.continuedTo ? { state: "result-unknown", continuedTo: error.continuedTo, warning: error.message } : {}) }); }
+      try { this.#requests.update(record, { finished: true, payload: undefined, error: { code: error.code ?? "REQUEST_FAILED", message: error.message }, ...(error.continuedTo ? { state: "result-unknown", continuedTo: error.continuedTo, warning: error.message } : {}) }); }
       catch (storageError) { error.message += `; request record update failed: ${storageError.message}`; }
       Object.assign(error, { requestId: record.requestId, target: session.id, delivery: record.delivery });
       throw error;
@@ -204,11 +216,14 @@ export class SessionBridge {
     const record = this.#requests.read(requestId);
     const base = { requestId, target: record.target, delivery: record.delivery, state: record.state, lastError: record.error, turnId: record.turnId, messageId: record.messageId, ...(record.kind === "send" ? { kind: "send" } : {}), ...(record.receipt ? { receipt: record.receipt } : {}), ...(record.continuedTo && record.receipt !== "consumed" ? { continuedTo: record.continuedTo, warning: record.warning } : {}) };
     const cached = this.#requests.reply(requestId);
+    if (record.origin || record.notification) base.notification = record.notification ?? { delivery: 'unconfirmed' };
     if (cached || (record.state === "replied" && record.reply !== undefined)) {
       delete base.continuedTo; delete base.warning;
       return { ...base, ...(cached ?? { reply: record.reply }) };
     }
-    if (record.delivery === "not-sent") return { ...base, state: this.#requests.active(record) ? record.state : "not-sent" };
+    if (record.delivery === "not-sent") return { ...base,
+      ...(record.durable && !record.finished ? { state: 'queued', delivery: 'local-queued' }
+        : { state: this.#requests.active(record) ? record.state : "not-sent" }) };
     if (["held", "refused"].includes(record.delivery)) return { ...base, state: record.delivery };
     const provider = this.#provider(record.session.provider);
     if (record.kind === "send") {

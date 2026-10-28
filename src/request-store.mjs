@@ -45,19 +45,30 @@ export class RequestStore {
     return record;
   }
 
+  claim(record) {
+    return this.update(record, { owner: { pid: process.pid, start: processIdentity(process.pid) } });
+  }
+
   read(id) {
+    const directory = fs.lstatSync(this.directory);
+    if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== process.getuid() || (directory.mode & 0o077)) throw fail('REQUEST_STORE_UNSAFE', 'Unsafe request directory');
     const file = this.file(id);
     const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
     try {
       const stat = fs.fstatSync(fd);
-      if (!stat.isFile() || stat.size > 4 * 1024 * 1024) throw fail("REQUEST_RECORD_INVALID", "Invalid request record");
+      if (!stat.isFile() || stat.size > 4 * 1024 * 1024 || stat.uid !== process.getuid() || (stat.mode & 0o077)) throw fail("REQUEST_RECORD_INVALID", "Invalid request record");
       const record = JSON.parse(fs.readFileSync(fd, "utf8"));
       if (record.version !== 1 || record.requestId !== id || record.target !== record.session?.id) throw fail("REQUEST_RECORD_INVALID", "Request identity mismatch");
+      if (record.durable && (!/^(claude|codex):[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(record.target)
+        || !['send', 'ask'].includes(record.kind) || !Number.isFinite(record.createdAt) || !Number.isSafeInteger(record.sequence) || record.sequence <= 0
+        || ![record.waitTimeoutMs, record.replyTimeoutMs].every(value => Number.isSafeInteger(value) && value > 0 && value <= 86400000)
+        || (record.payload !== undefined && (typeof record.payload !== 'string' || !record.payload.trim() || Buffer.byteLength(record.payload) > 64000))
+        || (record.origin && !/^claude:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(record.origin)))) throw fail('REQUEST_RECORD_INVALID', 'Invalid durable request');
       return record;
     } finally { fs.closeSync(fd); }
   }
 
-  // Bounded, read-only metadata for the web workspace. Payloads stay in native logs.
+  // Bounded, read-only metadata for the web workspace; never expose pending payloads.
   async recent({ limit = 50 } = {}) {
     const io = fs.promises;
     let directory;
@@ -83,6 +94,7 @@ export class RequestStore {
         records.push({ requestId: id, target: row.target, kind: row.kind, state: answer?.state ?? row.state,
           delivery: answer?.delivery ?? row.delivery, receipt: row.receipt, createdAt: row.createdAt,
           updatedAt: row.updatedAt ?? row.createdAt, reply: answer?.reply ?? row.reply, error: row.error,
+          ...(row.origin || row.notification ? { notification: row.notification ?? { delivery: 'unconfirmed' } } : {}),
           ...(row.continuedTo && row.receipt !== "consumed" && !answer && row.state !== "replied" ? { continuedTo: row.continuedTo, warning: row.warning } : {}) });
       } catch { /* A malformed or concurrently removed record must not hide other requests. */ }
     }
@@ -98,7 +110,15 @@ export class RequestStore {
       const temporary = `${file}.${crypto.randomUUID()}.tmp`;
       try {
         fs.writeFileSync(temporary, JSON.stringify(record), { flag: "wx", mode: 0o600 });
+        if (record.durable) {
+          const fd = fs.openSync(temporary, 'r');
+          try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+        }
         fs.renameSync(temporary, file);
+        if (record.durable) {
+          const fd = fs.openSync(this.directory, 'r');
+          try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+        }
       } finally { fs.rmSync(temporary, { force: true }); }
       return record;
     });
@@ -111,20 +131,34 @@ export class RequestStore {
       const temporary = `${file}.${crypto.randomUUID()}.tmp`;
       try {
         fs.writeFileSync(temporary, JSON.stringify(value), { flag: "wx", mode: 0o600 });
+        const fd = fs.openSync(temporary, 'r');
+        try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
         try { fs.linkSync(temporary, file); } catch (error) { if (error.code !== "EEXIST") throw error; }
+        const directory = fs.openSync(this.directory, 'r');
+        try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
       } finally { fs.rmSync(temporary, { force: true }); }
     }
     let fd;
     try { fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK); }
     catch (error) { if (error.code === "ENOENT") return null; throw error; }
     try {
-      if (!fs.fstatSync(fd).isFile()) throw fail("REQUEST_RECORD_INVALID", "Invalid reply record");
+      const stat = fs.fstatSync(fd);
+      if (!stat.isFile() || stat.uid !== process.getuid() || (stat.mode & 0o077) || stat.size > 4 * 1024 * 1024) throw fail("REQUEST_RECORD_INVALID", "Invalid reply record");
       return JSON.parse(fs.readFileSync(fd, "utf8"));
     } finally { fs.closeSync(fd); }
   }
 
   active(record) {
     return !record.finished && record.owner?.start != null && processIdentity(record.owner.pid) === record.owner.start;
+  }
+
+  pending(target) {
+    try {
+      return fs.readdirSync(this.directory).filter(name => UUID.test(name.slice(0, -5)) && name.endsWith('.json'))
+        .map(name => this.read(name.slice(0, -5)))
+        .filter(row => row.durable && row.target === target && !row.finished && row.delivery === 'not-sent' && typeof row.payload === 'string')
+        .sort((a, b) => (a.sequence ?? a.createdAt) - (b.sequence ?? b.createdAt));
+    } catch (error) { if (error.code === 'ENOENT') return []; throw error; }
   }
 
   async acquire(record, { timeoutMs, onProgress = () => {}, wait = ms => new Promise(resolve => setTimeout(resolve, ms)) }) {
@@ -142,7 +176,7 @@ export class RequestStore {
       const ids = fs.readFileSync(queue, "utf8").split("\n").filter(Boolean);
       const index = ids.indexOf(record.requestId);
       if (index < 0) throw fail("REQUEST_QUEUE_INVALID", "Request ticket is missing");
-      const ahead = ids.slice(0, index).some(id => this.active(this.read(id)));
+      const ahead = ids.slice(0, index).some(id => { const row = this.read(id); return !row.transmissionFinished && this.active(row); });
       if (!ahead) {
         if (Date.now() >= deadline) throw fail("TARGET_BUSY_TIMEOUT", "Local request queue timed out; message was not sent");
         return deadline - Date.now();

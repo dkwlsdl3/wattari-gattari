@@ -25,6 +25,7 @@ export function parseCliArgs(args) {
     if (arg === "--help" || arg === "-h") { options.command = "help"; commandSeen = true; continue; }
     if (arg === "--version" || arg === "-v") { options.command = "version"; commandSeen = true; continue; }
     if (arg === "--json") { options.json = true; continue; }
+    if (arg === '--async') { options.async = true; continue; }
     if (arg === '--execute') { options.execute = true; continue; }
     if (arg === "--until-idle") { options.untilIdle = true; continue; }
     if (arg === "--notify-origin") { options.notifyOrigin = true; continue; }
@@ -63,6 +64,7 @@ export function parseCliArgs(args) {
   if (!["auto", "direct", "tmux"].includes(options.backend)) throw invalid(`Unknown backend: ${options.backend}`);
   if (options.backend !== "auto" && options.command !== "default") throw invalid("--backend is only valid for the interactive dock");
   if (options.untilIdle && options.command !== "ask") throw invalid("--until-idle is only valid for ask");
+  if (options.async && options.command !== 'ask') throw invalid('--async is only valid for ask');
   if (options.notifyOrigin && options.command !== "ask") throw invalid("--notify-origin is only valid for ask");
   if (options.resume && options.command !== "run") throw invalid("--resume is only valid for run");
   if (options.execute && options.command !== 'plan') throw invalid('--execute is only valid for plan');

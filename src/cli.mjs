@@ -17,6 +17,7 @@ import { ClaudeProvider } from "./providers/claude.mjs";
 import { CodexProvider } from "./providers/codex.mjs";
 import { RequestStore } from "./request-store.mjs";
 import { SessionBridge } from "./session-bridge.mjs";
+import { MessageDelivery } from './message-delivery.mjs';
 import { enterSessionDock } from "./session-dock.mjs";
 import { TmuxWorkspace } from "./tmux-workspace.mjs";
 import { WagaSettingsStore } from "./waga-settings.mjs";
@@ -35,9 +36,10 @@ function usage() {
     `${CLI_NAME} run <workflow.json> [--resume RUN_ID]    Run isolated native work with checks and independent review`,
     `${CLI_NAME} plan <provider:session-id> [plan.json] [--execute] [--json]    Record a skill plan, or hand its execution to Waga with --execute`,
     `${CLI_NAME} serve [--port 4317] [--cwd PATH]    Open the local browser workspace`,
-    `${CLI_NAME} send <session-id-or-name> <message> [--cwd PATH]    One-way notification`,
-    `${CLI_NAME} ask <session-id-or-name> <message> [--notify-origin] [--wait-timeout SEC] [--reply-timeout SEC] [--cwd PATH]`,
+    `${CLI_NAME} send <session-id-or-name> <message> [--cwd PATH]    Durably queue a one-way notification`,
+    `${CLI_NAME} ask <session-id-or-name> <message> [--async] [--notify-origin] [--wait-timeout SEC] [--reply-timeout SEC] [--cwd PATH]`,
     "                                ask returns the request's answer, independent of session idle.",
+    "                                --async returns a local queue receipt; inspect the request with result.",
     "                                --until-idle is accepted for compatibility; it adds no session-idle wait.",
     `${CLI_NAME} result <request-id> [--json]    Read an existing request; never resend`,
     "                                ask: busy wait 1800s; reply wait 180s. Use explicit timeouts for long work.",
@@ -82,6 +84,7 @@ export async function runCli(args = process.argv.slice(2), {
   stdout = process.stdout,
   stderr = process.stderr,
   bridge = null,
+  delivery = null,
   doctor = runDoctor,
   launcher = openNativeAgents,
   dock = enterSessionDock,
@@ -107,7 +110,9 @@ export async function runCli(args = process.argv.slice(2), {
     catch (error) { stderr.write(`${error.message}\n`); return 1; }
     finally { process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
   }
-  bridge ??= defaultBridge({ autoStartDaemon: !['serve', 'plan'].includes(options.command) });
+  const nativeBridge = bridge === null;
+  bridge ??= defaultBridge({ autoStartDaemon: !['serve', 'plan', 'send'].includes(options.command) && !options.async });
+  if (nativeBridge) delivery ??= new MessageDelivery({ store: new RequestStore(), bridge });
 
   const cwd = path.resolve(options.cwd ?? process.cwd());
   if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()) {
@@ -123,7 +128,7 @@ export async function runCli(args = process.argv.slice(2), {
   const progress = ({ state, target, requestId, delivery }) => {
     lastProgress = { state, target, requestId, delivery };
     const explanation = {
-      "not-sent": "not sent", "waiting-local": "not sent; waiting behind another Waga request",
+      queued: "stored by Waga; native delivery pending", "not-sent": "not sent", "waiting-local": "not sent; waiting behind another Waga request",
       waiting: "not sent; target busy", submitting: "submission in progress; delivery unknown",
       submitted: delivery === "accepted" ? "native submission acknowledged" : "written; receiver acceptance unconfirmed",
       accepted: "receiver acknowledged", "reply-received": "request answer received", working: "request turn still running",
@@ -200,13 +205,23 @@ export async function runCli(args = process.argv.slice(2), {
     else if (options.command === "tmux-agents-view") return (await tmuxAgentsView(options.windowId)).code ?? 0;
     else if (options.command === "list" || options.command === "default") writeList(stdout, stderr, await bridge.discover({ provider: options.provider, cwd: options.cwd ? cwd : undefined }), options.json);
     else if (options.command === "send") {
-      const result = await bridge.send(options.target, options.message, { cwd: options.cwd ? cwd : undefined, onProgress: progress, waitTimeoutMs: options.waitTimeoutMs });
+      const result = delivery
+        ? await delivery.enqueue(options.target, options.message, { cwd: options.cwd ? cwd : undefined, waitTimeoutMs: options.waitTimeoutMs })
+        : await bridge.send(options.target, options.message, { cwd: options.cwd ? cwd : undefined, onProgress: progress, waitTimeoutMs: options.waitTimeoutMs });
       stdout.write(options.json ? `${JSON.stringify(result)}\n` : `${result.delivery ?? "submitted"}\t${result.target}\t${result.requestId}\n`);
     } else if (options.command === "ask") {
+      if (delivery) {
+        const receipt = await delivery.enqueue(options.target, options.message, { kind: 'ask', cwd: options.cwd ? cwd : undefined, origin: options.notifyOrigin ? origin : undefined, waitTimeoutMs: options.waitTimeoutMs, replyTimeoutMs: options.replyTimeoutMs });
+        progress({ ...receipt, delivery: 'local-queued' });
+        const result = options.async ? receipt : await delivery.wait(receipt.requestId, { onProgress: progress });
+        stdout.write(options.json ? `${JSON.stringify(result)}\n` : options.async ? `${result.delivery}\t${result.target}\t${result.requestId}\n` : `${result.reply}\n`);
+        return 0;
+      }
+      if (options.async) throw Object.assign(Error('Asynchronous ask requires a delivery service'), { code: 'DELIVERY_UNAVAILABLE' });
       const onReply = options.notifyOrigin ? async (reply, { requestId, target }) => {
         try {
-          await originNotifier({ origin, requestId, target, reply });
-          stderr.write(`origin-notified\t${origin}\t${requestId}\n`);
+          const notification = await originNotifier({ origin, requestId, target, reply });
+          stderr.write(`${notification?.delivery === 'local-queued' ? 'origin-local-queued' : 'origin-notified'}\t${origin}\t${requestId}\n`);
         } catch (error) {
           stderr.write(`ORIGIN_NOTIFY_FAILED: ${error.message}; inspect without resending: ${CLI_NAME} result ${requestId} --json\n`);
         }
@@ -222,6 +237,10 @@ export async function runCli(args = process.argv.slice(2), {
       stdout.write(options.json ? `${JSON.stringify(result)}\n` : `${result.reply}\n`);
     } else if (options.command === "result") {
       const result = await bridge.result(options.requestId);
+      if (delivery) {
+        try { await delivery.recover(options.requestId); }
+        catch (error) { stderr.write(`DELIVERY_RECOVERY_FAILED: ${error.message}; request remains stored: ${options.requestId}\n`); }
+      }
       if (options.json) stdout.write(`${JSON.stringify(result)}\n`);
       else if (result.state === "replied") stdout.write(`${result.reply}\n`);
       else {
@@ -237,8 +256,9 @@ export async function runCli(args = process.argv.slice(2), {
   } catch (error) {
     stderr.write(`${error.code ? `${error.code}: ` : ""}${error.message}\n`);
     if (error.requestId) {
+      if (error.locallyStored) stderr.write('Message remains stored locally; inspect the same request ID instead of resending.\n');
       stderr.write(`request\t${error.requestId}\ttarget=${error.target}\tdelivery=${error.delivery}\nInspect without resending: ${CLI_NAME} result ${error.requestId}\n`);
-      if (options.json) stdout.write(`${JSON.stringify({ error: { code: error.code ?? "REQUEST_FAILED", message: error.message }, requestId: error.requestId, target: error.target, delivery: error.delivery, ...(error.continuedTo ? { continuedTo: error.continuedTo } : {}) })}\n`);
+      if (options.json) stdout.write(`${JSON.stringify({ error: { code: error.code ?? "REQUEST_FAILED", message: error.message }, requestId: error.requestId, target: error.target, delivery: error.delivery, ...(error.locallyStored ? { locallyStored: true } : {}), ...(error.continuedTo ? { continuedTo: error.continuedTo } : {}) })}\n`);
     }
     return 1;
   } finally {

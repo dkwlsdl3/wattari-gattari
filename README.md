@@ -227,7 +227,10 @@ Waga does not change other sessions' display modes or global settings.
 
 ## Peer messages
 
-- `send`: one-way notification; confirms submission only.
+- `send`: durably stores a one-way notification and returns `local-queued` immediately.
+  This confirms local storage, not native receipt or a reply.
+- `ask --async`: stores a request and returns its ID immediately. For handoffs, ask for
+  one brief receipt reply and inspect `waga result <request-id> --json`.
 - `ask`: Claude queues a native peer message even while busy and waits for a request-tagged reply.
   Codex serializes Waga callers in admission order, waits for idle before submitting a peer turn,
   and returns that turn's completed answer. Both providers complete the exchange when
@@ -256,8 +259,21 @@ Enable `set -o pipefail` when piping output to preserve failures.
 
 Private request metadata and one immutable recovered answer are stored in
 `$XDG_STATE_HOME/wattari-gattari/requests/` (default
-`~/.local/state/wattari-gattari/requests/`). Prompts and full transcripts are not
-copied. Dead callers are not automatically resubmitted. FIFO ordering covers
+`~/.local/state/wattari-gattari/requests/`). CLI messages awaiting submission also
+store their body privately (directory 0700, records 0600, fsynced before acceptance).
+An on-demand detached worker per target delivers them after the sender exits;
+no web server or provider-daemon restart is required. Workers serialize delivery
+and reply waits for the same target; asynchronous acceptance does not inject into a busy Codex turn.
+Bodies are limited to 64,000 UTF-8 bytes, with at most 128 unfinished messages
+across 16 pending targets. The pre-submission deadline starts at local acceptance
+(default 1800s, maximum 24h); bodies are removed on submission or terminal failure.
+If a worker crashes, a new message to that target or `result` for a queued request
+restarts its remaining unsent messages. Without a new call, crash recovery does not run.
+Launch failure reports the stored request ID; inspect it instead of resending.
+Submission-unknown and submitted requests are never automatically replayed.
+Older metadata-only requests are never dispatched. Full transcripts are not copied.
+The `notification` field of `result --json` records origin-notification queue IDs or
+failures; inspect that ID separately to confirm its native delivery. FIFO ordering covers
 Waga callers sharing that directory, not native UI or other clients. Recovery
 reads only the original Codex turn or a `[WAGA REPLY <request-id>]` in the exact
 Claude session's native log; missing correlation is `result-unknown`.

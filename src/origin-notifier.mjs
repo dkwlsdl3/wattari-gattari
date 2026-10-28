@@ -32,7 +32,7 @@ export async function notifyOrigin({ origin, requestId, target, reply }, { execu
   let result;
   try { result = JSON.parse(stdout); }
   catch { throw Object.assign(new Error("Origin notification returned invalid JSON"), { code: "ORIGIN_NOTIFY_INVALID" }); }
-  if (result.delivery !== "accepted") {
+  if (!["accepted", "local-queued"].includes(result.delivery)) {
     throw Object.assign(new Error(`Origin notification was not acknowledged: ${result.delivery ?? "unknown"}`), { code: "ORIGIN_NOTIFY_UNCONFIRMED" });
   }
   return result;
