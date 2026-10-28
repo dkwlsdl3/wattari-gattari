@@ -216,8 +216,11 @@ function sessionWorkspace(session) {
   return path.resolve(String(session.projectCwd || session.cwd || "/"));
 }
 
-export function reconcileOverviewOrder(orderByWorkspace, sessions) {
+export function reconcileOverviewOrder(orderByWorkspace, sessions, savedOrder = new Map()) {
   const reconciled = new Map([...orderByWorkspace].map(([workspace, ids]) => [workspace, [...ids]]));
+  for (const [workspace, ids] of savedOrder) {
+    reconciled.set(workspace, [...new Set([...ids, ...(reconciled.get(workspace) ?? [])])]);
+  }
   for (const session of sessions) {
     const workspace = sessionWorkspace(session);
     if (!reconciled.has(workspace)) reconciled.set(workspace, []);
@@ -690,7 +693,7 @@ export async function runOverview({
   const readSavedOrder = () => {
     if (!orderStore) return;
     try {
-      for (const [workspacePath, ids] of orderStore.load()) orderByWorkspace.set(workspacePath, ids);
+      orderByWorkspace = reconcileOverviewOrder(orderByWorkspace, [], orderStore.load());
       orderReadWarning = null;
     } catch (error) { orderReadWarning = { provider: "waga", message: error.message }; }
   };
@@ -1424,8 +1427,7 @@ export async function runOverview({
         allSessions = applyOverviewOrder(allSessions, orderByWorkspace);
         selectedKey = target.session.id;
         if (orderStore) {
-          const liveIds = allSessions.filter((session) => sessionWorkspace(session) === target.cwd).map((session) => session.id);
-          try { orderStore.saveWorkspace(target.cwd, liveIds); orderWarning = null; }
+          try { orderStore.saveWorkspace(target.cwd, moved.get(target.cwd)); orderWarning = null; }
           catch (error) { orderWarning = { provider: "waga", message: error.message }; }
         }
       }

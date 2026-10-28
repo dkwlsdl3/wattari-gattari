@@ -435,6 +435,66 @@ test("Shift+Up and Shift+Down persist manual order across refreshes", async (t) 
   assert.equal(await running, 0);
 });
 
+test("overview merges partial saved order with remembered discovery order without polling saves", async (t) => {
+  const cwd = "/work/p";
+  const pinned = { id: "claude:pinned", provider: "claude", name: "Pinned", cwd, status: "idle", updatedAt: 1 };
+  const alpha = { ...pinned, id: "codex:alpha", provider: "codex", name: "Alpha" };
+  const beta = { ...alpha, id: "codex:beta", name: "Beta" };
+  const added = { ...alpha, id: "codex:new", name: "Newcomer" };
+  let rows = [pinned, alpha, beta], availableProviders = ["claude", "codex"], discoveries = 0;
+  let saved = new Map([[cwd, [pinned.id, "codex:absent"]]]);
+  const saves = [];
+  const orderStore = {
+    load: () => saved,
+    saveWorkspace(workspace, ids) { saves.push([...ids]); saved = new Map(saved).set(workspace, ids); },
+  };
+  const input = ttyInput(), output = capturedOutput();
+  const running = runOverview({
+    bridge: { async discover() { discoveries++; return { sessions: rows, warnings: [], availableProviders }; } },
+    workspace: { async leave() { return { closeOverview: true }; } }, orderStore,
+    defaultCwd: cwd, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false,
+  });
+  t.after(async () => { input.emit("end"); await running; });
+  const assertOrder = names => {
+    const frame = plain(output.writes.at(-1));
+    const positions = names.map(name => frame.indexOf(name));
+    assert.ok(positions.every(index => index >= 0), frame);
+    assert.deepEqual(positions, [...positions].sort((a, b) => a - b));
+  };
+  const refresh = async () => {
+    const next = discoveries + 1;
+    pressAlt(input, "r");
+    await waitFor(() => discoveries === next);
+    await new Promise(resolve => setImmediate(resolve));
+  };
+  await waitFor(() => output.writes.some(frame => frame.includes("Beta")));
+  assertOrder(["Pinned", "Alpha", "Beta"]);
+  rows = [{ ...beta, status: "working", updatedAt: 30 }, { ...alpha, status: "needs-input", updatedAt: 20 }, pinned];
+  await refresh();
+  assertOrder(["Pinned", "Alpha", "Beta"]);
+  // Opposite provider completion orders must retain the existing Codex placement.
+  rows = [pinned]; availableProviders = ["claude"];
+  await refresh();
+  assertOrder(["Pinned", "Alpha", "Beta"]);
+  rows = [beta, alpha]; availableProviders = ["codex"];
+  await refresh();
+  assertOrder(["Pinned", "Alpha", "Beta"]);
+  rows = [added, beta, alpha, pinned]; availableProviders = ["claude", "codex"];
+  await refresh();
+  await refresh();
+  assertOrder(["Pinned", "Alpha", "Beta", "Newcomer"]);
+  assert.deepEqual(saves, []);
+  saved = new Map([[cwd, [beta.id, "codex:absent", pinned.id]]]);
+  await refresh();
+  assertOrder(["Beta", "Pinned", "Alpha", "Newcomer"]);
+  input.emit("keypress", "", { name: "down" });
+  input.emit("keypress", "", { name: "down", shift: true });
+  assert.deepEqual(saves, [[pinned.id, "codex:absent", beta.id, alpha.id, added.id]]);
+  await refresh();
+  assertOrder(["Pinned", "Beta", "Alpha", "Newcomer"]);
+  assert.equal(saves.length, 1);
+});
+
 test("overview follows externally saved workspace order while retaining its selected session", async (t) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-order-sync-"));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));

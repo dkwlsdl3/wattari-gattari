@@ -83,8 +83,7 @@ export async function startWebServer({ bridge, cwd = process.cwd(), filterCwd, p
   const jobs = new Map(), previews = new Map();
   let viewOrder = new Map();
   const orderedSessions = sessions => {
-    for (const [workspace, ids] of orderStore.load()) viewOrder.set(workspace, ids);
-    viewOrder = reconcileOverviewOrder(viewOrder, [...sessions].sort((a, b) => workspaceOf(a).localeCompare(workspaceOf(b))));
+    viewOrder = reconcileOverviewOrder(viewOrder, [...sessions].sort((a, b) => workspaceOf(a).localeCompare(workspaceOf(b))), orderStore.load());
     return applyOverviewOrder(sessions, viewOrder);
   };
   let snapshot = null, discovering = null, readingRequests = null, requestsSnapshot = null;

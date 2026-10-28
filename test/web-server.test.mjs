@@ -334,6 +334,47 @@ test("conversation history resolves an authenticated native identity and passes 
   assert.deepEqual(seen, [null, "opaque:older"]);
 });
 
+test("web merges partial saved order across polling and filtered manual moves", async t => {
+  const pinned = { ...session, id: "claude:pinned", provider: "claude" };
+  const alpha = { ...session, id: "codex:alpha" }, beta = { ...session, id: "codex:beta" };
+  const added = { ...session, id: "codex:new" };
+  let rows = [pinned, alpha, beta], now = 0;
+  let saved = new Map([[session.cwd, [pinned.id, "codex:absent"]]]);
+  const saves = [];
+  const orderStore = {
+    load: () => saved,
+    saveWorkspace(workspace, ids) { saves.push([...ids]); saved = new Map(saved).set(workspace, ids); },
+  };
+  const f = await fixture(t, { discover: async () => ({ sessions: rows, warnings: [] }) }, { now: () => now, orderStore });
+  const ids = async () => {
+    now += 6_000;
+    const response = await f.get("/api/sessions");
+    assert.equal(response.status, 200);
+    return (await response.json()).sessions.map(row => row.id);
+  };
+  assert.deepEqual(await ids(), [pinned.id, alpha.id, beta.id]);
+  rows = [{ ...beta, status: "working", updatedAt: 30 }, { ...alpha, status: "needs-input", updatedAt: 20 }, pinned];
+  assert.deepEqual(await ids(), [pinned.id, alpha.id, beta.id]);
+  rows = [pinned];
+  assert.deepEqual(await ids(), [pinned.id]);
+  rows = [beta, alpha];
+  assert.deepEqual(await ids(), [alpha.id, beta.id]);
+  rows = [added, beta, alpha, pinned];
+  assert.deepEqual(await ids(), [pinned.id, alpha.id, beta.id, added.id]);
+  assert.deepEqual(await ids(), [pinned.id, alpha.id, beta.id, added.id]);
+  assert.deepEqual(saves, []);
+  saved = new Map([[session.cwd, [beta.id, "codex:absent", pinned.id]]]);
+  assert.deepEqual(await ids(), [beta.id, pinned.id, alpha.id, added.id]);
+  const response = await f.post(`/api/sessions/${encodeURIComponent(added.id)}/order`, {
+    targetId: beta.id, position: "before", visibleIds: [beta.id, added.id],
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).sessions.map(row => row.id), [added.id, beta.id, pinned.id, alpha.id]);
+  assert.deepEqual(saves, [[added.id, beta.id, "codex:absent", pinned.id, alpha.id]]);
+  assert.deepEqual(await ids(), [added.id, beta.id, pinned.id, alpha.id]);
+  assert.equal(saves.length, 1);
+});
+
 test("web reorders within project folders and shares durable dock ordering across server restarts", async t => {
   const { DockOrderStore } = await import("../src/dock-order.mjs");
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "waga-proof-web-order-"));
