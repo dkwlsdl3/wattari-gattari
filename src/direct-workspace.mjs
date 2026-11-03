@@ -137,6 +137,10 @@ export class DirectWorkspace {
     return { closed: false };
   }
 
+  async openRemoteHost(host, commandSpec) {
+    return this.focusOrOpen({ id: `host:${host.id}`, provider: "remote", name: host.name }, { ...commandSpec, cwd: process.cwd() });
+  }
+
   async reconcileSessionViews() {
     return { closed: [] };
   }

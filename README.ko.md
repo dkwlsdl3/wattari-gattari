@@ -17,6 +17,31 @@ Wattari Gattari(`waga`)는 Claude Code와 Codex의 활성 세션을 한 dock에�
 - Claude·Codex 사용 한도 표시 (5분 캐시)
 - 넓은 화면에서 선택한 세션의 마지막 입력·응답 미리보기
 - `waga send` 단방향 알림과 `waga ask` 응답 요청
+- Global Dock의 PC 선택, SSH로 원격 Dock 접속과 PC 간 메시지 전달
+
+## 여러 PC 연결
+
+현재 PC Dock 상단의 **↑ PC 목록으로**에서 Global Dock을 엽니다. PC를 선택하면
+그 PC의 기존 Dock으로 들어가며, `Alt+G`는 원격 세션에서도 해당 PC Dock으로 돌아옵니다.
+PC별 순서는 등록 순서를 유지하고, 연결 실패 시 마지막 조회 자료와 오류를 표시합니다.
+
+[설정 예시](integrations/hosts.example.json)를 별도 파일로 복사해 현재 PC 이름과 원격 PC의
+SSH 접속 대상(별칭 또는 `사용자@호스트`)·Waga 실행파일을 지정합니다. `command`에는 비대화형 SSH에서도 실행 가능한
+실행파일 이름 또는 절대 경로를 씁니다. 원격 PC에도 이 기능을 지원하는 Waga와 tmux가 필요합니다.
+SSH 인증·호스트 키 확인은 먼저 직접 완료하십시오. Waga가 키나 사용자 설정을 바꾸지는 않습니다.
+
+```sh
+waga --hosts /absolute/path/hosts.json
+waga list --host home-wsl --hosts /absolute/path/hosts.json --json
+waga ask codex:<전체-ID> '인계문을 확인하고 한 번 회신해 주세요' --async --host home-wsl --hosts /absolute/path/hosts.json
+waga result <요청-ID> --host home-wsl --hosts /absolute/path/hosts.json --json
+```
+
+기본 등록 파일은 `~/.config/wattari-gattari/hosts.json`이며 XDG_CONFIG_HOME을 따릅니다.
+설정 파일을 자동 생성하거나 Tailscale 기기를 자동 등록하지 않습니다.
+`local-queued`는 상대 PC Waga의 접수이며 실제 수신·답변은 결과에서 확인합니다.
+연결 실패 후 메시지를 자동 재전송하지 않습니다. 이번 연결은 PC 간 직접 SSH이며
+Oracle의 상시 접수·중계는 포함하지 않습니다. [설계와 연결 계약](docs/adr/2026-11-03-global-dock.md).
 
 ## 요구 사항과 설치
 

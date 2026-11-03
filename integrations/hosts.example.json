@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "local": { "id": "ubuntu-work", "name": "ubuntu-work" },
+  "hosts": [
+    { "id": "home-wsl", "name": "home-wsl", "ssh": "home-wsl", "command": "waga" }
+  ]
+}

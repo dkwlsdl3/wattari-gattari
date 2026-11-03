@@ -3,6 +3,13 @@ import test from "node:test";
 
 import { parseCliArgs } from "../src/cli-options.mjs";
 
+test("hosts path is absolute and limited to the interactive dock", () => {
+  assert.equal(parseCliArgs(["--hosts", "/tmp/hosts.json"]).hosts, "/tmp/hosts.json");
+  assert.equal(parseCliArgs(["overview", "--hosts", "/tmp/hosts.json"]).hosts, "/tmp/hosts.json");
+  assert.throws(() => parseCliArgs(["--hosts", "relative"]), { code: "INVALID_ARGUMENT" });
+  assert.throws(() => parseCliArgs(["list", "--hosts", "/tmp/hosts.json"]), { code: "INVALID_ARGUMENT" });
+});
+
 test("bare CLI selects the interactive default and agents remains a list alias", () => {
   assert.equal(parseCliArgs([]).command, "default");
   assert.equal(parseCliArgs(["agents"]).command, "list");
@@ -70,4 +77,11 @@ test("run requires a local manifest and validates resume scope", () => {
   const id = "11111111-1111-4111-8111-111111111111";
   assert.equal(parseCliArgs(["run", "workflow.json", "--resume", id]).resume, id);
   for (const args of [["run"], ["run", "a", "b"], ["run", "a", "--resume", "bad"], ["list", "--resume", id]]) assert.throws(() => parseCliArgs(args), { code: "INVALID_ARGUMENT" });
+});
+
+test("remote targets apply only to messages, results and lists, with no local-socket notification", () => {
+  assert.equal(parseCliArgs(["ask", "codex:x", "hello", "--async", "--host", "home", "--hosts", "/tmp/hosts.json"]).host, "home");
+  for (const args of [["--host", "home"], ["serve", "--host", "home"], ["ask", "codex:x", "hi", "--host", "home", "--notify-origin"]]) {
+    assert.throws(() => parseCliArgs(args), { code: "INVALID_ARGUMENT" });
+  }
 });

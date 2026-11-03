@@ -1,10 +1,40 @@
 import assert from "node:assert/strict";
 import path from "node:path";
+import fs from "node:fs";
+import os from "node:os";
 import test from "node:test";
 
 import { runCli } from "../src/cli.mjs";
+import { remoteCommand } from "../src/global-hosts.mjs";
 
 function output() { let value = ""; return { write(chunk) { value += chunk; }, get value() { return value; } }; }
+
+test("remote ask uses the owning PC cwd, exact target, receipt and timeouts without calling the local bridge", async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-remote-cli-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const host = { id: "home", name: "Home", ssh: "home-wsl", command: "waga" };
+  const file = path.join(root, "hosts.json");
+  fs.writeFileSync(file, JSON.stringify({ version: 1, local: { id: "work", name: "Work" }, hosts: [host] }));
+  const stdout = output(), stderr = output();
+  let calls = 0;
+  const args = ["ask", "claude:exact-id", "한글 인계 ' $(text)\n둘째 줄", "--cwd", "/remote/only/path", "--async", "--json", "--wait-timeout", "4", "--reply-timeout", "8"];
+  const code = await runCli([...args, "--host", "home", "--hosts", file], { stdout, stderr, bridge: { discover() { throw Error("local bridge must not run"); } },
+    remoteRunner: async (spec, streams) => {
+      calls++;
+      assert.deepEqual(spec, remoteCommand(host, { args: ["ask", args[1], args[2], "--cwd", "/remote/only/path", "--json", "--async", "--wait-timeout", "4", "--reply-timeout", "8"] }));
+      assert.equal(streams.stdout, stdout);
+      streams.stdout.write('{"delivery":"local-queued","requestId":"remote-request"}\n');
+      return 0;
+    } });
+  assert.equal(code, 0);
+  assert.equal(calls, 1);
+  assert.equal(JSON.parse(stdout.value).requestId, "remote-request");
+  assert.equal(stderr.value, "");
+  assert.equal(await runCli(["send", "codex:id", "hi", "--host", "home", "--hosts", file], { stdout: output(), stderr,
+    remoteRunner: async () => { calls++; return 255; } }), 255);
+  assert.equal(calls, 2, "an uncertain SSH result is not retried");
+  assert.match(stderr.value, /자동 재전송하지 않았습니다/);
+});
 
 test("CLI errors and JSON replies preserve exit codes and stdout/stderr separation", async () => {
   const stdout = output();

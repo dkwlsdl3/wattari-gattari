@@ -17,6 +17,31 @@ from one local dock or browser workspace. Native providers own session execution
 - View Claude and Codex quota with a five-minute cache
 - Preview the selected session's latest input and response on wide terminals
 - Send notifications with `waga send` or request replies with `waga ask`
+- Select registered PCs in Global Dock, open their existing Docks over SSH, and exchange messages
+
+## Multiple PCs
+
+Open **↑ PC 목록으로** at the top of the local Dock, then select a registered PC.
+The remote PC runs its own Waga Dock; `Alt+G` returns to that PC's Dock.
+Registration order stays fixed. Failed queries retain the last successful summary with an error.
+
+Copy the [host example](integrations/hosts.example.json) to your own file and set the local identity,
+remote SSH destination (an alias or `user@host`) and Waga executable. The executable must work in a noninteractive SSH shell.
+Remote PCs require this version of Waga and tmux. Establish SSH authentication and host trust first;
+Waga does not register keys or modify your SSH settings.
+
+```sh
+waga --hosts /absolute/path/hosts.json
+waga list --host home-wsl --hosts /absolute/path/hosts.json --json
+waga ask codex:<full-ID> 'Confirm this handoff with one reply' --async --host home-wsl --hosts /absolute/path/hosts.json
+waga result <request-ID> --host home-wsl --hosts /absolute/path/hosts.json --json
+```
+
+The optional default registry is `$XDG_CONFIG_HOME/wattari-gattari/hosts.json`, falling back to
+`~/.config`. It is never created automatically. Tailscale membership alone does not register a host.
+`local-queued` confirms storage by the remote Waga, not native receipt or a reply.
+Ambiguous SSH failures never trigger automatic message resubmission. This is direct SSH;
+an always-on Oracle relay and offline inbox are separate work. See the [connection contract](docs/adr/2026-11-03-global-dock.md).
 
 ## Requirements and install
 

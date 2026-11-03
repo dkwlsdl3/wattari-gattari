@@ -99,3 +99,12 @@ test("direct workspace has no retained session view to close after archive", asy
   const workspace = new DirectWorkspace({ inputStream: terminalStream(), outputStream: terminalStream() });
   assert.deepEqual(await workspace.closeSessionView({ id: "codex:proof" }), { closed: false });
 });
+
+test("direct backend gives the terminal to remote SSH and restores it after a connection error", async () => {
+  const input = terminalStream(), output = terminalStream();
+  const workspace = new DirectWorkspace({ inputStream: input, outputStream: output, eventLog: { record() {} },
+    launch: async (command, args) => { assert.equal(command, "ssh"); assert.deepEqual(args, ["-tt", "home", "waga"]); return { code: 255 }; } });
+  const result = await workspace.openRemoteHost({ id: "home", name: "Home" }, { command: "ssh", args: ["-tt", "home", "waga"] });
+  assert.equal(result.code, 255);
+  assert.deepEqual(input.events, ["raw:false", "pause", "raw:true", "resume"]);
+});

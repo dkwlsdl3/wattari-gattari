@@ -19,6 +19,7 @@ import { RequestStore } from "./request-store.mjs";
 import { SessionBridge } from "./session-bridge.mjs";
 import { MessageDelivery } from './message-delivery.mjs';
 import { enterSessionDock } from "./session-dock.mjs";
+import { loadHosts, remoteCommand, runRemoteCommand } from "./global-hosts.mjs";
 import { TmuxWorkspace } from "./tmux-workspace.mjs";
 import { WagaSettingsStore } from "./waga-settings.mjs";
 import { runWorkflow } from "./workflow-runtime.mjs";
@@ -30,8 +31,8 @@ import { executePlan, planRequest } from './work-plan-client.mjs';
 
 function usage() {
   return [
-    `${CLI_NAME} [--cwd PATH] [--backend auto|direct|tmux]`,
-    "                                Open the global dock, optionally filtered by workspace",
+    `${CLI_NAME} [--cwd PATH] [--backend auto|direct|tmux] [--hosts /absolute/hosts.json]`,
+    "                                Open the local dock; its PC list opens the global dock. --cwd filters the local workspace.",
     `${CLI_NAME} list [--provider claude|codex] [--cwd PATH] [--json]`,
     `${CLI_NAME} run <workflow.json> [--resume RUN_ID]    Run isolated native work with checks and independent review`,
     `${CLI_NAME} plan <provider:session-id> [plan.json] [--execute] [--json]    Record a skill plan, or hand its execution to Waga with --execute`,
@@ -42,6 +43,7 @@ function usage() {
     "                                --async returns a local queue receipt; inspect the request with result.",
     "                                --until-idle is accepted for compatibility; it adds no session-idle wait.",
     `${CLI_NAME} result <request-id> [--json]    Read an existing request; never resend`,
+    "                                list/send/ask/result: --host HOST_ID [--hosts /absolute/hosts.json] runs on that PC over SSH.",
     "                                ask: busy wait 1800s; reply wait 180s. Use explicit timeouts for long work.",
     `${CLI_NAME} open <claude|codex> [--cwd PATH]`,
     `${CLI_NAME} doctor`,
@@ -99,10 +101,30 @@ export async function runCli(args = process.argv.slice(2), {
   workStore = new WorkStore(),
   planUrl = process.env.WAGA_WEB_URL,
   handleSignals = false,
+  remoteRunner = runRemoteCommand,
 } = {}) {
   let options;
   try { options = parseCliArgs(args); }
   catch (error) { stderr.write(`${error.message}\n${usage()}\n`); return 2; }
+  if (options.host) {
+    try {
+      const host = loadHosts(options.hosts).hosts.find(host => host.id === options.host);
+      if (!host) throw Error(`Registered remote PC not found: ${options.host}`);
+      const remoteArgs = [options.command];
+      if (options.target) remoteArgs.push(options.target, options.message);
+      if (options.requestId) remoteArgs.push(options.requestId);
+      if (options.cwd) remoteArgs.push("--cwd", options.cwd);
+      if (options.provider) remoteArgs.push("--provider", options.provider);
+      if (options.json) remoteArgs.push("--json");
+      if (options.async) remoteArgs.push("--async");
+      if (options.untilIdle) remoteArgs.push("--until-idle");
+      if (options.command === "ask" || options.command === "send") remoteArgs.push("--wait-timeout", String(options.waitTimeoutMs / 1000));
+      if (options.command === "ask") remoteArgs.push("--reply-timeout", String(options.replyTimeoutMs / 1000));
+      const code = await remoteRunner(remoteCommand(host, { args: remoteArgs }), { stdout, stderr });
+      if (code && ["send", "ask"].includes(options.command)) stderr.write(`원격 접수·전달 상태를 확인하지 못했습니다. 자동 재전송하지 않았습니다. request ID를 받았다면 result --host ${host.id}로 확인하세요.\n`);
+      return code;
+    } catch (error) { stderr.write(`${error.message}\n`); return 1; }
+  }
   if (options.command === "run") {
     const controller = new AbortController(), stop = () => controller.abort();
     if (handleSignals) { process.once("SIGINT", stop); process.once("SIGTERM", stop); }
@@ -111,7 +133,7 @@ export async function runCli(args = process.argv.slice(2), {
     finally { process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
   }
   const nativeBridge = bridge === null;
-  bridge ??= defaultBridge({ autoStartDaemon: !['serve', 'plan', 'send'].includes(options.command) && !options.async });
+  bridge ??= defaultBridge({ autoStartDaemon: !['serve', 'plan', 'send', 'list'].includes(options.command) && !options.async });
   if (nativeBridge) delivery ??= new MessageDelivery({ store: new RequestStore(), bridge });
 
   const cwd = path.resolve(options.cwd ?? process.cwd());
@@ -194,6 +216,8 @@ export async function runCli(args = process.argv.slice(2), {
       cwd,
       filterCwd: options.cwd ? cwd : null,
       backend: options.backend,
+      hostsPath: options.hosts,
+      hosts: loadHosts(options.hosts),
       bridge,
       inputStream: stdin,
       outputStream: stdout,
@@ -201,7 +225,7 @@ export async function runCli(args = process.argv.slice(2), {
       orderStore,
       settingsStore,
     })).code;
-    else if (options.command === "overview") return await overview({ filterCwd: options.cwd ? cwd : null, defaultCwd: cwd, bridge, inputStream: stdin, outputStream: stdout, errorOutput: stderr, orderStore, settingsStore });
+    else if (options.command === "overview") return await overview({ hosts: loadHosts(options.hosts), filterCwd: options.cwd ? cwd : null, defaultCwd: cwd, bridge, inputStream: stdin, outputStream: stdout, errorOutput: stderr, orderStore, settingsStore });
     else if (options.command === "tmux-agents-view") return (await tmuxAgentsView(options.windowId)).code ?? 0;
     else if (options.command === "list" || options.command === "default") writeList(stdout, stderr, await bridge.discover({ provider: options.provider, cwd: options.cwd ? cwd : undefined }), options.json);
     else if (options.command === "send") {

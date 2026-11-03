@@ -19,6 +19,8 @@ import {
 } from "./provider-execution.mjs";
 import { TmuxWorkspace } from "./tmux-workspace.mjs";
 import { previewText, SessionPreview } from "./session-preview.mjs";
+import { GlobalDock, DockNavigationStore } from "./global-dock.mjs";
+import { remoteCommand } from "./global-hosts.mjs";
 
 const ESC = "\x1b[";
 const KOREAN_META_KEYS = new Map([
@@ -411,7 +413,7 @@ function settingsDisplayRows(provider, settings) {
   ]);
 }
 
-export function buildSettingsFrame({ settingsPanel, width = 100, height = 30, notice = "" }) {
+export function buildSettingsFrame({ settingsPanel, hostLabel = null, width = 100, height = 30, notice = "" }) {
   const usableWidth = Math.max(1, width - 4);
   const provider = settingsPanel?.provider === "codex" ? "codex" : "claude";
   const drafts = settingsPanel?.drafts ?? defaultProviderExecutionSettings();
@@ -424,7 +426,7 @@ export function buildSettingsFrame({ settingsPanel, width = 100, height = 30, no
   const viewportHeight = Math.max(1, height - 9);
   const offset = Math.max(0, Math.min(selectedDisplayIndex < 0 ? 0 : selectedDisplayIndex - Math.floor(viewportHeight / 2), Math.max(0, displayRows.length - viewportHeight)));
   const lines = [];
-  lines.push(`  ${color(THEME.title, fit("WAGA · 실행 설정", usableWidth))}`);
+  lines.push(`  ${color(THEME.title, fit(hostLabel ? `PC: ${hostLabel} · 실행 설정` : "WAGA · 실행 설정", usableWidth))}`);
   lines.push(`  ${color(THEME.muted, fit("새 세션 생성에 적용할 provider별 승인 권한과 실행 옵션을 선택합니다.", usableWidth))}`);
   const tabs = ["claude", "codex"].map((name) => name === provider
     ? color(name === "claude" ? THEME.claude : THEME.codex, `[ ${name.toUpperCase()} ]`)
@@ -505,6 +507,36 @@ function previewWindow(text, width, count, offset = 0) {
   };
 }
 
+export function buildGlobalDockFrame({ rows, selectedId, currentHost, query = "", searching = false, width = 100, height = 30, notice = "" }) {
+  const usableWidth = Math.max(1, width - 4);
+  const count = Math.max(1, Math.floor((height - 9) / 2));
+  const selected = Math.max(0, rows.findIndex(row => row.id === selectedId));
+  const start = Math.max(0, selected - count + 1);
+  const labels = { local: "현재 PC", unknown: "미조회", available: "연결됨", partial: "일부 조회 실패", stale: "조회 실패 · 이전 자료", unavailable: "조회 실패" };
+  const lines = [`WAGA GLOBAL · 현재 PC: ${currentHost}`, "─".repeat(usableWidth)];
+  for (const row of rows.slice(start, start + count)) {
+    const sessions = row.summary?.sessions;
+    const projects = sessions ? new Set(sessions.map(s => s.projectCwd || s.cwd)).size : 0;
+    const working = sessions?.filter(s => s.status === "working").length ?? 0;
+    const summary = sessions ? `${projects}개 프로젝트 · ${row.status === "partial" ? "확인된 " : ""}${sessions.length}개 세션 · 작업 중 ${working}` : "세션 미확인";
+    lines.push(`${row.id === selectedId ? "›" : " "} ${row.name} [${row.id}] · ${labels[row.status]} · ${summary}`);
+    lines.push(`  ${[row.updatedAt ? `확인 ${new Date(row.updatedAt).toLocaleTimeString()}` : "", row.error || row.summary?.warnings?.[0]?.message].filter(Boolean).join(" · ")}`);
+  }
+  if (!rows.length) lines.push("검색 결과가 없습니다.");
+  const row = rows[selected];
+  if (row?.summary && height - lines.length >= 7) {
+    const projects = new Map();
+    for (const session of row.summary.sessions) {
+      const folder = session.projectCwd || session.cwd;
+      projects.set(folder, (projects.get(folder) ?? 0) + 1);
+    }
+    lines.push("", `${row.name} · 프로젝트 요약`);
+    for (const [folder, total] of [...projects].slice(0, Math.max(0, height - lines.length - 4))) lines.push(`  ${folder} · ${total}개 세션`);
+  }
+  lines.push("", "↑↓ 선택 · Enter PC 열기 · / 검색 · Esc 현재 PC · Alt+R 갱신", searching || query ? `PC 검색: ${query}` : notice);
+  return lines.slice(0, height).map(line => `  ${fit(line, usableWidth)}`).join("\n");
+}
+
 function previewLines(session, preview, width, height, outputOffset = 0) {
   const heading = session ? `${session.provider === "claude" ? "CLAUDE" : "CODEX"} · ${session.name}` : "세션 미리보기";
   const brand = session?.provider === "claude" ? THEME.claude : THEME.codex;
@@ -530,8 +562,8 @@ function previewLines(session, preview, width, height, outputOffset = 0) {
   return lines;
 }
 
-export function buildOverviewFrame({ sessions, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, providerUsage = {}, notice = "", newTask = null, renameTask = null, preview = null, previewOutputOffset = 0, nativeHint = nativeReturnHint(null), codexExecutionMode = CODEX_EXECUTION_MODES.DEFAULT, providerSettings = defaultProviderExecutionSettings(), settingsPanel = null }) {
-  if (settingsPanel) return buildSettingsFrame({ settingsPanel, width, height, notice });
+export function buildOverviewFrame({ sessions, hostLabel = null, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, providerUsage = {}, notice = "", newTask = null, renameTask = null, preview = null, previewOutputOffset = 0, nativeHint = nativeReturnHint(null), codexExecutionMode = CODEX_EXECUTION_MODES.DEFAULT, providerSettings = defaultProviderExecutionSettings(), settingsPanel = null }) {
+  if (settingsPanel) return buildSettingsFrame({ settingsPanel, hostLabel, width, height, notice });
   const usableWidth = Math.max(1, width - 4);
   const split = hasOverviewPreview(width, height);
   const listWidth = split ? Math.floor(usableWidth * 0.6) : usableWidth;
@@ -550,7 +582,7 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
   const nameWidth = wide ? Math.max(12, listWidth - 31) : Math.max(1, listWidth - 22);
   const lines = [];
   const title = wide ? "WATTARI GATTARI  Claude + Codex session dock" : "WAGA · session dock";
-  lines.push(`  ${color(THEME.title, fit(title, usableWidth))}`);
+  lines.push(`  ${color(THEME.title, fit(hostLabel ? `PC: ${hostLabel} · ${title}` : title, usableWidth))}`);
   const executionStatusColor = codexExecutionMode === CODEX_EXECUTION_MODES.YOLO ? THEME.warning : THEME.muted;
   lines.push(`  ${color(executionStatusColor, fit(`${counts(sessions)}${provider ? `   filter: ${provider}` : ""}   ${codexExecutionLabel(codexExecutionMode)}   Alt+S 설정   Alt+Y 빠른 전환`, usableWidth))}`);
   if (usageLabels.length) lines.push(`  ${coloredUsageLine(usageLabels, usableWidth)}`);
@@ -562,6 +594,11 @@ export function buildOverviewFrame({ sessions, collapsed = new Set(), query = ""
     const node = nodes[index];
     const active = index === safeSelected;
     const marker = active ? color(THEME.cursor, "›") : " ";
+    if (node.type === "hosts") {
+      const row = `${marker} ${color(THEME.primary, fit(node.name, listWidth - 2))}`;
+      lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
+      continue;
+    }
     if (node.type === "workspace") {
       const toggle = collapsed.has(node.cwd) && !query ? "▸" : "▾";
       const detail = wide ? `  ${node.cwd}  ·  ${node.sessionCount} session${node.sessionCount === 1 ? "" : "s"}` : `  ${node.sessionCount}`;
@@ -672,6 +709,10 @@ export async function runOverview({
   errorOutput = process.stderr,
   orderStore = null,
   settingsStore = null,
+  hosts = null,
+  globalDock = hosts ? new GlobalDock(hosts) : null,
+  remoteHost = process.env.WAGA_REMOTE_HOST || null,
+  navigationStore = process.env.WAGA_REMOTE_HOST_ID ? new DockNavigationStore(process.env.WAGA_REMOTE_HOST_ID) : null,
   refreshMs = 3_000,
   previewDebounceMs = 150,
   previewCacheMs = 5_000,
@@ -684,6 +725,12 @@ export async function runOverview({
   }
 
   let allSessions = [];
+  let localObserved = false;
+  let globalVisible = false;
+  let globalQuery = "";
+  let globalSearching = false;
+  const hostRow = globalDock || remoteHost ? [{ type: "hosts", key: "global:hosts", name: "↑ PC 목록으로" }] : [];
+  const tree = sessions => [...hostRow, ...buildOverviewTree(sessions, { collapsed, query, rootCwd: defaultCwd })];
   let warnings = [];
   let missingSessionCounts = new Map();
   let providerUsage = {};
@@ -732,6 +779,25 @@ export async function runOverview({
   let pendingCreated = null;
   let previewOutputOffset = 0;
   let previewOutputSessionKey = null;
+  let lastContentKey = null;
+  let lastContentOffset = 0;
+  let restoringSelection = null;
+  let restoredOffset = 0;
+  if (navigationStore) {
+    try {
+      const saved = navigationStore.load();
+      if (saved) {
+        for (const folder of saved.collapsed) collapsed.add(folder);
+        query = saved.query; provider = saved.provider;
+        restoringSelection = saved.selectedKey; restoredOffset = saved.previewOutputOffset; lastContentOffset = saved.previewOutputOffset;
+      }
+    } catch (error) { notice = `이전 탐색 위치를 읽지 못했습니다: ${error.message}`; }
+  }
+  const saveNavigation = () => {
+    if (!navigationStore) return;
+    try { navigationStore.save({ selectedKey: lastContentKey, collapsed: [...collapsed], query, provider, previewOutputOffset: lastContentOffset }); }
+    catch (error) { errorOutput.write(`Dock 탐색 위치 저장 실패: ${error.message}\n`); }
+  };
   const archivedSessionIds = new Set();
   const previewReader = new SessionPreview({
     read: (session, options) => bridge.preview(session, options),
@@ -742,11 +808,34 @@ export async function runOverview({
   });
 
   const visibleSessions = () => selectOverviewSessions(allSessions, { query, provider });
-  const visibleNodes = () => buildOverviewTree(visibleSessions(), { collapsed, query, rootCwd: defaultCwd });
+  const visibleHosts = () => globalDock.rows(allSessions, warnings, localObserved).filter(row => `${row.name} ${row.id}`.toLowerCase().includes(globalQuery.toLowerCase()));
+  const refreshHosts = async () => {
+    if (closed || busy || nativeOpen || !globalVisible) return;
+    try {
+      if (workspace.shouldRefreshOverview && !await workspace.shouldRefreshOverview()) return;
+      if (!closed && globalVisible) await globalDock.refresh(render);
+    } catch (error) { notice = `PC 목록 조회 실패: ${error.message}`; render(); }
+  };
+  const visibleNodes = () => tree(visibleSessions());
+  const returnToLocal = () => {
+    globalVisible = false;
+    selectedKey = lastContentKey;
+    restoredOffset = lastContentOffset;
+    const nodes = visibleNodes();
+    if (selectedKey && !nodes.some(node => node.key === selectedKey)) {
+      const session = allSessions.find(session => session.id === selectedKey);
+      selectedKey = nodes.find(node => node.type === "workspace" && node.cwd === sessionWorkspace(session ?? {}))?.key ?? null;
+    }
+  };
   const reconcileSelection = (nodes) => {
+    if (restoringSelection && nodes.some(node => node.key === restoringSelection)) {
+      selectedKey = restoringSelection;
+      restoringSelection = null;
+    }
     const keyedIndex = selectedKey === null ? -1 : nodes.findIndex((node) => node.key === selectedKey);
     selected = keyedIndex >= 0 ? keyedIndex : Math.max(0, Math.min(selected, Math.max(0, nodes.length - 1)));
     selectedKey = nodes[selected]?.key ?? null;
+    if (nodes[selected]?.type === "session") lastContentKey = selectedKey;
   };
   const selectFirstSession = () => {
     const nodes = visibleNodes();
@@ -756,19 +845,31 @@ export async function runOverview({
   };
   const render = () => {
     if (closed || nativeOpen) return;
+    if (globalVisible) {
+      previewReader.select(null);
+      const rows = visibleHosts();
+      if (!rows.some(row => row.id === globalDock.selectedId) && rows.length) globalDock.selectedId = rows[0].id;
+      outputStream.write(`${ESC}H${ESC}J${buildGlobalDockFrame({ rows, selectedId: globalDock.selectedId, currentHost: globalDock.config.local.name,
+        query: globalQuery, searching: globalSearching, width: outputStream.columns || 100, height: outputStream.rows || 30, notice })}`);
+      return;
+    }
     const sessions = visibleSessions();
-    const nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd: defaultCwd });
+    const nodes = tree(sessions);
     reconcileSelection(nodes);
     const previewSession = hasOverviewPreview(outputStream.columns || 100, outputStream.rows || 30) && !busy && !newTask && !renameTask
       ? nodes[selected]?.session : null;
     const nextPreviewSessionKey = previewSession ? `${previewSession.id}\u0000${previewSession.cwd}` : null;
     if (nextPreviewSessionKey !== previewOutputSessionKey) {
+      if (previewOutputSessionKey && !nextPreviewSessionKey) lastContentOffset = previewOutputOffset;
       previewOutputSessionKey = nextPreviewSessionKey;
-      previewOutputOffset = 0;
+      previewOutputOffset = restoredOffset;
+      restoredOffset = 0;
+      if (nextPreviewSessionKey) lastContentOffset = previewOutputOffset;
     }
     previewReader.select(typeof bridge.preview === "function" ? previewSession : null);
     outputStream.write(`${ESC}H${ESC}J${buildOverviewFrame({
       sessions,
+      hostLabel: remoteHost ? `${remoteHost} · 원격` : hosts?.local.name,
       nodes,
       collapsed,
       selected,
@@ -801,7 +902,7 @@ export async function runOverview({
     const height = outputStream.rows || 30;
     if (!hasOverviewPreview(width, height) || busy || nativeOpen || newTask || renameTask || searching) return false;
     const sessions = visibleSessions();
-    const nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd: defaultCwd });
+    const nodes = tree(sessions);
     reconcileSelection(nodes);
     const session = nodes[selected]?.session;
     const preview = previewReader.snapshot(session);
@@ -818,6 +919,7 @@ export async function runOverview({
     if (direction === "top") previewOutputOffset = 0;
     else if (direction === "bottom") previewOutputOffset = current.maxOffset;
     else previewOutputOffset = Math.max(0, Math.min(current.offset + direction * step, current.maxOffset));
+    lastContentOffset = previewOutputOffset;
     render();
     return true;
   };
@@ -940,6 +1042,7 @@ export async function runOverview({
         ...(filterCwd ? { cwd: path.resolve(filterCwd) } : {}), includeUsage: true,
       });
       if (closed || nativeOpen || generation !== state.generation) return;
+      localObserved = true;
       const snapshot = reconcileDiscoveredSessions(
         allSessions.filter((session) => !archivedSessionIds.has(session.id)),
         { ...discovered, sessions: discovered.sessions.filter((session) => !archivedSessionIds.has(session.id)) },
@@ -987,6 +1090,7 @@ export async function runOverview({
   inputStream.resume();
 
   const leave = () => {
+    saveNavigation();
     busy = true;
     void workspace.leave()
       .then((result) => { if (result?.closeOverview) cleanup(); })
@@ -1228,6 +1332,7 @@ export async function runOverview({
 
   const onKeypress = (text, key = {}) => {
     if (busy || closed) return;
+    restoringSelection = null;
     const koreanMetaKey = key.meta && key.sequence?.startsWith("\x1b") && KOREAN_META_KEYS.get(key.sequence.slice(1));
     if (koreanMetaKey) key = { ...key, name: koreanMetaKey };
     pendingCreated = null; // A later discovery must not steal selection after the user navigates.
@@ -1245,6 +1350,44 @@ export async function runOverview({
     }
     if ((key.ctrl && key.name === "c") || (key.meta && key.name === "q")) {
       leave();
+      return;
+    }
+    if (globalVisible) {
+      const rows = visibleHosts();
+      let index = Math.max(0, rows.findIndex(row => row.id === globalDock.selectedId));
+      if (key.name === "escape") {
+        if (globalSearching || globalQuery) { globalSearching = false; globalQuery = ""; }
+        else returnToLocal();
+      }
+      else if (key.sequence === "/" && !globalSearching) globalSearching = true;
+      else if (globalSearching && key.name === "return") globalSearching = false;
+      else if (globalSearching && key.name === "backspace") globalQuery = graphemes(globalQuery).slice(0, -1).join("");
+      else if (globalSearching && !key.ctrl && !key.meta && text && !/[\x00-\x1f\x7f-\x9f]/.test(text)) globalQuery = (globalQuery + text).slice(0, 256);
+      else if (key.name === "up" || key.name === "down") {
+        index = Math.max(0, Math.min(rows.length - 1, index + (key.name === "up" ? -1 : 1)));
+        if (rows[index]) globalDock.selectedId = rows[index].id;
+      } else if (key.meta && key.name === "r") {
+        void refreshHosts();
+      } else if (key.name === "return") {
+        const host = rows[index];
+        if (!host) return;
+        if (host.local) returnToLocal();
+        else if (!workspace.openRemoteHost) notice = "원격 PC 열기는 tmux backend가 필요합니다. waga --backend tmux를 사용하세요.";
+        else {
+          busy = true;
+          nativeOpen = true;
+          void workspace.openRemoteHost(host, remoteCommand(host, { interactive: true }))
+            .then(result => { if (result?.code) throw Error(`${host.name} SSH 연결 종료: exit ${result.code}`); })
+            .catch(error => { notice = error.message; })
+            .finally(() => { busy = false; nativeOpen = false; render(); });
+        }
+      }
+      render();
+      return;
+    }
+    if (!newTask && !renameTask && !settingsPanel && !searching && key.name === "return" && visibleNodes()[selected]?.type === "hosts") {
+      if (remoteHost) leave();
+      else { globalVisible = true; notice = ""; render(); void refreshHosts(); }
       return;
     }
     if (key.meta && key.name === "s" && !renameTask) {
@@ -1480,11 +1623,15 @@ export async function runOverview({
   const onResize = () => render();
   inputStream.on("keypress", onKeypress);
   outputStream.on("resize", onResize);
-  const timer = setInterval(() => { if (newTask?.submitting) render(); else void refresh(); }, refreshMs);
+  const timer = setInterval(() => {
+    if (newTask?.submitting) render();
+    else { void refresh(); if (globalVisible) void refreshHosts(); }
+  }, refreshMs);
   let resolveRun;
   const completed = new Promise((resolve) => { resolveRun = resolve; });
   const cleanup = () => {
     if (closed) return;
+    saveNavigation();
     closed = true;
     previewReader.close();
     clearInterval(timer);

@@ -4,6 +4,12 @@
 
 검증 명령과 결과 재사용 기준: [테스트 검증 절차](docs/testing-plan.md).
 
+## Global Dock 실제 PC 간 검증
+
+- home-wsl의 실제 Linux 사용자로 SSH 조회를 확인하고 Claude·Codex의 원격 TUI와
+  메시지 왕복을 폐기용 세션으로 검증합니다. 폐기용 SSH·tmux와 provider fixture 검사는
+  자동화되어 있으며 실제 PC·provider 검증과 구분합니다.
+
 ## 메시지 접수·결과 회수 런타임 검증
 
 - `waga-proof-*` Claude 대화형 세션이 작업 중일 때 접수·요청 표식 회신을 실측합니다.

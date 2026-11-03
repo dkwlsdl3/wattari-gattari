@@ -29,9 +29,14 @@ export function parseCliArgs(args) {
     if (arg === '--execute') { options.execute = true; continue; }
     if (arg === "--until-idle") { options.untilIdle = true; continue; }
     if (arg === "--notify-origin") { options.notifyOrigin = true; continue; }
-    if (["--resume", "--port", "--cwd", "--provider", "--backend", "--timeout", "--wait-timeout", "--reply-timeout"].includes(arg)) {
+    if (["--host", "--hosts", "--resume", "--port", "--cwd", "--provider", "--backend", "--timeout", "--wait-timeout", "--reply-timeout"].includes(arg)) {
       const value = args[++index];
       if (!value) throw invalid(`${arg} requires a value`);
+      if (arg === "--host") options.host = value;
+      if (arg === "--hosts") {
+        if (!value.startsWith("/")) throw invalid("--hosts requires an absolute path");
+        options.hosts = value;
+      }
       if (arg === "--resume") options.resume = value;
       if (arg === "--cwd") options.cwd = value;
       if (arg === "--provider") options.provider = value;
@@ -59,6 +64,9 @@ export function parseCliArgs(args) {
 
   if (options.command === "default" && (options.json || options.provider)) options.command = "list";
   if (options.command === "serve") options.port ??= 4317;
+  if (options.host && !["list", "send", "ask", "result"].includes(options.command)) throw invalid("--host is only valid for list, send, ask and result");
+  if (options.host && options.notifyOrigin) throw invalid("--notify-origin cannot use a local Claude socket across PCs; use result --host instead");
+  if (options.hosts && !options.host && !["default", "overview"].includes(options.command)) throw invalid("--hosts is only valid for the interactive dock or with --host");
   if (args.includes("--port") && options.command !== "serve") throw invalid("--port is only valid for serve");
   if (options.provider && !["claude", "codex"].includes(options.provider)) throw invalid(`Unknown provider: ${options.provider}`);
   if (!["auto", "direct", "tmux"].includes(options.backend)) throw invalid(`Unknown backend: ${options.backend}`);

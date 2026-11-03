@@ -10,6 +10,9 @@
 아래 현행 실행 계약 위에서 단계적으로 적용하며, 목표 설계를 이미 구현된 기능으로 취급하지 않습니다.
 활성 구현 항목은 [TODO](../../TODO.md), 현재 코드·완료 이력은 git에서 확인합니다.
 
+[Global Dock과 PC 간 직접 SSH 연결](2026-11-03-global-dock.md)은 PC 선택, 원격 Dock과
+메시지 경로의 계약입니다. 로컬 웹의 loopback 인증 경계를 원격으로 확장하지 않습니다.
+
 ## 제품 경계
 
 Wattari Gattari는 Claude Code와 Codex가 소유한 네이티브 세션을 발견하고 연결하는
