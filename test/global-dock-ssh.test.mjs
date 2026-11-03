@@ -59,13 +59,15 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   const cliUrl = new URL("../src/cli.mjs", import.meta.url).href;
   const overviewUrl = new URL("../src/overview.mjs", import.meta.url).href;
   const workspaceUrl = new URL("../src/tmux-workspace.mjs", import.meta.url).href;
+  const dockUrl = new URL("../src/session-dock.mjs", import.meta.url).href;
   const nativeCode = `process.stdin.setRawMode(true); process.stdin.resume(); require('node:fs').writeFileSync(${JSON.stringify(path.join(root, "native-ready"))},'ready'); process.stdout.write('waga-proof-ready\\r\\n'); process.stdin.on('data', data => require('node:fs').appendFileSync(${JSON.stringify(path.join(root, "native-input"))}, data));`;
   const fixture = path.join(root, "fixture.mjs");
   fs.writeFileSync(fixture, `
     import fs from 'node:fs';
     import {runCli} from ${JSON.stringify(cliUrl)};
     import {runOverview} from ${JSON.stringify(overviewUrl)};
-    import {TmuxWorkspace} from ${JSON.stringify(workspaceUrl)};
+    import {TmuxWorkspace,enterWagaDock} from ${JSON.stringify(workspaceUrl)};
+    import {enterSessionDock} from ${JSON.stringify(dockUrl)};
     const side = process.env.WAGA_PROOF_SIDE;
     process.env.PATH = ${JSON.stringify(env.PATH)};
     process.env.XDG_CONFIG_HOME = ${JSON.stringify(env.XDG_CONFIG_HOME)};
@@ -81,7 +83,7 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
     },recover:async()=>{}};
     process.exitCode = await runCli(process.argv.slice(2), {bridge,delivery,
       tmuxAgentsView: async window => { fs.writeFileSync(${JSON.stringify(path.join(root, "agents-key.json"))},JSON.stringify({side,window})); return {code:0}; },
-      dock: options => workspace.enter(options),
+      dock: options => enterSessionDock({...options,enterTmux: options => enterWagaDock({...options,workspace})}),
       overview: options => runOverview({...options, defaultCwd:${JSON.stringify(root)}, workspace, commandFor: () => ({command:process.execPath,args:['-e',${JSON.stringify(nativeCode)}],cwd:${JSON.stringify(root)}})})
     });
   `);

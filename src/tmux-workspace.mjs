@@ -591,6 +591,6 @@ export class TmuxWorkspace {
   }
 }
 
-export async function enterWagaDock({ cwd = process.cwd(), filterCwd = null, workspace = new TmuxWorkspace() } = {}) {
-  return workspace.enter({ cwd, filterCwd });
+export async function enterWagaDock({ cwd = process.cwd(), filterCwd = null, hostsPath = null, workspace = new TmuxWorkspace() } = {}) {
+  return workspace.enter({ cwd, filterCwd, hostsPath });
 }
