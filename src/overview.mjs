@@ -49,6 +49,9 @@ const THEME = {
   needsInput: "1;31",
   error: "1;38;2;224;154;164",
   warning: "1;38;2;224;190;132",
+  pc: "1;38;2;125;211;252",
+  wsl: "1;38;2;94;234;212",
+  vm: "1;38;2;196;181;253",
 };
 
 function safeText(value) {
@@ -509,32 +512,49 @@ function previewWindow(text, width, count, offset = 0) {
 
 export function buildGlobalDockFrame({ rows, selectedId, currentHost, query = "", searching = false, width = 100, height = 30, notice = "" }) {
   const usableWidth = Math.max(1, width - 4);
-  const count = Math.max(1, Math.floor((height - 9) / 2));
+  const count = Math.max(1, Math.floor((height - 10) / 3));
   const selected = Math.max(0, rows.findIndex(row => row.id === selectedId));
   const start = Math.max(0, selected - count + 1);
   const labels = { local: "현재 PC", unknown: "미조회", available: "연결됨", partial: "일부 조회 실패", stale: "조회 실패 · 이전 자료", unavailable: "조회 실패" };
-  const lines = [`WAGA GLOBAL · 현재 PC: ${currentHost}`, "─".repeat(usableWidth)];
+  const types = { pc: { label: "PC", color: THEME.pc }, wsl: { label: "WSL", color: THEME.wsl }, vm: { label: "VM", color: THEME.vm } };
+  const lines = [];
+  const line = (text, style = THEME.muted) => lines.push(`  ${color(style, fit(text, usableWidth))}`);
+  line("WAGA GLOBAL · PC 선택", THEME.pc);
+  line(`현재 PC: ${currentHost}   ·   ${rows.length}대`);
+  line("─".repeat(usableWidth), THEME.divider);
   for (const row of rows.slice(start, start + count)) {
+    const active = row.id === selectedId;
+    const type = types[row.type] ?? types.pc;
+    const background = active ? `;${THEME.selected}` : "";
+    const statusStyle = row.status === "available" ? THEME.working : row.status === "local" ? THEME.pc
+      : row.status === "unavailable" ? THEME.error : ["partial", "stale"].includes(row.status) ? THEME.warning : THEME.muted;
+    const marker = ["local", "available"].includes(row.status) ? "●" : ["partial", "stale", "unavailable"].includes(row.status) ? "!" : "○";
     const sessions = row.summary?.sessions;
     const projects = sessions ? new Set(sessions.map(s => s.projectCwd || s.cwd)).size : 0;
     const working = sessions?.filter(s => s.status === "working").length ?? 0;
     const summary = sessions ? `${projects}개 프로젝트 · ${row.status === "partial" ? "확인된 " : ""}${sessions.length}개 세션 · 작업 중 ${working}` : "세션 미확인";
-    lines.push(`${row.id === selectedId ? "›" : " "} ${row.name} [${row.id}] · ${labels[row.status]} · ${summary}`);
-    lines.push(`  ${[row.updatedAt ? `확인 ${new Date(row.updatedAt).toLocaleTimeString()}` : "", row.error || row.summary?.warnings?.[0]?.message].filter(Boolean).join(" · ")}`);
+    line(`${active ? "›" : " "} [${type.label}] ${row.name}${row.local ? "   [현재 PC]" : ""}`, `${active ? THEME.primary : type.color}${background}`);
+    line(`    ${marker} ${labels[row.status]}   ·   ${summary}`, `${statusStyle}${background}`);
+    line("");
   }
-  if (!rows.length) lines.push("검색 결과가 없습니다.");
+  if (!rows.length) line("검색 결과가 없습니다.", THEME.warning);
   const row = rows[selected];
-  if (row?.summary && height - lines.length >= 7) {
+  if (row && height - lines.length >= 7) {
+    const type = types[row.type] ?? types.pc;
+    line(`${row.name} · ${type.label} · 등록 ID: ${row.id}`, type.color);
+    if (row.updatedAt) line(`마지막 확인 ${new Date(row.updatedAt).toLocaleTimeString()}`);
+    if (row.error || row.summary?.warnings?.length) line(`! ${row.error || row.summary.warnings[0].message}`, THEME.warning);
     const projects = new Map();
-    for (const session of row.summary.sessions) {
+    for (const session of row.summary?.sessions ?? []) {
       const folder = session.projectCwd || session.cwd;
       projects.set(folder, (projects.get(folder) ?? 0) + 1);
     }
-    lines.push("", `${row.name} · 프로젝트 요약`);
-    for (const [folder, total] of [...projects].slice(0, Math.max(0, height - lines.length - 4))) lines.push(`  ${folder} · ${total}개 세션`);
+    for (const [folder, total] of [...projects].slice(0, Math.max(0, height - lines.length - 4))) line(`  ${folder} · ${total}개 세션`);
   }
-  lines.push("", "↑↓ 선택 · Enter PC 열기 · / 검색 · Esc 현재 PC · Alt+R 갱신", searching || query ? `PC 검색: ${query}` : notice);
-  return lines.slice(0, height).map(line => `  ${fit(line, usableWidth)}`).join("\n");
+  line("─".repeat(usableWidth), THEME.divider);
+  line("↑↓ 선택   Enter PC 열기   / 검색   Esc 현재 PC   Alt+R 갱신", THEME.primary);
+  line(searching || query ? `PC 검색: ${query}` : notice);
+  return lines.slice(0, height).join("\n");
 }
 
 function previewLines(session, preview, width, height, outputOffset = 0) {

@@ -56,13 +56,15 @@ test("a healthy host publishes before a different host finishes, and partial dis
 });
 
 test("global frame shows project locations and last successful data without claiming offline or zero sessions", () => {
-  const rows = [{ id: "home", name: "Home", status: "stale", error: "SSH refused", summary: { sessions: [{ cwd: "/home/me/keeper", status: "working" }] } },
-    { id: "mac", name: "Mac", status: "unavailable" }];
+  const rows = [{ id: "home", name: "Home", type: "wsl", status: "stale", error: "SSH refused", summary: { sessions: [{ cwd: "/home/me/keeper", status: "working" }] } },
+    { id: "server", name: "Server", type: "vm", status: "unavailable" }];
   const frame = buildGlobalDockFrame({ rows, selectedId: "home", currentHost: "Work", width: 100, height: 24 });
   assert.match(frame, /이전 자료/);
   assert.match(frame, /1개 세션/);
   assert.match(frame, /세션 미확인/);
   assert.match(frame, /\/home\/me\/keeper/);
+  assert.match(frame, /\[WSL\]/);
+  assert.match(frame, /\[VM\]/);
   assert.doesNotMatch(frame, /오프라인|0개 세션/);
 });
 

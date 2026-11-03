@@ -14,8 +14,9 @@ export function validateHosts(config) {
   const identity = host => {
     if (!host || typeof host.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(host.id) || ids.has(host.id)) throw invalid("Host IDs must be unique safe identifiers");
     if (typeof host.name !== "string" || !host.name.trim() || host.name.length > 80 || /[\x00-\x1f\x7f-\x9f]/.test(host.name)) throw invalid("Host name must be printable text of at most 80 characters");
+    if (host.type !== undefined && !["pc", "wsl", "vm"].includes(host.type)) throw invalid("Host type must be pc, wsl or vm");
     ids.add(host.id);
-    return { id: host.id, name: host.name };
+    return { id: host.id, name: host.name, ...(host.type === undefined ? {} : { type: host.type }) };
   };
   const local = identity(config.local);
   const hosts = config.hosts.map(host => {

@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "local": { "id": "ubuntu-work", "name": "ubuntu-work" },
+  "local": { "id": "ubuntu-work", "name": "ubuntu-work", "type": "pc" },
   "hosts": [
-    { "id": "home-wsl", "name": "home-wsl", "ssh": "home-wsl", "command": "waga" }
+    { "id": "home-wsl", "name": "home-wsl", "type": "wsl", "ssh": "home-wsl", "command": "waga" }
   ]
 }

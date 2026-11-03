@@ -18,6 +18,9 @@ test("optional configuration reads no file into existence; explicit missing and 
 
 test("host IDs and SSH aliases are validated rather than interpreted as shell input", () => {
   assert.deepEqual(validateHosts(config), config);
+  const typed = { ...config, local: { ...config.local, type: "pc" }, hosts: [{ ...host, type: "wsl" }] };
+  assert.deepEqual(validateHosts(typed), typed);
+  assert.throws(() => validateHosts({ ...config, hosts: [{ ...host, type: "unknown" }] }), { code: "INVALID_HOSTS" });
   assert.equal(validateHosts({ ...config, hosts: [{ ...host, ssh: "user@home-wsl" }] }).hosts[0].ssh, "user@home-wsl");
   for (const ssh of ["-oProxyCommand=bad", "dev;touch /tmp/bad", "a b", "$(id)", "x\ny"]) {
     assert.throws(() => validateHosts({ ...config, hosts: [{ ...host, ssh }] }), { code: "INVALID_HOSTS" });
