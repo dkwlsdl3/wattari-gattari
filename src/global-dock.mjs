@@ -56,7 +56,7 @@ export class GlobalDock {
         const summary = await this.query(host);
         this.states.set(host.id, { status: summary.warnings?.length ? "partial" : "available", summary, updatedAt: Date.now() });
       } catch (error) {
-        this.states.set(host.id, { ...previous, status: previous.summary ? "stale" : "unavailable", error: error.message });
+        this.states.set(host.id, { ...previous, status: previous.summary ? "stale" : "unavailable", error: error.stderr?.trim() || error.message });
       }
       changed();
     })).finally(() => { this.pending = null; });

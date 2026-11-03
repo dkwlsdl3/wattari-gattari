@@ -12,7 +12,7 @@ test("independent failures preserve registration order, ID selection and last go
   const config = { local: { id: "here", name: "Same name" }, hosts: [{ id: "b", name: "Same name" }, { id: "a", name: "Same name" }] };
   let fail = false;
   const dock = new GlobalDock(config, { query: async host => {
-    if (host.id === "a" || fail) throw new Error("SSH timeout");
+    if (host.id === "a" || fail) throw Object.assign(new Error("Command failed: ssh -T -o lots-of-options remote-command"), { stderr: "DISCOVERY_FAILED: provider unavailable\n" });
     return { sessions: [{ id: "codex:remote", cwd: "/remote" }], warnings: [] };
   } });
   dock.selectedId = "b";
@@ -20,6 +20,7 @@ test("independent failures preserve registration order, ID selection and last go
   assert.deepEqual(dock.rows().map(row => row.id), ["here", "b", "a"]);
   assert.equal(dock.states.get("a").status, "unavailable");
   assert.equal(dock.states.get("a").summary, null);
+  assert.equal(dock.states.get("a").error, "DISCOVERY_FAILED: provider unavailable");
   const good = dock.states.get("b").summary;
   fail = true;
   await dock.refresh();
