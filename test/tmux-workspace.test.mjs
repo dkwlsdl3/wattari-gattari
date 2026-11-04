@@ -368,6 +368,19 @@ test("shouldRefreshOverview reports whether the dock is attached and selected", 
   }
 });
 
+test('only an uncollected exit in an owned remote pane wakes the isolated tmux reaper', async () => {
+  for (const [pane, recover, mode = 'isolated'] of [['home\t1\t\t\n', true], ['home\t0\t\t\n', false], ['home\t1\t23\t\n', false], ['home\t1\t\t15\n', false], ['\t1\t\t\n', false], ['home\t1\t\t\n', false, 'existing']]) {
+    let notified = false;
+    const workspace = new TmuxWorkspace({ env: { TMUX: 'yes', WAGA_TMUX_SESSION: 'waga-proof', WAGA_TMUX_MODE: mode }, eventLog: { record() {} },
+      run: async args => {
+        if (args[0] === 'run-shell') { notified = true; return { code: 0, stdout: '', stderr: '' }; }
+        return { code: 0, stdout: args.includes('waga-proof:overview') ? '0\t1\n' : pane, stderr: '' };
+      } });
+    assert.equal(await workspace.shouldRefreshOverview(), false);
+    assert.equal(notified, recover);
+  }
+});
+
 test("leave switches or detaches clients and then destroys the Waga frontend session", async () => {
   const existingCalls = [];
   const existing = new TmuxWorkspace({ run: async (args) => { existingCalls.push(args); return { stdout: "", stderr: "", code: 0 }; }, env: { TMUX: "yes", WAGA_TMUX_MODE: "existing", WAGA_TMUX_SESSION: "waga-global" } });

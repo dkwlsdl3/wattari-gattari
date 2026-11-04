@@ -112,3 +112,8 @@ Dock은 새 버전을 발견하면 자신의 overview PID·활성 창·표시 cl
 이후 관리 설치본끼리의 업데이트는 위 자동 적용을 사용합니다. 구버전 목록 조회는 기존
 `list --json`으로 호환하고, 새 `host-status --json`은 provider 조회 실패와 설치 상태를
 분리하므로 Claude·Codex가 없는 PC의 설치를 실패로 취급하지 않습니다.
+
+일부 구버전 tmux/libutempter에서는 PTY 종료 중 SIGCHLD를 놓쳐 종료된 SSH가 회수되지
+않습니다([상위 결함과 수정](https://github.com/tmux/tmux/issues/4559)). Waga 전용 격리
+서버에서 소유한 원격 창의 pane은 종료됐지만 종료 코드·신호가 모두 미확인인 경우에만
+서버에 SIGCHLD를 알립니다. 서버 재시작이나 프로세스 중단, 사용자 tmux 설정 변경은 없습니다.

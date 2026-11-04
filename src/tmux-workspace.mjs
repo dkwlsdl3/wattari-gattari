@@ -466,6 +466,16 @@ export class TmuxWorkspace {
     ], { check: false });
     if (result.code !== 0) return true;
     const [active, attached] = result.stdout.trim().split("\t");
+    if (active === '0' && attached !== '0' && this.#env.WAGA_TMUX_MODE === 'isolated') {
+      const exited = await this.#call(['display-message', '-p', '-t', sessionName,
+        '#{@waga_remote_host}\t#{pane_dead}\t#{pane_dead_status}\t#{pane_dead_signal}'], { check: false });
+      const [host, dead, status, signal] = exited.stdout.trimEnd().split('\t');
+      // tmux/tmux#4559: old libutempter builds can lose SIGCHLD on PTY close.
+      // Match only our remote pane with an exit that has not been collected.
+      if (exited.code === 0 && host && dead === '1' && !status && !signal) {
+        await this.#call(['run-shell', '-b', 'kill -s CHLD #{pid}']);
+      }
+    }
     return active === "1" && Number(attached) > 0;
   }
 
