@@ -196,19 +196,20 @@ export class TmuxWorkspace {
       return { windowId: existing.windowId, reused: true };
     }
     if (existing) await this.#call(["kill-window", "-t", existing.windowId]);
-    const created = await this.#call(["new-window", "-d", "-P", "-F", "#{window_id}", "-t", sessionName,
-      "-n", `PC ${host.name}`, shellCommand(commandSpec.command, commandSpec.args)]);
+    // One tmux command queue installs the exit policy before SSH can exit.
+    // new-window selects the new window, so sessionName targets it throughout.
+    const created = await this.#call(["new-window", "-P", "-F", "#{window_id}", "-t", sessionName,
+      "-n", `PC ${host.name}`, shellCommand(commandSpec.command, commandSpec.args),
+      ";", "set-window-option", "-t", sessionName, "@waga_remote_host", host.id,
+      ";", "set-window-option", "-t", sessionName, "remain-on-exit", "failed",
+      ";", "set-window-option", "-t", sessionName, "automatic-rename", "off",
+      ";", "set-hook", "-w", "-t", sessionName, "pane-exited", `if-shell -F '#{==:#{pane_dead_status},0}' 'select-window -t ${sessionName}:overview'`,
+    ], { check: false });
     const windowId = created.stdout.trim();
     if (!/^@[0-9]+$/.test(windowId)) throw Object.assign(new Error("tmux did not return remote window ID"), { code: "TMUX_WINDOW_FAILED" });
-    try {
-      await this.#call(["set-window-option", "-t", windowId, "@waga_remote_host", host.id]);
-      await this.#call(["set-window-option", "-t", windowId, "remain-on-exit", "failed"]);
-      await this.#call(["set-window-option", "-t", windowId, "automatic-rename", "off"]);
-      await this.#call(["set-hook", "-w", "-t", windowId, "pane-exited", `if-shell -F '#{==:#{pane_dead_status},0}' 'select-window -t ${sessionName}:overview'`]);
-      await this.#call(["select-window", "-t", windowId]);
-    } catch (error) {
+    if (created.code !== 0) {
       await this.#call(["kill-window", "-t", windowId], { check: false });
-      throw error;
+      throw Object.assign(new Error(created.stderr.trim() || "Cannot configure remote window"), { code: "TMUX_COMMAND_FAILED" });
     }
     return { windowId };
   }

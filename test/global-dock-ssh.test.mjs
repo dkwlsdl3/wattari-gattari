@@ -140,7 +140,7 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
     try { return { ...await exec("tmux", ["-L", localSocket, ...args], { env, timeout: 3000 }), code: 0 }; }
     catch (error) { return { stdout: error.stdout ?? "", stderr: error.stderr ?? "", code: error.code }; }
   } });
-  const failed = await workspace.openRemoteHost({ id: "failed", name: "Failed SSH fixture" }, { command: process.execPath, args: ["-e", "setTimeout(()=>process.exit(23),100)"] });
+  const failed = await workspace.openRemoteHost({ id: "failed", name: "Failed SSH fixture" }, { command: "/bin/sh", args: ["-c", "exit 23"] });
   await until(() => call(localSocket, "display-message", "-p", "-t", failed.windowId, "#{pane_dead_status}"), "23", "failed connection remains visible");
   client.write("\x1bg");
   await until(() => call(localSocket, "display-message", "-p", "-t", view("local"), "#{window_name}"), "overview", "Alt+G can leave a failed connection");
