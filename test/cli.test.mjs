@@ -36,6 +36,33 @@ test("remote ask uses the owning PC cwd, exact target, receipt and timeouts with
   assert.match(stderr.value, /자동 재전송하지 않았습니다/);
 });
 
+test('update routes locally to the selected registered PC and persists its fixed launcher', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'waga-proof-update-cli-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'hosts.json'), stdout = output();
+  const host = { id: 'home', name: 'Home', ssh: 'home-wsl', command: '/old/waga' };
+  fs.writeFileSync(file, JSON.stringify({ version: 1, local: { id: 'here', name: 'Here' }, hosts: [host] }));
+  const code = await runCli(['update', '--host', 'home', '--hosts', file, '--json'], { stdout, stderr: output(),
+    bridge: { discover() { throw Error('must not use a local provider'); } },
+    hostUpdater: async hosts => {
+      assert.deepEqual(hosts, [host]);
+      return [{ id: 'home', state: 'updated', revision: 'a'.repeat(40), command: '/stable/waga', node: '/node', previous: { command: host.command, ssh: host.ssh } }];
+    } });
+  assert.equal(code, 0);
+  assert.equal(JSON.parse(stdout.value).results[0].state, 'updated');
+  assert.equal(JSON.parse(fs.readFileSync(file)).hosts[0].command, '/stable/waga');
+});
+
+test('host status exposes release information even when no provider can be discovered', async () => {
+  const stdout = output();
+  assert.equal(await runCli(['host-status', '--json'], { stdout, stderr: output(), bridge: { discover: async () => { throw Error('no providers'); } } }), 0);
+  const status = JSON.parse(stdout.value);
+  assert.equal(status.sessions, null);
+  assert.match(status.warnings[0].message, /no providers/);
+  assert.equal(typeof status.release.runningRevision, 'string');
+  assert.ok(Array.isArray(status.release.docks));
+});
+
 test("CLI errors and JSON replies preserve exit codes and stdout/stderr separation", async () => {
   const stdout = output();
   const stderr = output();

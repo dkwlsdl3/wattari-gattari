@@ -28,6 +28,12 @@ import { WorkStore } from './work-store.mjs';
 import { workSources } from './work-assistant.mjs';
 import { validateWorkPlan } from './work-plan.mjs';
 import { executePlan, planRequest } from './work-plan-client.mjs';
+import { releaseInfo } from './release-install.mjs';
+import { updateHosts, saveUpdatedHosts } from './host-update.mjs';
+
+async function describeRelease() {
+  return { ...releaseInfo(), docks: await new TmuxWorkspace().dockReleases() };
+}
 
 function usage() {
   return [
@@ -47,6 +53,7 @@ function usage() {
     "                                ask: busy wait 1800s; reply wait 180s. Use explicit timeouts for long work.",
     `${CLI_NAME} open <claude|codex> [--cwd PATH]`,
     `${CLI_NAME} doctor`,
+    `${CLI_NAME} update (--host HOST_ID | --all) [--hosts /absolute/hosts.json] [--json]    Deploy this committed release over SSH`,
     `${CLI_NAME} --version`,
   ].join("\n");
 }
@@ -102,10 +109,27 @@ export async function runCli(args = process.argv.slice(2), {
   planUrl = process.env.WAGA_WEB_URL,
   handleSignals = false,
   remoteRunner = runRemoteCommand,
+  hostUpdater = updateHosts,
 } = {}) {
   let options;
   try { options = parseCliArgs(args); }
   catch (error) { stderr.write(`${error.message}\n${usage()}\n`); return 2; }
+  if (options.command === 'version') {
+    try { stdout.write(`${options.json ? JSON.stringify(await describeRelease()) : VERSION}\n`); return 0; }
+    catch (error) { stderr.write(`${error.message}\n`); return 1; }
+  }
+  if (options.command === 'update') {
+    try {
+      const config = loadHosts(options.hosts);
+      const hosts = options.all ? config.hosts : config.hosts.filter(host => host.id === options.host);
+      if (!hosts.length) throw Error('업데이트할 등록 PC가 없습니다.');
+      const results = await hostUpdater(hosts);
+      stdout.write(options.json ? `${JSON.stringify({ results })}\n` : results.map(row => `${row.id}\t${row.state}\t${row.revision.slice(0, 8)}${row.error ? `\t${row.error}` : ''}\n`).join(''));
+      try { saveUpdatedHosts(options.hosts, results); }
+      catch (error) { stderr.write(`원격 설치 결과는 위와 같습니다. PC 등록 경로 저장 실패: ${error.message}\n`); return 1; }
+      return results.some(row => row.state === 'failed') ? 1 : 0;
+    } catch (error) { stderr.write(`${error.message}\n`); return 1; }
+  }
   if (options.host) {
     try {
       const host = loadHosts(options.hosts).hosts.find(host => host.id === options.host);
@@ -133,7 +157,7 @@ export async function runCli(args = process.argv.slice(2), {
     finally { process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }
   }
   const nativeBridge = bridge === null;
-  bridge ??= defaultBridge({ autoStartDaemon: !['serve', 'plan', 'send', 'list'].includes(options.command) && !options.async });
+  bridge ??= defaultBridge({ autoStartDaemon: !['serve', 'plan', 'send', 'list', 'host-status'].includes(options.command) && !options.async });
   if (nativeBridge) delivery ??= new MessageDelivery({ store: new RequestStore(), bridge });
 
   const cwd = path.resolve(options.cwd ?? process.cwd());
@@ -208,7 +232,13 @@ export async function runCli(args = process.argv.slice(2), {
       const row = input.replanFrom ? await planRequest(`works/${work.id}?session=${encodeURIComponent(session.id)}`, { plan: input }, planUrl) : workStore.plan(work.id, input);
       const launch = options.execute ? await executePlan(row, planUrl) : undefined;
       stdout.write(`${JSON.stringify({ workId: row.id, messageId: row.messageId, plan: row.plan, ...(launch ? { launch } : {}) })}\n`);
-    } else if (options.command === "version") stdout.write(`${VERSION}\n`);
+    } else if (options.command === 'host-status') {
+      const release = await describeRelease();
+      let data;
+      try { data = await bridge.discover({}); }
+      catch (error) { data = { sessions: null, warnings: [{ provider: 'waga', message: error.message }] }; }
+      stdout.write(`${JSON.stringify({ ...data, release })}\n`);
+    }
     else if (options.command === "serve") return await web({ bridge, cwd, filterCwd: options.cwd ? cwd : undefined, port: options.port, output: stdout, orderStore });
     else if (options.command === "help") stdout.write(`${usage()}\n`);
     else if (options.command === "doctor") return (await doctor({ output: stdout, cwd })).exitCode;
@@ -225,7 +255,7 @@ export async function runCli(args = process.argv.slice(2), {
       orderStore,
       settingsStore,
     })).code;
-    else if (options.command === "overview") return await overview({ hosts: loadHosts(options.hosts), filterCwd: options.cwd ? cwd : null, defaultCwd: cwd, bridge, inputStream: stdin, outputStream: stdout, errorOutput: stderr, orderStore, settingsStore });
+    else if (options.command === "overview") return await overview({ hosts: loadHosts(options.hosts), hostsPath: options.hosts, filterCwd: options.cwd ? cwd : null, defaultCwd: cwd, bridge, inputStream: stdin, outputStream: stdout, errorOutput: stderr, orderStore, settingsStore });
     else if (options.command === "tmux-agents-view") return (await tmuxAgentsView(options.windowId)).code ?? 0;
     else if (options.command === "list" || options.command === "default") writeList(stdout, stderr, await bridge.discover({ provider: options.provider, cwd: options.cwd ? cwd : undefined }), options.json);
     else if (options.command === "send") {

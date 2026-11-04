@@ -43,6 +43,20 @@ The optional default registry is `$XDG_CONFIG_HOME/wattari-gattari/hosts.json`, 
 Ambiguous SSH failures never trigger automatic message resubmission. This is direct SSH;
 an always-on Oracle relay and offline inbox are separate work. See the [connection contract](docs/adr/2026-11-03-global-dock.md).
 
+In Global Dock, `u` updates the selected PC and `U` updates all registered remote PCs:
+
+```sh
+waga update --host home-wsl --hosts /absolute/path/hosts.json
+waga update --all --hosts /absolute/path/hosts.json
+```
+
+Updates deploy the current clean checkout commit, or the active installed release's saved source archive.
+Set the optional host `node` executable path if Node is absent from the noninteractive SSH PATH.
+Successful updates save a fixed launcher path in the registry. Versioned installs preserve native agents
+and message workers; managed Docks apply the new version when visible and not editing input/settings.
+Installation or startup failure keeps the previous release. Legacy Docks without this feature need
+one reconnect after their first update; subsequent managed updates apply automatically.
+
 ## Requirements and install
 
 - Linux, Node.js 22+, and `flock` (util-linux) for concurrent local storage

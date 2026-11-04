@@ -21,6 +21,8 @@ import { TmuxWorkspace } from "./tmux-workspace.mjs";
 import { previewText, SessionPreview } from "./session-preview.mjs";
 import { GlobalDock, DockNavigationStore } from "./global-dock.mjs";
 import { remoteCommand } from "./global-hosts.mjs";
+import { updateHosts, saveUpdatedHosts } from './host-update.mjs';
+import { releaseInfo } from './release-install.mjs';
 
 const ESC = "\x1b[";
 const KOREAN_META_KEYS = new Map([
@@ -542,6 +544,12 @@ export function buildGlobalDockFrame({ rows, selectedId, currentHost, query = ""
   if (row && height - lines.length >= 7) {
     const type = types[row.type] ?? types.pc;
     line(`${row.name} · ${type.label} · 등록 ID: ${row.id}`, type.color);
+    if (row.update) line(`업데이트: ${{ updating: '설치 중', updated: '설치 완료 · 화면 확인 중', current: '이미 최신', failed: '실패' }[row.update.state]} ${row.update.revision.slice(0, 8)}${row.update.error ? ` · ${row.update.error}` : ''}`, row.update.state === 'failed' ? THEME.error : THEME.pc);
+    if (row.release) {
+      const installed = row.release.installedRevision;
+      const pending = row.release.docks?.filter(dock => dock.revision !== installed).length ?? 0;
+      line(`설치: ${installed?.slice(0, 8) || '개발/이전 설치'} · Dock: ${pending ? `${pending}개 적용 대기` : row.release.docks?.length ? '적용됨' : '다음 접속부터 적용'}`, pending ? THEME.warning : THEME.muted);
+    }
     if (row.updatedAt) line(`마지막 확인 ${new Date(row.updatedAt).toLocaleTimeString()}`);
     if (row.error || row.summary?.warnings?.length) line(`! ${row.error || row.summary.warnings[0].message}`, THEME.warning);
     const projects = new Map();
@@ -552,7 +560,7 @@ export function buildGlobalDockFrame({ rows, selectedId, currentHost, query = ""
     for (const [folder, total] of [...projects].slice(0, Math.max(0, height - lines.length - 4))) line(`  ${folder} · ${total}개 세션`);
   }
   line("─".repeat(usableWidth), THEME.divider);
-  line("↑↓ 선택   Enter PC 열기   / 검색   Esc 현재 PC   Alt+R 갱신", THEME.primary);
+  line("↑↓ 선택   Enter PC 열기   u 업데이트 · U 전체   / 검색   Esc 복귀   Alt+R 갱신", THEME.primary);
   line(searching || query ? `PC 검색: ${query}` : notice);
   return lines.slice(0, height).join("\n");
 }
@@ -730,7 +738,10 @@ export async function runOverview({
   orderStore = null,
   settingsStore = null,
   hosts = null,
+  hostsPath = null,
   globalDock = hosts ? new GlobalDock(hosts) : null,
+  hostUpdater = updateHosts,
+  readRelease = releaseInfo,
   remoteHost = process.env.WAGA_REMOTE_HOST || null,
   navigationStore = process.env.WAGA_REMOTE_HOST_ID ? new DockNavigationStore(process.env.WAGA_REMOTE_HOST_ID) : null,
   refreshMs = 3_000,
@@ -749,6 +760,8 @@ export async function runOverview({
   let globalVisible = false;
   let globalQuery = "";
   let globalSearching = false;
+  let updating = false, reloading = false;
+  const runningRelease = readRelease();
   const hostRow = globalDock || remoteHost ? [{ type: "hosts", key: "global:hosts", name: "↑ PC 목록으로" }] : [];
   const tree = sessions => [...hostRow, ...buildOverviewTree(sessions, { collapsed, query, rootCwd: defaultCwd })];
   let warnings = [];
@@ -817,6 +830,19 @@ export async function runOverview({
     if (!navigationStore) return;
     try { navigationStore.save({ selectedKey: lastContentKey, collapsed: [...collapsed], query, provider, previewOutputOffset: lastContentOffset }); }
     catch (error) { errorOutput.write(`Dock 탐색 위치 저장 실패: ${error.message}\n`); }
+  };
+  const reloadIfReady = async () => {
+    if (!runningRelease.root || !workspace.reloadOverview || reloading || closed || busy || nativeOpen || newTask || renameTask || settingsPanel || searching || globalSearching || updating) return;
+    try {
+      if (workspace.shouldRefreshOverview && !await workspace.shouldRefreshOverview()) return;
+      if (closed || busy || nativeOpen || newTask || renameTask || settingsPanel || searching || globalSearching || updating) return;
+      const installed = readRelease();
+      if (!installed.installedRevision || installed.installedRevision === runningRelease.runningRevision) return;
+      reloading = true;
+      saveNavigation();
+      const result = await workspace.reloadOverview(installed, { hostsPath, filterCwd });
+      if (result?.deferred) reloading = false;
+    } catch (error) { notice = `새 버전 화면 적용 실패: ${error.message}`; reloading = false; render(); }
   };
   const archivedSessionIds = new Set();
   const previewReader = new SessionPreview({
@@ -1351,7 +1377,7 @@ export async function runOverview({
   };
 
   const onKeypress = (text, key = {}) => {
-    if (busy || closed) return;
+    if (busy || closed || reloading) return;
     restoringSelection = null;
     const koreanMetaKey = key.meta && key.sequence?.startsWith("\x1b") && KOREAN_META_KEYS.get(key.sequence.slice(1));
     if (koreanMetaKey) key = { ...key, name: koreanMetaKey };
@@ -1388,6 +1414,21 @@ export async function runOverview({
         if (rows[index]) globalDock.selectedId = rows[index].id;
       } else if (key.meta && key.name === "r") {
         void refreshHosts();
+      } else if (key.name === 'u' && !key.meta && !key.ctrl && !globalSearching) {
+        const targets = key.shift || text === 'U' ? globalDock.config.hosts : rows[index]?.local ? [] : rows[index] ? globalDock.config.hosts.filter(host => host.id === rows[index].id) : [];
+        if (updating) notice = 'PC 업데이트가 진행 중입니다.';
+        else if (!targets.length) notice = '업데이트할 원격 PC를 선택해 주세요.';
+        else {
+          updating = true;
+          notice = '확정된 버전을 준비하고 있습니다.';
+          void hostUpdater(targets, { changed: (host, state) => { globalDock.updates.set(host.id, state); render(); } })
+            .then(results => {
+              saveUpdatedHosts(hostsPath, results);
+              notice = `업데이트 결과: ${results.filter(row => row.state !== 'failed').length}개 성공 · ${results.filter(row => row.state === 'failed').length}개 실패`;
+            })
+            .catch(error => { notice = error.message; })
+            .finally(() => { updating = false; render(); void refreshHosts(); });
+        }
       } else if (key.name === "return") {
         const host = rows[index];
         if (!host) return;
@@ -1645,7 +1686,7 @@ export async function runOverview({
   outputStream.on("resize", onResize);
   const timer = setInterval(() => {
     if (newTask?.submitting) render();
-    else { void refresh(); if (globalVisible) void refreshHosts(); }
+    else { void refresh(); if (globalVisible) void refreshHosts(); void reloadIfReady(); }
   }, refreshMs);
   let resolveRun;
   const completed = new Promise((resolve) => { resolveRun = resolve; });
@@ -1674,6 +1715,10 @@ export async function runOverview({
   }
   inputStream.once("end", cleanup);
   inputStream.once("close", cleanup);
+  if (runningRelease.root && workspace.prepareOverviewRelease) {
+    try { await workspace.prepareOverviewRelease(runningRelease.runningRevision); }
+    catch (error) { notice = `Dock 버전 표시 실패: ${error.message}`; }
+  }
   void refresh({ force: true });
   return await completed;
 }

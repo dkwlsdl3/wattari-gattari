@@ -7,6 +7,7 @@ import { setImmediate } from "node:timers/promises";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from 'node:timers/promises';
 
 test("independent failures preserve registration order, ID selection and last good summary", async () => {
   const config = { local: { id: "here", name: "Same name" }, hosts: [{ id: "b", name: "Same name" }, { id: "a", name: "Same name" }] };
@@ -145,4 +146,33 @@ test("PC list round trip keeps the last session's response scroll position", asy
   await f.press("up"); await f.press("up"); await f.press("return"); await f.press("escape");
   f.input.emit("end"); await f.running;
   assert.ok(saved.at(-1).previewOutputOffset > 0, "returning from the PC list did not reset the response to its beginning");
+});
+
+test('update keys select registered PCs and never deploy typed search text', async t => {
+  const targets = [];
+  const globalDock = new GlobalDock(config, { query: async () => ({ sessions: [], warnings: [] }) });
+  const f = dockFixture(t, { globalDock, workspace: {}, hostUpdater: async hosts => { targets.push(hosts.map(host => host.id)); return []; } });
+  await setImmediate(); await f.press('return');
+  await f.press('u', 'u'); assert.deepEqual(targets, []);
+  await f.press('down'); await f.press('u', 'u'); assert.deepEqual(targets, [['home']]);
+  await f.press('/', '/'); await f.press('u', 'u'); assert.equal(targets.length, 1);
+  await f.press('escape'); await f.press('u', 'U', { shift: true }); assert.deepEqual(targets, [['home'], ['home']]);
+});
+
+test('installed update waits for the owning Dock to become visible before reloading, retaining navigation', async t => {
+  let visible = false, installed = 'old';
+  const reloads = [], saved = [];
+  let reloaded;
+  const ready = new Promise(resolve => { reloaded = resolve; });
+  const f = dockFixture(t, { refreshMs: 10,
+    readRelease: () => ({ root: '/waga-proof-install', runningRevision: 'old', installedRevision: installed }),
+    navigationStore: { load: () => null, save: state => saved.push(state) },
+    workspace: { shouldRefreshOverview: async () => visible, reloadOverview: async release => { reloads.push(release.installedRevision); reloaded(); } } });
+  await setImmediate(); installed = 'new';
+  await delay(35); assert.deepEqual(reloads, [], 'a native TUI is still active');
+  visible = true;
+  await Promise.race([ready, delay(1000).then(() => { throw Error('Dock did not reload'); })]);
+  assert.deepEqual(reloads, ['new']);
+  assert.equal(saved.length, 1);
+  f.input.emit('end'); await f.running;
 });

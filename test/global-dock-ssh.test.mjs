@@ -7,6 +7,8 @@ import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import pty from "node-pty";
+import crypto from 'node:crypto';
+import { deployHost } from '../src/host-update.mjs';
 import { queryHost } from "../src/global-hosts.mjs";
 import { TmuxWorkspace, retainedSessionName, shellCommand } from "../src/tmux-workspace.mjs";
 
@@ -60,6 +62,10 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   const overviewUrl = new URL("../src/overview.mjs", import.meta.url).href;
   const workspaceUrl = new URL("../src/tmux-workspace.mjs", import.meta.url).href;
   const dockUrl = new URL("../src/session-dock.mjs", import.meta.url).href;
+  const releaseFile = path.join(root, 'remote-release.json');
+  fs.mkdirSync(path.join(root, 'managed'));
+  fs.writeFileSync(releaseFile, JSON.stringify({ root: path.join(root, 'managed'), installedRevision: 'old' }));
+  fs.writeFileSync(path.join(root, 'managed/waga'), `#!/bin/sh\n${shellCommand(process.execPath, [path.join(root, "remote waga's.mjs")])} "$@"\n`, { mode: 0o700 });
   const nativeCode = `process.stdin.setRawMode(true); process.stdin.resume(); require('node:fs').writeFileSync(${JSON.stringify(path.join(root, "native-ready"))},'ready'); process.stdout.write('waga-proof-ready\\r\\n'); process.stdin.on('data', data => require('node:fs').appendFileSync(${JSON.stringify(path.join(root, "native-input"))}, data));`;
   const fixture = path.join(root, "fixture.mjs");
   fs.writeFileSync(fixture, `
@@ -69,6 +75,7 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
     import {TmuxWorkspace,enterWagaDock} from ${JSON.stringify(workspaceUrl)};
     import {enterSessionDock} from ${JSON.stringify(dockUrl)};
     const side = process.env.WAGA_PROOF_SIDE;
+    const runningRevision = JSON.parse(fs.readFileSync(${JSON.stringify(releaseFile)})).installedRevision;
     process.env.PATH = ${JSON.stringify(env.PATH)};
     process.env.XDG_CONFIG_HOME = ${JSON.stringify(env.XDG_CONFIG_HOME)};
     process.env.XDG_STATE_HOME = ${JSON.stringify(root)} + '/' + side + '-state';
@@ -84,7 +91,9 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
     process.exitCode = await runCli(process.argv.slice(2), {bridge,delivery,
       tmuxAgentsView: async window => { fs.writeFileSync(${JSON.stringify(path.join(root, "agents-key.json"))},JSON.stringify({side,window})); return {code:0}; },
       dock: options => enterSessionDock({...options,enterTmux: options => enterWagaDock({...options,workspace})}),
-      overview: options => runOverview({...options, defaultCwd:${JSON.stringify(root)}, workspace, commandFor: () => ({command:process.execPath,args:['-e',${JSON.stringify(nativeCode)}],cwd:${JSON.stringify(root)}})})
+      overview: options => runOverview({...options, defaultCwd:${JSON.stringify(root)}, workspace, refreshMs:100,
+        readRelease: () => side === 'remote' ? {...JSON.parse(fs.readFileSync(${JSON.stringify(releaseFile)})),runningRevision} : {root:null},
+        commandFor: () => ({command:process.execPath,args:['-e',${JSON.stringify(nativeCode)}],cwd:${JSON.stringify(root)}})})
     });
   `);
   const localCli = path.join(root, "local-waga.mjs"), remoteCli = path.join(root, "remote waga's.mjs");
@@ -131,8 +140,15 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   const ownerExited = new Promise(resolve => ownerClient.onExit(resolve)); ownerClient.kill(); await ownerExited;
   client.write("\x1ba");
   await until(() => { try { return JSON.parse(fs.readFileSync(path.join(root, "agents-key.json"), "utf8")).side; } catch { return null; } }, "remote", "Alt+A also passes through to the owning PC");
+  const oldOverviewPid = await call(remoteSocket, 'display-message', '-p', '-t', `${firstView}:overview`, '#{pane_pid}');
+  fs.writeFileSync(releaseFile, JSON.stringify({ root: path.join(root, 'managed'), installedRevision: 'new' }));
+  await new Promise(resolve => setTimeout(resolve, 250));
+  assert.equal(await call(remoteSocket, 'display-message', '-p', '-t', `${firstView}:overview`, '#{pane_pid}'), oldOverviewPid, 'update leaves the native TUI and hidden Dock alone');
   client.write("\x1bg");
   await until(() => call(remoteSocket, "display-message", "-p", "-t", firstView, "#{window_name}"), "overview", "Alt+G passes the outer tmux and returns to remote Dock");
+  await until(() => call(remoteSocket, 'display-message', '-p', '-t', `${firstView}:overview`, '#{@waga_release}'), 'new', 'visible Dock automatically applies the installed release');
+  assert.notEqual(await call(remoteSocket, 'display-message', '-p', '-t', `${firstView}:overview`, '#{pane_pid}'), oldOverviewPid);
+  assert.equal(await call(remoteSocket, 'display-message', '-p', '-t', nativeTarget, '#{pane_pid}'), nativePid, 'only the Dock process was replaced');
   client.write("\x1b[A\x1b[A\r");
   await until(() => call(localSocket, "display-message", "-p", "-t", view("local"), "#{window_name}"), "overview", "remote PC back returns to original Global Dock");
   assert.equal(await call(remoteSocket, "display-message", "-p", "-t", nativeTarget, "#{pane_pid}"), nativePid);
@@ -153,4 +169,27 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   await until(() => call(remoteSocket, "display-message", "-p", "-t", nativeTarget, "#{session_attached}"), "0", "SSH disconnect detaches its native view");
   assert.equal(await call(remoteSocket, "display-message", "-p", "-t", nativeTarget, "#{pane_pid}"), nativePid);
   assert.doesNotThrow(() => process.kill(Number(nativePid), 0), "native host survives local terminal close");
+
+  // Exercise the real SSH bootstrap and installer with an offline, dependency-free CLI fixture.
+  const packageDir = path.join(root, 'deploy-package');
+  fs.mkdirSync(packageDir);
+  fs.cpSync(new URL('../src', import.meta.url), path.join(packageDir, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(packageDir, 'package.json'), '{"name":"waga-proof-deploy","version":"1.0.0","private":true}');
+  await exec('npm', ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: packageDir });
+  fs.writeFileSync(path.join(packageDir, 'src/cli.mjs'), `import fs from 'node:fs'; import path from 'node:path'; import {fileURLToPath} from 'node:url';
+    const p=path.dirname(path.dirname(fileURLToPath(import.meta.url))),m=JSON.parse(fs.readFileSync(path.join(p,'release.json')));
+    let active=null;try{active=JSON.parse(fs.readFileSync(path.join(m.root,'current/release.json')));}catch{}
+    console.log(JSON.stringify({runningRevision:m.revision,installedRevision:active?.revision??null}));`);
+  const archive = path.join(root, 'deploy.tar.gz');
+  await exec('tar', ['-czf', archive, '-C', packageDir, '.']);
+  const bytes = fs.readFileSync(archive), release = { revision: 'a'.repeat(40), archive: bytes, sha256: crypto.createHash('sha256').update(bytes).digest('hex') };
+  const node = path.join(root, 'proof-node');
+  fs.writeFileSync(node, `#!/bin/sh\n${shellCommand('env', [`HOME=${path.join(root, 'deploy-home')}`, process.execPath])} "$@"\n`, { mode: 0o700 });
+  const deployed = await deployHost({ ...host, node }, release, { env });
+  assert.equal(deployed.state, 'updated');
+  assert.equal(JSON.parse((await exec(deployed.command, ['--version', '--json'])).stdout).runningRevision, release.revision);
+  assert.equal((await deployHost({ ...host, node }, release, { env })).state, 'current');
+  await assert.rejects(deployHost({ ...host, node }, { ...release, sha256: '0'.repeat(64) }, { env }), /checksum mismatch/);
+  assert.equal(JSON.parse((await exec(deployed.command, ['--version', '--json'])).stdout).installedRevision, release.revision, 'a rejected SSH transfer does not change the active release');
+  assert.equal(await call(remoteSocket, 'display-message', '-p', '-t', nativeTarget, '#{pane_pid}'), nativePid, 'SSH deployment also leaves native sessions alive');
 });

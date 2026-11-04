@@ -22,8 +22,12 @@ export function validateHosts(config) {
   const hosts = config.hosts.map(host => {
     const base = identity(host);
     if (typeof host.ssh !== "string" || !/^[a-zA-Z0-9_][a-zA-Z0-9._@-]*$/.test(host.ssh)) throw invalid("ssh must be an SSH alias or user@host destination");
-    if (typeof host.command !== "string" || !host.command || host.command.startsWith("-") || host.command.length > 4096 || /[\x00-\x1f\x7f-\x9f]/.test(host.command) || (host.command.includes("/") && !path.posix.isAbsolute(host.command))) throw invalid("command must be an executable name or absolute path");
-    return { ...base, ssh: host.ssh, command: host.command };
+    for (const field of ['command', 'node']) {
+      const value = host[field];
+      if (field === 'node' && value === undefined) continue;
+      if (typeof value !== 'string' || !value || value.startsWith('-') || value.length > 4096 || /[\x00-\x1f\x7f-\x9f]/.test(value) || (value.includes('/') && !path.posix.isAbsolute(value))) throw invalid(`${field} must be an executable name or absolute path`);
+    }
+    return { ...base, ssh: host.ssh, command: host.command, ...(host.node === undefined ? {} : { node: host.node }) };
   });
   return { version: 1, local, hosts };
 }
@@ -60,10 +64,20 @@ export function runRemoteCommand(spec, { stdout = process.stdout, stderr = proce
 }
 
 export async function queryHost(host, { run = execute } = {}) {
-  const spec = remoteCommand(host);
-  const result = await run(spec.command, spec.args, { encoding: "utf8", timeout: 10_000, maxBuffer: 1024 * 1024, killSignal: "SIGKILL" });
+  let spec = remoteCommand(host, { args: ['host-status', '--json'] }), result;
+  const options = { encoding: "utf8", timeout: 10_000, maxBuffer: 1024 * 1024, killSignal: "SIGKILL" };
+  try { result = await run(spec.command, spec.args, options); }
+  catch (error) {
+    // Old Waga rejects the new read-only command with its CLI usage exit code.
+    if (error.code !== 2) throw error;
+    spec = remoteCommand(host);
+    result = await run(spec.command, spec.args, options);
+  }
   const data = JSON.parse(result.stdout);
+  if (data?.release && ((data.release.installedRevision !== null && typeof data.release.installedRevision !== 'string')
+    || !Array.isArray(data.release.docks) || data.release.docks.some(dock => !dock || (dock.revision !== null && typeof dock.revision !== 'string')))) throw invalid('Remote status returned invalid release information');
+  if (data?.sessions === null && data?.release) throw Object.assign(Error(data.warnings?.[0]?.message || 'Remote discovery failed'), { release: data.release });
   if (!Array.isArray(data?.sessions) || data.sessions.some(s => !s || typeof s.id !== "string" || typeof s.cwd !== "string" || typeof s.name !== "string")) throw invalid("Remote list returned invalid sessions");
   if (!Array.isArray(data.warnings ?? []) || data.warnings?.some(w => !w || typeof w.message !== "string")) throw invalid("Remote list returned invalid warnings");
-  return { sessions: data.sessions, warnings: data.warnings ?? [] };
+  return { sessions: data.sessions, warnings: data.warnings ?? [], ...(data.release ? { release: data.release } : {}) };
 }

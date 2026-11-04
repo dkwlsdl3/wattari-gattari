@@ -1,4 +1,4 @@
-const COMMANDS = new Set(["plan", "run", "serve", "list", "agents", "send", "ask", "result", "open", "overview", "tmux-agents-view", "doctor", "help"]);
+const COMMANDS = new Set(["update", "host-status", "plan", "run", "serve", "list", "agents", "send", "ask", "result", "open", "overview", "tmux-agents-view", "doctor", "help"]);
 const DEFAULT_WAIT_TIMEOUT_MS = 30 * 60 * 1_000;
 const DEFAULT_REPLY_TIMEOUT_MS = 3 * 60 * 1_000;
 
@@ -25,6 +25,7 @@ export function parseCliArgs(args) {
     if (arg === "--help" || arg === "-h") { options.command = "help"; commandSeen = true; continue; }
     if (arg === "--version" || arg === "-v") { options.command = "version"; commandSeen = true; continue; }
     if (arg === "--json") { options.json = true; continue; }
+    if (arg === "--all") { options.all = true; continue; }
     if (arg === '--async') { options.async = true; continue; }
     if (arg === '--execute') { options.execute = true; continue; }
     if (arg === "--until-idle") { options.untilIdle = true; continue; }
@@ -64,9 +65,11 @@ export function parseCliArgs(args) {
 
   if (options.command === "default" && (options.json || options.provider)) options.command = "list";
   if (options.command === "serve") options.port ??= 4317;
-  if (options.host && !["list", "send", "ask", "result"].includes(options.command)) throw invalid("--host is only valid for list, send, ask and result");
+  if (options.host && !["update", "list", "send", "ask", "result"].includes(options.command)) throw invalid("--host is only valid for update, list, send, ask and result");
   if (options.host && options.notifyOrigin) throw invalid("--notify-origin cannot use a local Claude socket across PCs; use result --host instead");
-  if (options.hosts && !options.host && !["default", "overview"].includes(options.command)) throw invalid("--hosts is only valid for the interactive dock or with --host");
+  if (options.all && options.command !== 'update') throw invalid('--all is only valid for update');
+  if (options.command === 'update' && (!!options.host === !!options.all)) throw invalid('update requires exactly one of --host HOST_ID or --all');
+  if (options.hosts && !options.host && !["default", "overview", "update"].includes(options.command)) throw invalid("--hosts is only valid for the interactive dock or with --host");
   if (args.includes("--port") && options.command !== "serve") throw invalid("--port is only valid for serve");
   if (options.provider && !["claude", "codex"].includes(options.provider)) throw invalid(`Unknown provider: ${options.provider}`);
   if (!["auto", "direct", "tmux"].includes(options.backend)) throw invalid(`Unknown backend: ${options.backend}`);

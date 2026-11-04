@@ -46,6 +46,7 @@ export class GlobalDock {
     this.selectedId = config.local.id;
     this.states = new Map(config.hosts.map(host => [host.id, { status: "unknown", summary: null }]));
     this.pending = null;
+    this.updates = new Map();
   }
 
   refresh(changed = () => {}) {
@@ -54,9 +55,9 @@ export class GlobalDock {
       const previous = this.states.get(host.id);
       try {
         const summary = await this.query(host);
-        this.states.set(host.id, { status: summary.warnings?.length ? "partial" : "available", summary, updatedAt: Date.now() });
+        this.states.set(host.id, { status: summary.warnings?.length ? "partial" : "available", summary, release: summary.release, updatedAt: Date.now() });
       } catch (error) {
-        this.states.set(host.id, { ...previous, status: previous.summary ? "stale" : "unavailable", error: error.stderr?.trim() || error.message });
+        this.states.set(host.id, { ...previous, release: error.release ?? previous.release, status: previous.summary ? "stale" : "unavailable", error: error.stderr?.trim() || error.message });
       }
       changed();
     })).finally(() => { this.pending = null; });
@@ -65,6 +66,6 @@ export class GlobalDock {
 
   rows(localSessions = [], localWarnings = [], localKnown = true) {
     return [{ ...this.config.local, local: true, status: localWarnings.length ? "partial" : "local", summary: localKnown ? { sessions: localSessions, warnings: localWarnings } : null },
-      ...this.config.hosts.map(host => ({ ...host, ...this.states.get(host.id) }))];
+      ...this.config.hosts.map(host => ({ ...host, ...this.states.get(host.id), update: this.updates.get(host.id) }))];
   }
 }

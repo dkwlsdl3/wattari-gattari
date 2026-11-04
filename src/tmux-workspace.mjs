@@ -10,6 +10,8 @@ import { nativeAgentsCommand } from "./native-launcher.mjs";
 import { retainedClaudeViewMatches } from "./providers/claude-view.mjs";
 import { retainedCodexViewState } from "./providers/codex-view.mjs";
 import { interactiveUnavailable } from "./providers/claude-interactive.mjs";
+import { quote, shellCommand } from './shell-command.mjs';
+export { shellCommand } from './shell-command.mjs';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_SOCKET = `waga-${typeof process.getuid === "function" ? process.getuid() : "user"}`;
@@ -75,14 +77,6 @@ function defaultLaunch(args, { env = process.env, ...options } = {}) {
 
 function defaultWait(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-function quote(value) {
-  return `'${String(value).replaceAll("'", `'\\''`)}'`;
-}
-
-export function shellCommand(command, args = []) {
-  return `exec ${[command, ...args].map(quote).join(" ")}`;
 }
 
 export function workspaceSessionName(cwd) {
@@ -212,6 +206,40 @@ export class TmuxWorkspace {
       throw Object.assign(new Error(created.stderr.trim() || "Cannot configure remote window"), { code: "TMUX_COMMAND_FAILED" });
     }
     return { windowId };
+  }
+
+  async dockReleases() {
+    const prefix = this.#env.TMUX ? [] : ['-L', this.#socketName, '-f', '/dev/null'];
+    const result = await this.#call([...prefix, 'list-windows', '-a', '-F', '#{window_name}\t#{@waga_revision}\t#{@waga_release}'], { check: false });
+    if (result.code !== 0) return [];
+    return result.stdout.trimEnd().split('\n').flatMap(line => {
+      const [name, source, revision] = line.split('\t');
+      return name === 'overview' && source ? [{ revision: revision || null }] : [];
+    });
+  }
+
+  async prepareOverviewRelease(revision) {
+    const session = await this.#currentSessionName();
+    if (this.#env.WAGA_RELOAD === '1') {
+      await this.#configure([], session, this.#env.WAGA_TMUX_MODE);
+      await this.#call(['set-window-option', '-t', `${session}:overview`, '@waga_revision', this.#revision]);
+    }
+    await this.#call(['set-window-option', '-t', `${session}:overview`, '@waga_release', revision]);
+  }
+
+  async reloadOverview(release, { hostsPath, filterCwd } = {}) {
+    const session = await this.#currentSessionName(), target = `${session}:overview`;
+    const pane = await this.#call(['display-message', '-p', '-t', target, '#{pane_pid}']);
+    if (pane.stdout.trim() !== String(process.pid)) throw Error('Dock reload ownership does not match this process');
+    const args = ['WAGA_RELOAD=1', `WAGA_TMUX_SESSION=${session}`, `WAGA_TMUX_MODE=${this.#env.WAGA_TMUX_MODE}`, 'WAGA_TMUX_INDEPENDENT=1',
+      ...['WAGA_REMOTE_HOST', 'WAGA_REMOTE_HOST_ID'].filter(key => this.#env[key]).map(key => `${key}=${this.#env[key]}`),
+      path.join(release.root, 'waga'), 'overview'];
+    if (hostsPath) args.push('--hosts', hostsPath);
+    if (filterCwd) args.push('--cwd', filterCwd);
+    const command = `respawn-pane -k -t ${quote(target)} -c ${quote(process.cwd())} ${quote(shellCommand('env', args))}`;
+    const condition = `#{&&:#{==:#{pane_pid},${process.pid}},#{&&:#{window_active},#{>:#{window_active_clients},0}}}`;
+    const result = await this.#call(['if-shell', '-t', target, '-F', condition, command, 'display-message -p deferred']);
+    return { deferred: result.stdout.trim() === 'deferred' };
   }
 
   async focusOrOpen(session, commandSpec, { force = false, knownNativeIds = [] } = {}) {

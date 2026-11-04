@@ -38,7 +38,7 @@ test("SSH uses bounded public JSON command, quoted executable and strict noninte
     assert.equal(command, "ssh");
     assert.ok(args.includes("StrictHostKeyChecking=yes"));
     assert.ok(args.includes("BatchMode=yes"));
-    assert.deepEqual(args.slice(-3), ["--", host.ssh, shellCommand(host.command, ["list", "--json"])]);
+    assert.deepEqual(args.slice(-3), ["--", host.ssh, shellCommand(host.command, ["host-status", "--json"])]);
     assert.equal(options.timeout, 10_000);
     assert.equal(options.maxBuffer, 1024 * 1024);
     return { stdout: JSON.stringify(summary) };
@@ -47,6 +47,17 @@ test("SSH uses bounded public JSON command, quoted executable and strict noninte
   const spec = remoteCommand(host, { interactive: true });
   assert.equal(spec.args[0], "-tt");
   assert.equal(spec.args.at(-1), shellCommand("env", ["WAGA_REMOTE_HOST=Dev PC", "WAGA_REMOTE_HOST_ID=dev", host.command, "--backend", "tmux"]));
+});
+
+test('old remote Waga falls back only for an unsupported command, and installation status survives missing providers', async () => {
+  let calls = 0;
+  const old = await queryHost(host, { run: async () => {
+    if (++calls === 1) throw Object.assign(Error('unsupported command'), { code: 2 });
+    return { stdout: JSON.stringify({ sessions: [], warnings: [] }) };
+  } });
+  assert.equal(calls, 2); assert.deepEqual(old.sessions, []);
+  const release = { installedRevision: 'a'.repeat(40), docks: [{ revision: null }] };
+  await assert.rejects(queryHost(host, { run: async () => ({ stdout: JSON.stringify({ sessions: null, warnings: [{ message: 'no providers' }], release }) }) }), error => error.release.installedRevision === release.installedRevision && /providers/.test(error.message));
 });
 
 test("failed or malformed remote command is never retried or converted to empty sessions", async () => {

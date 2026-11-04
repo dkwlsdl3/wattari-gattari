@@ -43,6 +43,19 @@ waga result <요청-ID> --host home-wsl --hosts /absolute/path/hosts.json --json
 연결 실패 후 메시지를 자동 재전송하지 않습니다. 이번 연결은 PC 간 직접 SSH이며
 Oracle의 상시 접수·중계는 포함하지 않습니다. [설계와 연결 계약](docs/adr/2026-11-03-global-dock.md).
 
+Global Dock에서 `u`는 선택 PC, `U`는 모든 등록 PC를 업데이트합니다. CLI에서도 실행할 수 있습니다.
+
+```sh
+waga update --host home-wsl --hosts /absolute/path/hosts.json
+waga update --all --hosts /absolute/path/hosts.json
+```
+
+깨끗한 checkout의 현재 커밋을 배포하며, 설치본에서는 활성 버전의 소스 묶음을 전달합니다.
+원격의 Node가 SSH PATH에 없으면 등록 항목에 `node` 실행파일의 절대 경로를 지정하십시오.
+설치 성공 후 고정 실행 경로를 등록 파일에 저장합니다. 기존 Claude·Codex와 메시지 worker는
+유지하고 Dock 화면만 복귀 후 자동 적용합니다. 설치/기동 실패 시 이전 버전을 유지합니다.
+이 기능이 없던 예전 설치본은 첫 업데이트 뒤 원격 Dock을 한 번 다시 열어야 합니다.
+
 ## 요구 사항과 설치
 
 - Linux, Node.js 22 이상, 로컬 저장의 동시 갱신에 사용하는 `flock`(util-linux)
