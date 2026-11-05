@@ -42,6 +42,8 @@ const THEME = {
   muted: "38;2;190;199;211",
   divider: "38;2;100;116;139",
   selected: "48;2;58;72;94",
+  tabActive: "1;38;2;15;23;42;48;2;56;189;248",
+  filterActive: "1;38;2;15;23;42;48;2;226;232;240",
   cursor: "1;38;2;226;232;240",
   // Claude's brand coral and the native Codex TUI's terminal-defined cyan.
   claude: "1;38;2;217;119;87",
@@ -616,9 +618,27 @@ export function buildOverviewFrame({ sessions, hostLabel = null, pcTabs = null, 
   const lines = [];
   const title = wide ? "WATTARI GATTARI  Claude + Codex session dock" : "WAGA · session dock";
   lines.push(`  ${color(THEME.title, fit(hostLabel ? `PC: ${hostLabel} · ${title}` : title, usableWidth))}`);
-  if (pcTabs) lines.push(`  ${color(THEME.primary, fit(pcTabs, usableWidth))}`);
+  if (pcTabs) {
+    const labels = pcTabs.items.map(host => ({ id: host.id, text: host.id === pcTabs.selectedId ? `[${safeText(host.name)}]` : safeText(host.name) }));
+    const current = labels.findIndex(host => host.id === pcTabs.selectedId);
+    let start = 0;
+    while (start < current && labels.slice(start, current + 1).reduce((total, host) => total + widthOf(host.text) + 3, 0) > usableWidth - 2) start++;
+    let remaining = usableWidth - (start ? 2 : 0);
+    let tabs = start ? color(THEME.muted, '… ') : '';
+    for (const host of labels.slice(start)) {
+      if (remaining < 3) break;
+      const size = Math.min(widthOf(host.text) + 2, remaining);
+      tabs += color(host.id === pcTabs.selectedId ? THEME.tabActive : THEME.muted, ` ${fit(host.text, size - 2)} `);
+      remaining -= size + 1;
+      tabs += ' ';
+    }
+    lines.push(`  ${tabs}`);
+  }
   const executionStatusColor = codexExecutionMode === CODEX_EXECUTION_MODES.YOLO ? THEME.warning : THEME.muted;
-  lines.push(`  ${color(executionStatusColor, fit(`${counts(sessions)}   제공자: ${provider?.toUpperCase() ?? '전체'}   ${codexExecutionLabel(codexExecutionMode)}   Alt+S 설정   Alt+Y 빠른 전환`, usableWidth))}`);
+  const filterLabel = ` 제공자: ${provider?.toUpperCase() ?? '전체'} `;
+  const statusCounts = fit(counts(sessions), Math.min(widthOf(counts(sessions)), Math.max(0, usableWidth - widthOf(filterLabel) - 2)));
+  const executionWidth = Math.max(0, usableWidth - widthOf(statusCounts) - widthOf(filterLabel) - 2);
+  lines.push(`  ${color(THEME.muted, statusCounts)} ${color(THEME.filterActive, filterLabel)} ${color(executionStatusColor, fit(`${codexExecutionLabel(codexExecutionMode)}   Alt+S 설정   Alt+Y 빠른 전환`, executionWidth))}`);
   if (usageLabels.length) lines.push(`  ${coloredUsageLine(usageLabels, usableWidth)}`);
   lines.push(`  ${color(THEME.divider, "─".repeat(Math.max(1, usableWidth)))}`);
   const bodyStart = lines.length;
@@ -628,7 +648,15 @@ export function buildOverviewFrame({ sessions, hostLabel = null, pcTabs = null, 
     const node = nodes[index];
     const active = index === safeSelected;
     const marker = active ? color(THEME.cursor, "›") : " ";
-    if (node.type === "hosts" || node.type === "host") {
+    if (node.type === 'host') {
+      const label = `${active ? '›' : ' '} ━━ ${safeText(node.name)} `;
+      const title = fit(label, Math.min(widthOf(label), listWidth));
+      const rule = '─'.repeat(Math.max(0, listWidth - widthOf(title)));
+      const ink = node.host?.status === 'offline' ? THEME.muted : THEME[node.host?.type] ?? THEME.pc;
+      lines.push(color(`${active ? THEME.selected : '48;2;30;41;59'};${ink}`, `${title}${rule}`));
+      continue;
+    }
+    if (node.type === "hosts") {
       const row = `${marker} ${color(THEME.primary, fit(node.name, listWidth - 2))}`;
       lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
       continue;
@@ -956,13 +984,7 @@ export async function runOverview({
     outputStream.write(`${ESC}H${ESC}J${buildOverviewFrame({
       sessions,
       hostLabel: integrated ? pcFilter ? globalDock.rows().find(host => host.id === pcFilter)?.name : '전체 PC 통합 Dock' : remoteHost ? `${remoteHost} · 원격` : hosts?.local.name,
-      pcTabs: integrated ? (() => {
-        const tabs = [{ id: null, name: '전체 PC' }, ...globalDock.rows()];
-        const current = tabs.findIndex(host => host.id === pcFilter);
-        let start = 0;
-        while (start < current && widthOf(tabs.slice(start, current + 1).map(host => host.name).join('  ')) > (outputStream.columns || 100) - 12) start++;
-        return `${start ? '… ' : ''}${tabs.slice(start).map(host => host.id === pcFilter ? `[${host.name}]` : ` ${host.name} `).join('  ')}`;
-      })() : null,
+      pcTabs: integrated ? { items: [{ id: null, name: '전체 PC' }, ...globalDock.rows()], selectedId: pcFilter } : null,
       nodes,
       collapsed,
       selected,
