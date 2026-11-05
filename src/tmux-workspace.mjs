@@ -151,8 +151,8 @@ export class TmuxWorkspace {
       `WAGA_TMUX_MODE=${mode}`,
       `WAGA_TMUX_SESSION=${sessionName}`,
       "WAGA_TMUX_INDEPENDENT=1",
-      ...(this.#env.WAGA_REMOTE_HOST ? [`WAGA_REMOTE_HOST=${this.#env.WAGA_REMOTE_HOST}`] : []),
-      ...(this.#env.WAGA_REMOTE_HOST_ID ? [`WAGA_REMOTE_HOST_ID=${this.#env.WAGA_REMOTE_HOST_ID}`] : []),
+      `WAGA_REMOTE_HOST=${this.#env.WAGA_REMOTE_HOST ?? ""}`,
+      `WAGA_REMOTE_HOST_ID=${this.#env.WAGA_REMOTE_HOST_ID ?? ""}`,
       this.#nodePath,
       this.#cliPath,
       "overview",
@@ -232,7 +232,7 @@ export class TmuxWorkspace {
     const pane = await this.#call(['display-message', '-p', '-t', target, '#{pane_pid}']);
     if (pane.stdout.trim() !== String(process.pid)) throw Error('Dock reload ownership does not match this process');
     const args = ['WAGA_RELOAD=1', `WAGA_TMUX_SESSION=${session}`, `WAGA_TMUX_MODE=${this.#env.WAGA_TMUX_MODE}`, 'WAGA_TMUX_INDEPENDENT=1',
-      ...['WAGA_REMOTE_HOST', 'WAGA_REMOTE_HOST_ID'].filter(key => this.#env[key]).map(key => `${key}=${this.#env[key]}`),
+      ...['WAGA_REMOTE_HOST', 'WAGA_REMOTE_HOST_ID'].map(key => `${key}=${this.#env[key] ?? ''}`),
       path.join(release.root, 'waga'), 'overview'];
     if (hostsPath) args.push('--hosts', hostsPath);
     if (filterCwd) args.push('--cwd', filterCwd);

@@ -23,6 +23,38 @@ async function waitFor(check, timeoutMs = 2_000) {
   throw new Error(`condition was not met within ${timeoutMs}ms`);
 }
 
+test('new docks keep their own local or remote identity on a server started by a remote dock', { skip: !hasTmux, timeout: 15_000 }, async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'waga-proof-dock-origin-'));
+  const socketName = path.basename(root), prefix = ['-L', socketName, '-f', '/dev/null'];
+  const env = { ...process.env };
+  for (const key of ['TMUX', 'TMUX_PANE', 'WAGA_REMOTE_HOST', 'WAGA_REMOTE_HOST_ID']) delete env[key];
+  t.after(() => {
+    spawnSync('tmux', [...prefix, 'kill-server'], { stdio: 'ignore', timeout: commandTimeoutMs });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  await execFileAsync('tmux', [...prefix, 'new-session', '-d', '-s', 'waga-proof-anchor', 'sleep 30'], {
+    env: { ...env, WAGA_REMOTE_HOST: 'old-host', WAGA_REMOTE_HOST_ID: 'old-id' }, timeout: commandTimeoutMs,
+  });
+  const cli = path.join(root, 'cli.mjs');
+  fs.writeFileSync(cli, `import fs from 'node:fs';
+    fs.writeFileSync(${JSON.stringify(root)}+'/'+process.env.WAGA_TMUX_SESSION+'.json',JSON.stringify({host:process.env.WAGA_REMOTE_HOST||null,id:process.env.WAGA_REMOTE_HOST_ID||null}));
+    setInterval(()=>{},1000);`);
+  for (const identity of [{ host: null, id: null }, { host: 'new-host', id: 'new-id' }]) {
+    const workspace = new TmuxWorkspace({ socketName, cliPath: cli,
+      env: { ...env, ...(identity.host ? { WAGA_REMOTE_HOST: identity.host, WAGA_REMOTE_HOST_ID: identity.id } : {}) },
+      launch: async args => {
+        const file = path.join(root, `${args.at(-1)}.json`);
+        await waitFor(() => fs.existsSync(file));
+        assert.deepEqual(JSON.parse(fs.readFileSync(file)), identity);
+        return { code: 0 };
+      },
+    });
+    await workspace.enter({ cwd: root });
+  }
+  const { stdout } = await execFileAsync('tmux', [...prefix, 'show-environment', '-g', 'WAGA_REMOTE_HOST'], { encoding: 'utf8', timeout: commandTimeoutMs });
+  assert.equal(stdout.trim(), 'WAGA_REMOTE_HOST=old-host', 'other views retain the server environment');
+});
+
 test("real tmux dock previews follow key selection and disappear on terminal resize", { skip: !hasTmux, timeout: 15_000 }, async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-preview-tmux-"));
   const prefix = ["-S", path.join(root, "tmux.sock"), "-f", "/dev/null"];
