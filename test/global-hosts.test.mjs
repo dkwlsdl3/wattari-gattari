@@ -46,7 +46,7 @@ test("SSH uses bounded public JSON command, quoted executable and strict noninte
   assert.equal(calls, 1);
   const spec = remoteCommand(host, { interactive: true });
   assert.equal(spec.args[0], "-tt");
-  assert.equal(spec.args.at(-1), shellCommand("env", ["WAGA_REMOTE_HOST=Dev PC", "WAGA_REMOTE_HOST_ID=dev", host.command, "--backend", "tmux"]));
+  assert.equal(spec.args.at(-1), shellCommand("env", ["WAGA_REMOTE_HOST=Dev PC", "WAGA_REMOTE_HOST_ID=dev", "WAGA_OPEN_SESSION=", "WAGA_OPEN_FORCE=", host.command, "--backend", "tmux"]));
 });
 
 test('old remote Waga falls back only for an unsupported command, and installation status survives missing providers', async () => {

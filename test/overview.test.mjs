@@ -1180,17 +1180,17 @@ test("provider tabs clear stale rows and select the first matching session", asy
   const running = runOverview({ bridge, workspace, defaultCwd: "/work/p", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
   await new Promise((resolve) => setImmediate(resolve));
 
-  input.emit("keypress", "", { name: "tab" });
-  const claudeFrame = output.writes.at(-1);
-  assert.match(claudeFrame, /^\x1b\[H\x1b\[J/);
-  assert.doesNotMatch(plain(claudeFrame), /CODEX/);
-  assert.equal(selectedSessionName(output), "UI");
-
-  input.emit("keypress", "", { name: "tab" });
+  input.emit("keypress", "", { name: "tab", shift: true });
   const codexFrame = output.writes.at(-1);
   assert.match(codexFrame, /^\x1b\[H\x1b\[J/);
   assert.doesNotMatch(plain(codexFrame), /CLAUDE/);
   assert.equal(selectedSessionName(output), "API");
+
+  input.emit("keypress", "", { name: "tab", shift: true });
+  const claudeFrame = output.writes.at(-1);
+  assert.match(claudeFrame, /^\x1b\[H\x1b\[J/);
+  assert.doesNotMatch(plain(claudeFrame), /CODEX/);
+  assert.equal(selectedSessionName(output), "UI");
 
   pressAlt(input, "q");
   assert.equal(await running, 0);
@@ -1502,8 +1502,7 @@ test("overview shows the provider fallback until the external router runs", asyn
   const workspace = { async leave() { return { closeOverview: true }; } };
   const running = runOverview({ bridge, workspace, defaultCwd: "/work/sample-app", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
   await new Promise((resolve) => setImmediate(resolve));
-  input.emit("keypress", "", { name: "tab" });
-  input.emit("keypress", "", { name: "tab" });
+  input.emit("keypress", "", { name: "tab", shift: true });
   pressAlt(input, "n");
   input.emit("keypress", "이슈루프 스킬써서 #123번 이슈 확인해봐", { sequence: "이슈루프 스킬써서 #123번 이슈 확인해봐" });
   assert.match(plain(output.writes.at(-1)), /자동 라우팅: Codex 기본값/);

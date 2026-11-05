@@ -153,6 +153,8 @@ export class TmuxWorkspace {
       "WAGA_TMUX_INDEPENDENT=1",
       `WAGA_REMOTE_HOST=${this.#env.WAGA_REMOTE_HOST ?? ""}`,
       `WAGA_REMOTE_HOST_ID=${this.#env.WAGA_REMOTE_HOST_ID ?? ""}`,
+      `WAGA_OPEN_SESSION=${this.#env.WAGA_OPEN_SESSION ?? ""}`,
+      `WAGA_OPEN_FORCE=${this.#env.WAGA_OPEN_FORCE ?? ""}`,
       this.#nodePath,
       this.#cliPath,
       "overview",
@@ -183,9 +185,10 @@ export class TmuxWorkspace {
 
   async openRemoteHost(host, commandSpec) {
     const sessionName = await this.#currentSessionName();
-    const windows = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}\t#{@waga_remote_host}\t#{pane_dead}"]);
-    const existing = parseWindows(windows.stdout).find(window => window.sessionId === host.id);
-    if (existing && !existing.paneDead) {
+    const key = commandSpec.sessionId ? JSON.stringify([host.id, commandSpec.sessionId]) : host.id;
+    const windows = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}\t#{?@waga_remote_key,#{@waga_remote_key},#{@waga_remote_host}}\t#{pane_dead}"]);
+    const existing = parseWindows(windows.stdout).find(window => window.sessionId === key);
+    if (existing && !existing.paneDead && !commandSpec.force) {
       await this.#call(["select-window", "-t", existing.windowId]);
       return { windowId: existing.windowId, reused: true };
     }
@@ -195,6 +198,7 @@ export class TmuxWorkspace {
     const created = await this.#call(["new-window", "-P", "-F", "#{window_id}", "-t", sessionName,
       "-n", `PC ${host.name}`, shellCommand(commandSpec.command, commandSpec.args),
       ";", "set-window-option", "-t", sessionName, "@waga_remote_host", host.id,
+      ";", "set-window-option", "-t", sessionName, "@waga_remote_key", key,
       ";", "set-window-option", "-t", sessionName, "remain-on-exit", "failed",
       ";", "set-window-option", "-t", sessionName, "automatic-rename", "off",
       ";", "set-hook", "-w", "-t", sessionName, "pane-exited", `if-shell -F '#{==:#{pane_dead_status},0}' 'select-window -t ${sessionName}:overview'`,
@@ -231,7 +235,7 @@ export class TmuxWorkspace {
     const session = await this.#currentSessionName(), target = `${session}:overview`;
     const pane = await this.#call(['display-message', '-p', '-t', target, '#{pane_pid}']);
     if (pane.stdout.trim() !== String(process.pid)) throw Error('Dock reload ownership does not match this process');
-    const args = ['WAGA_RELOAD=1', `WAGA_TMUX_SESSION=${session}`, `WAGA_TMUX_MODE=${this.#env.WAGA_TMUX_MODE}`, 'WAGA_TMUX_INDEPENDENT=1',
+    const args = ['WAGA_RELOAD=1', 'WAGA_OPEN_SESSION=', 'WAGA_OPEN_FORCE=', `WAGA_TMUX_SESSION=${session}`, `WAGA_TMUX_MODE=${this.#env.WAGA_TMUX_MODE}`, 'WAGA_TMUX_INDEPENDENT=1',
       ...['WAGA_REMOTE_HOST', 'WAGA_REMOTE_HOST_ID'].map(key => `${key}=${this.#env[key] ?? ''}`),
       path.join(release.root, 'waga'), 'overview'];
     if (hostsPath) args.push('--hosts', hostsPath);
@@ -606,7 +610,7 @@ export class TmuxWorkspace {
       await this.#call([...prefix, "set-option", "-s", "extended-keys", "on"]);
       await this.#call([...prefix, "set-option", "-s", "escape-time", "0"]);
       for (const key of ["M-g", "M-G", "M-ㅎ"]) {
-        await this.#call([...prefix, "bind-key", "-n", key, "if-shell", "-F", "#{&&:#{!=:#{@waga_remote_host},},#{==:#{pane_dead},0}}", "send-keys M-g", "select-window -t :overview ; send-keys -t :overview M-r"]);
+        await this.#call([...prefix, "bind-key", "-n", key, "select-window -t :overview ; send-keys -t :overview M-r"]);
       }
       const agentsViewCommand = shellCommand("env", ["WAGA_TMUX_TARGET_SESSION=#{session_id}", "WAGA_TMUX_MODE=isolated", this.#nodePath, this.#cliPath, "tmux-agents-view", "#{window_id}"]);
       for (const key of ["M-a", "M-A", "M-ㅁ"]) {

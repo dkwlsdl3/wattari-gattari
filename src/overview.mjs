@@ -573,6 +573,7 @@ function previewLines(session, preview, width, height, outputOffset = 0) {
   const heading = session ? `${session.provider === "claude" ? "CLAUDE" : "CODEX"} · ${session.name}` : "세션 미리보기";
   const brand = session?.provider === "claude" ? THEME.claude : THEME.codex;
   const lines = [color(brand, fit(heading, width))];
+  if (session?.hostId) return [...lines, '', ...wrapPreview(`${session.hostName}의 세션입니다. Enter로 연결해 대화를 확인합니다.`, width, height - 2)];
   if (!session || !preview || preview.state !== "ready") {
     const text = !session ? "세션을 선택하면 최근 대화가 표시됩니다."
       : preview?.state === "error" ? `미리보기를 읽지 못했습니다: ${preview.error || "조회 오류"}. 잠시 후 재시도합니다.` : "최근 대화를 읽는 중입니다…";
@@ -594,7 +595,7 @@ function previewLines(session, preview, width, height, outputOffset = 0) {
   return lines;
 }
 
-export function buildOverviewFrame({ sessions, hostLabel = null, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, providerUsage = {}, notice = "", newTask = null, renameTask = null, preview = null, previewOutputOffset = 0, nativeHint = nativeReturnHint(null), codexExecutionMode = CODEX_EXECUTION_MODES.DEFAULT, providerSettings = defaultProviderExecutionSettings(), settingsPanel = null }) {
+export function buildOverviewFrame({ sessions, hostLabel = null, pcTabs = null, collapsed = new Set(), query = "", rootCwd = null, nodes = buildOverviewTree(sessions, { collapsed, query, rootCwd }), selected = 0, width = 100, height = 30, warnings = [], provider = null, providerUsage = {}, notice = "", newTask = null, renameTask = null, preview = null, previewOutputOffset = 0, nativeHint = nativeReturnHint(null), codexExecutionMode = CODEX_EXECUTION_MODES.DEFAULT, providerSettings = defaultProviderExecutionSettings(), settingsPanel = null }) {
   if (settingsPanel) return buildSettingsFrame({ settingsPanel, hostLabel, width, height, notice });
   const usableWidth = Math.max(1, width - 4);
   const split = hasOverviewPreview(width, height);
@@ -608,15 +609,16 @@ export function buildOverviewFrame({ sessions, hostLabel = null, collapsed = new
   const selectedSession = nodes[safeSelected]?.session;
   const identityLines = !newTask && !renameTask && selectedSession
     ? wrapPreviewLines(safeText(selectedSession.id), usableWidth) : [];
-  const visibleRows = Math.max(1, height - (usageLabels.length ? 10 : 9) - identityLines.length - (newTask ? editorHeight + 3 : 0));
+  const visibleRows = Math.max(1, height - (usageLabels.length ? 10 : 9) - (pcTabs ? 1 : 0) - identityLines.length - (newTask ? editorHeight + 3 : 0));
   const offset = Math.max(0, Math.min(safeSelected - Math.floor(visibleRows / 2), Math.max(0, nodes.length - visibleRows)));
   const wide = listWidth >= 64;
   const nameWidth = wide ? Math.max(12, listWidth - 31) : Math.max(1, listWidth - 22);
   const lines = [];
   const title = wide ? "WATTARI GATTARI  Claude + Codex session dock" : "WAGA · session dock";
   lines.push(`  ${color(THEME.title, fit(hostLabel ? `PC: ${hostLabel} · ${title}` : title, usableWidth))}`);
+  if (pcTabs) lines.push(`  ${color(THEME.primary, fit(pcTabs, usableWidth))}`);
   const executionStatusColor = codexExecutionMode === CODEX_EXECUTION_MODES.YOLO ? THEME.warning : THEME.muted;
-  lines.push(`  ${color(executionStatusColor, fit(`${counts(sessions)}${provider ? `   filter: ${provider}` : ""}   ${codexExecutionLabel(codexExecutionMode)}   Alt+S 설정   Alt+Y 빠른 전환`, usableWidth))}`);
+  lines.push(`  ${color(executionStatusColor, fit(`${counts(sessions)}   제공자: ${provider?.toUpperCase() ?? '전체'}   ${codexExecutionLabel(codexExecutionMode)}   Alt+S 설정   Alt+Y 빠른 전환`, usableWidth))}`);
   if (usageLabels.length) lines.push(`  ${coloredUsageLine(usageLabels, usableWidth)}`);
   lines.push(`  ${color(THEME.divider, "─".repeat(Math.max(1, usableWidth)))}`);
   const bodyStart = lines.length;
@@ -626,13 +628,13 @@ export function buildOverviewFrame({ sessions, hostLabel = null, collapsed = new
     const node = nodes[index];
     const active = index === safeSelected;
     const marker = active ? color(THEME.cursor, "›") : " ";
-    if (node.type === "hosts") {
+    if (node.type === "hosts" || node.type === "host") {
       const row = `${marker} ${color(THEME.primary, fit(node.name, listWidth - 2))}`;
       lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
       continue;
     }
     if (node.type === "workspace") {
-      const toggle = collapsed.has(node.cwd) && !query ? "▸" : "▾";
+      const toggle = collapsed.has(node.collapseKey ?? node.cwd) && !query ? "▸" : "▾";
       const detail = wide ? `  ${node.cwd}  ·  ${node.sessionCount} session${node.sessionCount === 1 ? "" : "s"}` : `  ${node.sessionCount}`;
       const row = `${marker} ${color(THEME.muted, toggle)} ${color(THEME.primary, fit(`${node.name}${detail}`, listWidth - 4))}`;
       lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
@@ -677,8 +679,8 @@ export function buildOverviewFrame({ sessions, hostLabel = null, collapsed = new
   const helpLines = wide
     // Alt+S stays visible in the status header, so the action line spends its
     // width on Alt+D next to Alt+N instead.
-    ? ["↑↓ 선택  Shift+↑↓ 순서  ←→ 접기  Enter 열기  F4 재접속  / 검색  Tab 필터", "F2 이름 변경  Alt+N 새 세션  Alt+D 기본값  Alt+Y Codex 실행  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기  PgUp/PgDn 응답"]
-    : ["↑↓ 이동  Shift+↑↓ 순서  Enter 열기  Alt+Q 나가기", "F4 재접속  / 검색  Tab 필터  F2 이름  Alt+N 새 세션", "Alt+D 기본값  Alt+S 설정  Alt+Y 실행  Alt+R 갱신  Alt+X 보관"];
+    ? ["Tab PC  Shift+Tab 제공자  ↑↓ 이동  Shift+↑↓ 순서  Enter 열기  F4 재접속  / 검색", "F2 이름 변경  Alt+N 새 세션  Alt+D 기본값  Alt+Y Codex 실행  Alt+R 갱신  Alt+X 보관  Alt+Q 나가기  PgUp/PgDn 응답"]
+    : ["↑↓ 이동  Shift+↑↓ 순서  Enter 열기  Alt+Q 나가기", "Tab PC  Shift+Tab 제공자  F4 재접속  / 검색  F2 이름", "Alt+D 기본값  Alt+S 설정  Alt+Y 실행  Alt+R 갱신  Alt+X 보관"];
   while (lines.length < height - helpLines.length - (newTask || renameTask ? 4 : 3 + identityLines.length) - (newTask ? editorHeight + 1 : 0)) lines.push("");
   if (newTask) {
     const providerName = newTask.provider === "claude" ? "CLAUDE" : "CODEX";
@@ -747,6 +749,8 @@ export async function runOverview({
   hostUpdater = updateHosts,
   readRelease = releaseInfo,
   remoteHost = process.env.WAGA_REMOTE_HOST || null,
+  initialSessionId = process.env.WAGA_OPEN_SESSION || null,
+  initialSessionForce = process.env.WAGA_OPEN_FORCE === '1',
   navigationStore = process.env.WAGA_REMOTE_HOST_ID ? new DockNavigationStore(process.env.WAGA_REMOTE_HOST_ID) : null,
   refreshMs = 3_000,
   previewDebounceMs = 150,
@@ -762,12 +766,37 @@ export async function runOverview({
   let allSessions = [];
   let localObserved = false;
   let globalVisible = false;
+  const integrated = Boolean(globalDock && !remoteHost);
+  let pcFilter = null;
+  const pcSelections = new Map();
   let globalQuery = "";
   let globalSearching = false;
   let updating = false, reloading = false;
   const runningRelease = readRelease();
-  const hostRow = globalDock || remoteHost ? [{ type: "hosts", key: "global:hosts", name: "↑ PC 목록으로" }] : [];
-  const tree = sessions => [...hostRow, ...buildOverviewTree(sessions, { collapsed, query, rootCwd: defaultCwd })];
+  const hostRow = globalDock || remoteHost ? [{ type: "hosts", key: "global:hosts", name: integrated ? "PC 연결 설정" : "↑ PC 목록으로" }] : [];
+  const sessionKey = session => session.hostId ? `remote:${session.hostId}:${session.id}` : session.id;
+  const tree = sessions => {
+    if (!integrated) return [...hostRow, ...buildOverviewTree(sessions, { collapsed, query, rootCwd: defaultCwd })];
+    const nodes = [...hostRow];
+    for (const host of globalDock.rows(allSessions, warnings, localObserved)) {
+      if (pcFilter && host.id !== pcFilter) continue;
+      const entries = sessions.filter(session => host.local ? !session.hostId : session.hostId === host.id);
+      const status = host.status === 'offline' ? '연결 안 됨' : host.status === 'stale' ? '조회 실패 · 이전 자료'
+        : host.status === 'setup' ? '첫 연결 필요 · Enter' : host.status === 'connecting' ? '연결 확인 중'
+        : host.status === 'unavailable' ? '조회 실패' : host.status === 'unknown' ? '조회 중' : host.status === 'partial' ? '일부 조회 실패' : '';
+      const badge = { pc: 'PC', wsl: 'WSL', vm: 'VM' }[host.type] ?? 'PC';
+      nodes.push({ type: 'host', key: `host:${host.id}`, host, name: `[${badge}] ${host.name}${host.local ? ' · 현재 PC' : ''}${status ? ` · ${status}` : ''}` });
+      const projects = buildOverviewTree(entries, { query, rootCwd: host.local ? defaultCwd : null });
+      for (const node of projects) {
+        const collapseKey = host.local ? node.cwd : `remote:${host.id}:${node.cwd}`;
+        if (node.type === 'session' && collapsed.has(collapseKey) && !query) continue;
+        nodes.push({ ...node, host, collapseKey,
+          key: node.type === 'session' ? sessionKey(node.session) : host.local ? node.key : `remote:${host.id}:${node.key}`,
+          ...(node.workspaceKey ? { workspaceKey: host.local ? node.workspaceKey : `remote:${host.id}:${node.workspaceKey}` } : {}) });
+      }
+    }
+    return nodes;
+  };
   let warnings = [];
   let missingSessionCounts = new Map();
   let providerUsage = {};
@@ -833,7 +862,7 @@ export async function runOverview({
   }
   const saveNavigation = () => {
     if (!navigationStore) return;
-    try { navigationStore.save({ selectedKey: lastContentKey, collapsed: [...collapsed], query, provider, previewOutputOffset: lastContentOffset }); }
+    try { navigationStore.save({ selectedKey: lastContentKey, collapsed: [...collapsed].filter(folder => path.isAbsolute(folder)), query, provider, previewOutputOffset: lastContentOffset }); }
     catch (error) { errorOutput.write(`Dock 탐색 위치 저장 실패: ${error.message}\n`); }
   };
   const reloadIfReady = async () => {
@@ -858,13 +887,19 @@ export async function runOverview({
     cacheMs: previewCacheMs,
   });
 
-  const visibleSessions = () => selectOverviewSessions(allSessions, { query, provider });
+  const visibleSessions = () => {
+    if (!integrated) return selectOverviewSessions(allSessions, { query, provider });
+    const sessions = globalDock.rows(allSessions, warnings, localObserved)
+      .filter(host => !pcFilter || host.id === pcFilter)
+      .flatMap(host => (host.summary?.sessions ?? []).map(session => host.local ? session : { ...session, hostId: host.id, hostName: host.name }));
+    return selectOverviewSessions(sessions, { query, provider });
+  };
   const visibleHosts = () => globalDock.rows(allSessions, warnings, localObserved).filter(row => `${row.name} ${row.id}`.toLowerCase().includes(globalQuery.toLowerCase()));
   const refreshHosts = async ({ force = false } = {}) => {
-    if (closed || busy || nativeOpen || !globalVisible) return;
+    if (closed || busy || nativeOpen || (!globalVisible && !integrated)) return;
     try {
       if (workspace.shouldRefreshOverview && !await workspace.shouldRefreshOverview()) return;
-      if (!closed && globalVisible) await globalDock.refresh(render, { force });
+      if (!closed && (globalVisible || integrated)) await globalDock.refresh(render, { force });
     } catch (error) { notice = `PC 목록 조회 실패: ${error.message}`; render(); }
   };
   const visibleNodes = () => tree(visibleSessions());
@@ -891,7 +926,7 @@ export async function runOverview({
   const selectFirstSession = () => {
     const nodes = visibleNodes();
     const sessionIndex = nodes.findIndex((node) => node.type === "session");
-    selected = sessionIndex >= 0 ? sessionIndex : 0;
+    selected = sessionIndex >= 0 ? sessionIndex : Math.max(0, nodes.findIndex(node => node.type === 'host'));
     selectedKey = nodes[selected]?.key ?? null;
   };
   const render = () => {
@@ -909,7 +944,7 @@ export async function runOverview({
     reconcileSelection(nodes);
     const previewSession = hasOverviewPreview(outputStream.columns || 100, outputStream.rows || 30) && !busy && !newTask && !renameTask
       ? nodes[selected]?.session : null;
-    const nextPreviewSessionKey = previewSession ? `${previewSession.id}\u0000${previewSession.cwd}` : null;
+    const nextPreviewSessionKey = previewSession ? `${previewSession.hostId ?? ''}\u0000${previewSession.id}\u0000${previewSession.cwd}` : null;
     if (nextPreviewSessionKey !== previewOutputSessionKey) {
       if (previewOutputSessionKey && !nextPreviewSessionKey) lastContentOffset = previewOutputOffset;
       previewOutputSessionKey = nextPreviewSessionKey;
@@ -917,10 +952,17 @@ export async function runOverview({
       restoredOffset = 0;
       if (nextPreviewSessionKey) lastContentOffset = previewOutputOffset;
     }
-    previewReader.select(typeof bridge.preview === "function" ? previewSession : null);
+    previewReader.select(typeof bridge.preview === "function" && !previewSession?.hostId ? previewSession : null);
     outputStream.write(`${ESC}H${ESC}J${buildOverviewFrame({
       sessions,
-      hostLabel: remoteHost ? `${remoteHost} · 원격` : hosts?.local.name,
+      hostLabel: integrated ? pcFilter ? globalDock.rows().find(host => host.id === pcFilter)?.name : '전체 PC 통합 Dock' : remoteHost ? `${remoteHost} · 원격` : hosts?.local.name,
+      pcTabs: integrated ? (() => {
+        const tabs = [{ id: null, name: '전체 PC' }, ...globalDock.rows()];
+        const current = tabs.findIndex(host => host.id === pcFilter);
+        let start = 0;
+        while (start < current && widthOf(tabs.slice(start, current + 1).map(host => host.name).join('  ')) > (outputStream.columns || 100) - 12) start++;
+        return `${start ? '… ' : ''}${tabs.slice(start).map(host => host.id === pcFilter ? `[${host.name}]` : ` ${host.name} `).join('  ')}`;
+      })() : null,
       nodes,
       collapsed,
       selected,
@@ -934,7 +976,7 @@ export async function runOverview({
         ...warnings,
       ],
       provider,
-      providerUsage,
+      providerUsage: integrated && pcFilter && pcFilter !== globalDock.config.local.id ? {} : providerUsage,
       notice,
       newTask,
       renameTask,
@@ -1120,6 +1162,18 @@ export async function runOverview({
       state.warnings = reconcileWarning ? [reconcileWarning, ...discovered.warnings] : discovered.warnings;
       warnings = [...refreshStates.values()].flatMap(entry => entry.warnings);
       notice = `마지막 갱신 ${new Date().toLocaleTimeString()}`;
+      if (initialSessionId) {
+        const target = allSessions.find(session => session.id === initialSessionId);
+        if (target) {
+          initialSessionId = null; restoringSelection = null; query = ''; provider = null;
+          collapsed.delete(sessionWorkspace(target)); selectedKey = target.id;
+          openSession(target, { force: initialSessionForce });
+        }
+        else if (!providerName || initialSessionId.startsWith(`${providerName}:`)) {
+          notice = `요청한 세션을 찾지 못했습니다: ${initialSessionId}`;
+          initialSessionId = null;
+        }
+      }
     } catch (error) {
       state.warnings = [{ provider: providerName ?? "waga", message: error.message }];
       warnings = [...refreshStates.values()].flatMap(entry => entry.warnings);
@@ -1357,6 +1411,13 @@ export async function runOverview({
   };
 
   const openSession = (target, { force = false } = {}) => {
+    if (target.hostId) {
+      const host = globalDock.config.hosts.find(host => host.id === target.hostId);
+      if (!host || host.discovered || host.online === false) { notice = '이 PC에 연결할 수 없습니다. PC 연결 설정을 확인해 주세요.'; render(); return; }
+      if (!globalDock.states.get(host.id)?.summary?.openSession) { notice = `${host.name}의 Waga 업데이트가 필요합니다. PC 연결 설정에서 u로 업데이트해 주세요.`; render(); return; }
+      void openHost(host, { sessionId: target.id, force });
+      return;
+    }
     busy = true;
     notice = force ? `${target.name} 세션에 다시 연결하는 중입니다.` : `${target.name} 세션을 여는 중입니다.`;
     render();
@@ -1381,12 +1442,12 @@ export async function runOverview({
       .finally(() => { busy = false; nativeOpen = false; render(); });
   };
 
-  const openHost = async host => {
+  const openHost = async (host, { sessionId, force = false } = {}) => {
     if (!workspace.openRemoteHost) { notice = '원격 PC 열기는 tmux backend가 필요합니다. waga --backend tmux를 사용하세요.'; render(); return; }
     busy = true;
     nativeOpen = true;
     try {
-      const result = await workspace.openRemoteHost(host, remoteCommand(host, { interactive: true }));
+      const result = await workspace.openRemoteHost(host, { ...remoteCommand(host, { interactive: true, sessionId, force }), sessionId, force });
       if (result?.code) throw Error(`${host.name} SSH 연결 종료: exit ${result.code}`);
     } catch (error) { notice = error.message; }
     finally { busy = false; nativeOpen = false; render(); }
@@ -1640,6 +1701,15 @@ export async function runOverview({
     }
     const nodes = visibleNodes();
     reconcileSelection(nodes);
+    const owner = nodes[selected]?.host ?? (pcFilter ? globalDock?.rows().find(host => host.id === pcFilter) : null);
+    const manageRemote = key.meta && ['n', 'd'].includes(key.name) || nodes[selected]?.type === 'session'
+      && (key.name === 'f2' || key.meta && key.name === 'x' || key.shift && ['up', 'down'].includes(key.name));
+    if (owner && !owner.local && manageRemote) {
+      notice = '이 PC의 관리 화면에서 생성·이름 변경·보관·순서 변경을 실행해 주세요.';
+      if (!owner.discovered && owner.online !== false) void openHost(owner);
+      else { globalVisible = true; globalDock.selectedId = owner.id; }
+      render(); return;
+    }
     if (key.meta && key.name === "x" && nodes[selected]?.type === "session") {
       archiveSession(nodes[selected].session);
       return;
@@ -1673,10 +1743,17 @@ export async function runOverview({
     if (key.name === "up") selected = Math.max(0, selected - 1);
     else if (key.name === "down") selected = Math.min(Math.max(0, nodes.length - 1), selected + 1);
     else if (key.name === "tab") {
-      provider = provider === null ? "claude" : provider === "claude" ? "codex" : null;
-      selected = 0;
-      selectedKey = null;
-      selectFirstSession();
+      if (key.shift) {
+        provider = provider === null ? 'codex' : provider === 'codex' ? 'claude' : null;
+        selectFirstSession();
+      } else if (integrated) {
+        pcSelections.set(pcFilter, { key: selectedKey, offset: previewOutputOffset });
+        const ids = [null, ...globalDock.rows().map(host => host.id)];
+        pcFilter = ids[(ids.indexOf(pcFilter) + 1) % ids.length];
+        const saved = pcSelections.get(pcFilter);
+        selectedKey = saved?.key ?? null; restoredOffset = saved?.offset ?? 0;
+        if (!selectedKey) selectFirstSession();
+      }
     }
     else if (key.sequence === "/") searching = true;
     else if (key.meta && (key.name === "n" || key.name === "d")) {
@@ -1693,21 +1770,25 @@ export async function runOverview({
       };
       refreshNewTaskRouting();
     }
-    else if (key.meta && key.name === "r") { notice = "새로고침 중입니다."; render(); void refresh({ force: true }); return; }
-    else if (key.name === "left" && nodes[selected]?.type === "workspace") collapsed.add(nodes[selected].cwd);
+    else if (key.meta && key.name === "r") { notice = "새로고침 중입니다."; render(); void refresh({ force: true }); void refreshHosts({ force: true }); return; }
+    else if (key.name === "left" && nodes[selected]?.type === "workspace") collapsed.add(nodes[selected].collapseKey ?? nodes[selected].cwd);
     else if (key.name === "left" && nodes[selected]?.type === "session") {
       const parentIndex = nodes.findIndex((node) => node.key === nodes[selected].workspaceKey);
       if (parentIndex >= 0) selected = parentIndex;
     }
-    else if (key.name === "right" && nodes[selected]?.type === "workspace") collapsed.delete(nodes[selected].cwd);
+    else if (key.name === "right" && nodes[selected]?.type === "workspace") collapsed.delete(nodes[selected].collapseKey ?? nodes[selected].cwd);
     else if (key.name === "return" && nodes[selected]?.type === "workspace") {
-      const cwd = nodes[selected].cwd;
+      const cwd = nodes[selected].collapseKey ?? nodes[selected].cwd;
       if (collapsed.has(cwd)) collapsed.delete(cwd);
       else collapsed.add(cwd);
     }
     else if (key.name === "return" && nodes[selected]?.type === "session") {
       openSession(nodes[selected].session);
       return;
+    }
+    else if (key.name === 'return' && nodes[selected]?.type === 'host') {
+      const host = nodes[selected].host;
+      if (!host.local) { globalVisible = true; globalDock.selectedId = host.id; void refreshHosts(); }
     }
     selectedKey = visibleNodes()[selected]?.key ?? null;
     render();
@@ -1718,7 +1799,7 @@ export async function runOverview({
   outputStream.on("resize", onResize);
   const timer = setInterval(() => {
     if (newTask?.submitting) render();
-    else { void refresh(); if (globalVisible) void refreshHosts(); void reloadIfReady(); }
+    else { void refresh(); if (globalVisible || integrated) void refreshHosts(); void reloadIfReady(); }
   }, refreshMs);
   let resolveRun;
   const completed = new Promise((resolve) => { resolveRun = resolve; });
@@ -1752,5 +1833,6 @@ export async function runOverview({
     catch (error) { notice = `Dock 버전 표시 실패: ${error.message}`; }
   }
   void refresh({ force: true });
+  if (integrated) void refreshHosts();
   return await completed;
 }

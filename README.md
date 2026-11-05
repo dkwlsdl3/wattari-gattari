@@ -21,11 +21,14 @@ from one local dock or browser workspace. Native providers own session execution
 
 ## Multiple PCs
 
-Open **↑ PC 목록으로** at the top of the local Dock, then select a registered PC.
-The remote PC runs its own Waga Dock; `Alt+G` returns to that PC's Dock.
-Registration order stays fixed. Failed queries retain the last successful summary with an error.
+`waga` opens the unified Dock for all PCs. `Tab` cycles All PCs → this PC → remote PCs → All PCs.
+`Shift+Tab` independently cycles All providers → Codex → Claude → All providers.
+Enter opens the selected native session on its owning PC; `Alt+G` returns to the originating Dock.
+PC registration order stays fixed. Failed queries retain the last successful summary with an error.
+Use **PC 연결 설정** for first connections and updates. Remote create/rename/archive/order actions
+open that PC's own management Dock; remote conversation previews are available inside the native TUI.
 
-Opening the PC list discovers Tailscale PCs automatically. Connections verified with the current
+The visible unified Dock discovers Tailscale PCs automatically. Connections verified with the current
 account and an installed Waga are saved automatically. If a PC uses another account, press Enter
 on it and enter its SSH username once. Remote PCs need Waga and tmux. Tailscale SSH peers use the
 official `tailscale ssh` host-key checks; other peers use existing OpenSSH authentication and trust.
@@ -222,7 +225,8 @@ No model calls or additional transcript files are created.
 | `←` / `→` / `Enter` | Collapse or expand a project |
 | `Enter` on a session | Return to its running native TUI |
 | `F4` on a session | Force a native TUI reattach |
-| `/` / `Tab` | Search / filter providers |
+| `/` | Search sessions |
+| `Tab` / `Shift+Tab` | Cycle PCs / cycle All → Codex → Claude |
 | `F2` | Rename the selected session |
 | `Alt+N` / `Alt+R` | New session / refresh |
 | `Alt+D` | New session with provider defaults, skipping local-llm-router (`Alt+D` toggles it while composing) |

@@ -21,11 +21,15 @@ Wattari Gattari(`waga`)는 Claude Code와 Codex의 활성 세션을 한 dock에�
 
 ## 여러 PC 연결
 
-현재 PC Dock 상단의 **↑ PC 목록으로**에서 Global Dock을 엽니다. PC를 선택하면
-그 PC의 기존 Dock으로 들어가며, `Alt+G`는 원격 세션에서도 해당 PC Dock으로 돌아옵니다.
+`waga`를 실행하면 모든 PC의 세션을 보여주는 통합 Dock이 열립니다.
+`Tab`은 전체 PC → 현재 PC → 원격 PC → 전체 PC, `Shift+Tab`은 전체 제공자 → Codex → Claude → 전체 제공자로
+독립적으로 순환합니다. 세션에서 Enter를 누르면 해당 PC의 네이티브 TUI로 바로 연결하고,
+`Alt+G`로 원래 통합 Dock에 돌아옵니다. 입력창·설정창과 네이티브 TUI의 Tab 동작은 유지합니다.
 PC별 순서는 등록 순서를 유지하고, 연결 실패 시 마지막 조회 자료와 오류를 표시합니다.
+처음 연결과 업데이트는 **PC 연결 설정**에서 합니다. 원격 생성·이름 변경·보관·순서 변경은
+해당 PC의 관리 Dock을 열어 실행하며, 원격 대화 내용은 Enter로 연결한 네이티브 TUI에서 확인합니다.
 
-PC 목록을 열면 Tailscale의 PC를 자동으로 찾습니다. 현재 계정으로 SSH 접속과 Waga 설치가
+통합 Dock이 보일 때 Tailscale의 PC를 자동으로 찾습니다. 현재 계정으로 SSH 접속과 Waga 설치가
 확인되면 자동 등록합니다. 계정이 다르면 해당 PC에서 Enter를 눌러 처음 한 번 계정명을
 입력합니다. 이후에는 저장한 접속 정보를 사용합니다. 원격 PC에는 Waga와 tmux가 필요합니다.
 Tailscale SSH가 켜진 PC는 공식 `tailscale ssh`의 호스트 키 확인을 사용하며, 그 외에는 기존
@@ -219,7 +223,8 @@ version 1 Codex 전환 설정은 읽을 때 provider 설정으로 변환되며, 
 | `←` / `→` / `Enter` | 프로젝트 접기·펼치기 |
 | 세션에서 `Enter` | 실행 중인 네이티브 TUI로 복귀 |
 | 세션에서 `F4` | 네이티브 TUI 강제 재접속 |
-| `/` / `Tab` | 검색 / provider 필터 |
+| `/` | 세션 검색 |
+| `Tab` / `Shift+Tab` | PC 순환 / 전체 → Codex → Claude 순환 |
 | `F2` | 선택한 세션 이름 변경 |
 | `Alt+N` / `Alt+R` | 새 세션 / 새로고침 |
 | `Alt+D` | local-llm-router를 거치지 않는 provider 기본값 새 세션 (편집 중 `Alt+D`로 전환) |

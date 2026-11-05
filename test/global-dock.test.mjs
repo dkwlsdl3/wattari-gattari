@@ -8,6 +8,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from 'node:timers/promises';
+import { stripVTControlCharacters } from 'node:util';
 
 test("independent failures preserve registration order, ID selection and last good summary", async () => {
   const config = { local: { id: "here", name: "Same name" }, hosts: [{ id: "b", name: "Same name" }, { id: "a", name: "Same name" }] };
@@ -71,14 +72,74 @@ test("global frame shows project locations and last successful data without clai
 
 const config = { version: 1, local: { id: "work", name: "Work" }, hosts: [{ id: "home", name: "Home", ssh: "home-box", command: "waga" }] };
 function dockFixture(t, options = {}) {
+  let frame = '';
   const input = Object.assign(new EventEmitter(), { isTTY: true, setRawMode() {}, resume() {} });
-  const output = Object.assign(new EventEmitter(), { isTTY: true, columns: 120, rows: 30, write() {} });
+  const output = Object.assign(new EventEmitter(), { isTTY: true, columns: 120, rows: 30, write(text) { frame = stripVTControlCharacters(text); } });
   const session = { id: "codex:local", provider: "codex", name: "Local", cwd: "/tmp/waga-proof-global", status: "idle" };
   const running = runOverview({ hosts: config, defaultCwd: session.cwd, bridge: { discover: async () => ({ sessions: [session], warnings: [] }) },
     inputStream: input, outputStream: output, errorOutput: { write() {} }, listenForSignals: false, refreshMs: 60_000, ...options });
   t.after(async () => { input.emit("end"); await running; });
-  return { input, session, running, press: async (name, text = "", extra = {}) => { input.emit("keypress", text, { name, sequence: text, ...extra }); await setImmediate(); } };
+  return { input, session, running, frame: () => frame, press: async (name, text = "", extra = {}) => { input.emit("keypress", text, { name, sequence: text, ...extra }); await setImmediate(); } };
 }
+
+test('startup combines PCs and Tab and Shift+Tab independently wrap PC and provider filters', async t => {
+  const local = ['codex', 'claude'].map(provider => ({ id: `${provider}:same`, nativeId: 'same', provider, cwd: '/same/project', name: `local-${provider}` }));
+  const remote = local.map(session => ({ ...session, name: `remote-${session.provider}` }));
+  const globalDock = new GlobalDock(config, { query: async () => ({ sessions: remote, warnings: [] }) });
+  const f = dockFixture(t, { globalDock, workspace: {}, bridge: { discover: async () => ({ sessions: local, warnings: [] }) } });
+  await setImmediate();
+  assert.match(f.frame(), /\[전체 PC\]/);
+  for (const session of [...local, ...remote]) assert.match(f.frame(), new RegExp(session.name));
+  await f.press('tab');
+  assert.match(f.frame(), /\[Work\]/); assert.doesNotMatch(f.frame(), /remote-codex|remote-claude/);
+  await f.press('tab', '', { shift: true });
+  assert.match(f.frame(), /local-codex/); assert.doesNotMatch(f.frame(), /local-claude/);
+  await f.press('tab');
+  assert.match(f.frame(), /\[Home\]/); assert.match(f.frame(), /remote-codex/); assert.doesNotMatch(f.frame(), /local-codex|remote-claude/);
+  await f.press('tab', '', { shift: true });
+  assert.match(f.frame(), /remote-claude/); assert.doesNotMatch(f.frame(), /remote-codex/);
+  await f.press('tab', '', { shift: true });
+  assert.match(f.frame(), /remote-codex/); assert.match(f.frame(), /remote-claude/);
+  await f.press('tab');
+  assert.match(f.frame(), /\[전체 PC\]/);
+  for (const session of [...local, ...remote]) assert.match(f.frame(), new RegExp(session.name));
+});
+
+test('same canonical ID and cwd on two PCs open their own session and remote management never uses the local bridge', async t => {
+  const session = { id: 'codex:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', nativeId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', provider: 'codex', cwd: '/same/project', name: 'same' };
+  let openSession = true;
+  const globalDock = new GlobalDock(config, { query: async () => ({ sessions: [session], warnings: [], openSession }) });
+  const local = [], remote = [], previews = [];
+  const f = dockFixture(t, { globalDock, previewDebounceMs: 0,
+    bridge: { discover: async () => ({ sessions: [session], warnings: [] }), preview: async target => { previews.push(target); return {}; },
+      rename: () => { throw Error('wrong PC'); }, archive: () => { throw Error('wrong PC'); }, create: () => { throw Error('wrong PC'); } },
+    commandFor: target => { local.push(target.id); return {}; },
+    workspace: { focusOrOpen: async () => {}, openRemoteHost: async (host, spec) => { remote.push({ host: host.id, spec }); } } });
+  await setImmediate(); await f.press('tab'); await f.press('return');
+  assert.deepEqual(local, [session.id]);
+  await f.press('tab'); await f.press('return');
+  assert.equal(remote[0].host, 'home'); assert.equal(remote[0].spec.sessionId, session.id);
+  assert.match(remote[0].spec.args.at(-1), new RegExp(`WAGA_OPEN_SESSION=${session.id}`));
+  for (const [name, extra] of [['f2', {}], ['x', { meta: true }], ['n', { meta: true }]]) await f.press(name, '', extra);
+  assert.deepEqual(local, [session.id]);
+  assert.ok(remote.slice(1).every(row => row.host === 'home' && row.spec.sessionId === undefined));
+  assert.ok(previews.every(target => !target.hostId));
+  openSession = false; await globalDock.refresh();
+  const before = remote.length;
+  await f.press('return');
+  assert.equal(remote.length, before);
+  assert.match(f.frame(), /Waga 업데이트가 필요/);
+});
+
+test('remote target opens once by exact canonical ID without selecting a PC or session again', async t => {
+  const opened = [];
+  const f = dockFixture(t, { remoteHost: 'Home', initialSessionId: 'codex:local',
+    commandFor: session => { opened.push(session.id); return {}; }, workspace: { focusOrOpen: async () => {} } });
+  await setImmediate();
+  assert.deepEqual(opened, ['codex:local']);
+  await f.press('r', '', { meta: true }); await setImmediate();
+  assert.deepEqual(opened, ['codex:local']);
+});
 
 test('first connection keeps the account editable on failure, then registers and opens only that PC', async t => {
   const candidate = { ...config.hosts[0], discovered: true };
@@ -139,10 +200,10 @@ test("PC switching preserves local session selection and global search never bec
   const globalDock = new GlobalDock(config, { query: async () => ({ sessions: [], warnings: [] }) });
   const f = dockFixture(t, { globalDock, workspace: { openRemoteHost: async host => { opened.push(host.id); }, focusOrOpen: async session => { native.push(session.id); } }, commandFor: () => ({}) });
   await setImmediate();
-  await f.press("down"); await f.press("down"); // PC row, project, session.
+  await f.press("down"); await f.press("down"); await f.press("down"); // Settings, PC, project, session.
   await f.press("f4");
   assert.deepEqual(native, [f.session.id]);
-  await f.press("up"); await f.press("up"); await f.press("return");
+  await f.press("up"); await f.press("up"); await f.press("up"); await f.press("return");
   await f.press("/", "/"); await f.press("h", "home"); await f.press("return"); await f.press("return");
   assert.deepEqual(opened, ["home"]);
   assert.deepEqual(native, [f.session.id]);
@@ -195,9 +256,9 @@ test("PC list round trip keeps the last session's response scroll position", asy
   const f = dockFixture(t, { outputStream: output, navigationStore: { load: () => null, save: value => saved.push(value) }, previewDebounceMs: 0,
     workspace: {}, bridge: { discover: async () => ({ sessions: [{ id: "codex:local", provider: "codex", name: "Local", cwd: "/tmp/waga-proof-global" }], warnings: [] }),
       preview: async () => { previewStarted(); return { input: "request", output: Array.from({ length: 100 }, (_, i) => `response ${i}`).join("\n") }; } } });
-  await setImmediate(); await f.press("down"); await f.press("down"); await ready; await setImmediate();
+  await setImmediate(); await f.press("down"); await f.press("down"); await f.press("down"); await ready; await setImmediate();
   await f.press("pagedown");
-  await f.press("up"); await f.press("up"); await f.press("return"); await f.press("escape");
+  await f.press("up"); await f.press("up"); await f.press("up"); await f.press("return"); await f.press("escape");
   f.input.emit("end"); await f.running;
   assert.ok(saved.at(-1).previewOutputOffset > 0, "returning from the PC list did not reset the response to its beginning");
 });

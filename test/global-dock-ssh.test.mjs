@@ -58,6 +58,7 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, XDG_CONFIG_HOME: path.join(root, "config"), XDG_STATE_HOME: path.join(root, "local-state") };
   delete env.TMUX; delete env.TMUX_PANE; delete env.WAGA_REMOTE_HOST; delete env.WAGA_REMOTE_HOST_ID;
   const session = { id: "claude:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", nativeId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", provider: "claude", name: "waga-proof-native", cwd: root, status: "idle" };
+  const sibling = { ...session, id: 'claude:bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', nativeId: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', name: 'waga-proof-sibling' };
   const cliUrl = new URL("../src/cli.mjs", import.meta.url).href;
   const overviewUrl = new URL("../src/overview.mjs", import.meta.url).href;
   const workspaceUrl = new URL("../src/tmux-workspace.mjs", import.meta.url).href;
@@ -74,6 +75,7 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
     import {runOverview} from ${JSON.stringify(overviewUrl)};
     import {TmuxWorkspace,enterWagaDock} from ${JSON.stringify(workspaceUrl)};
     import {GlobalDock} from ${JSON.stringify(new URL('../src/global-dock.mjs', import.meta.url).href)};
+    import {queryHost} from ${JSON.stringify(new URL('../src/global-hosts.mjs', import.meta.url).href)};
     import {enterSessionDock} from ${JSON.stringify(dockUrl)};
     const side = process.env.WAGA_PROOF_SIDE;
     const runningRevision = JSON.parse(fs.readFileSync(${JSON.stringify(releaseFile)})).installedRevision;
@@ -83,13 +85,15 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
     const workspace = new TmuxWorkspace({socketName: side === 'remote' ? ${JSON.stringify(remoteSocket)} : ${JSON.stringify(localSocket)}, cliPath: process.argv[1], eventLog: {record(){}}, claudeViewMatches: async () => true});
     const bridge = {discover: async () => {
       if(process.argv[2] === 'overview') fs.writeFileSync(${JSON.stringify(root)} + '/' + side + '-view.json', JSON.stringify({view:process.env.WAGA_TMUX_SESSION}));
-      return {sessions: side === 'remote' ? [${JSON.stringify(session)}] : [], warnings: []};
+      return {sessions: side === 'remote' ? [${JSON.stringify(session)},${JSON.stringify(sibling)}] : [], warnings: []};
     }, result: async requestId => ({requestId, target:${JSON.stringify(session.id)}, state:'replied', reply:'waga-proof-reply'})};
     const delivery = {enqueue: async (target,payload,options) => {
       fs.writeFileSync(${JSON.stringify(path.join(root, "message.json"))},JSON.stringify({target,payload,kind:options.kind}));
       return {requestId:'aaaaaaaa-1111-4222-8333-bbbbbbbbbbbb',target,delivery:'local-queued'};
     },recover:async()=>{}};
-    process.exitCode = await runCli(process.argv.slice(2), {bridge,delivery,globalDockFactory:config=>new GlobalDock(config),
+    process.exitCode = await runCli(process.argv.slice(2), {bridge,delivery,globalDockFactory:config=>new GlobalDock(config,{query:async host=>{
+      const summary=await queryHost(host); fs.writeFileSync(${JSON.stringify(root)}+'/remote-summary.json',JSON.stringify(summary)); return summary;
+    }}),
       tmuxAgentsView: async window => { fs.writeFileSync(${JSON.stringify(path.join(root, "agents-key.json"))},JSON.stringify({side,window})); return {code:0}; },
       dock: options => enterSessionDock({...options,enterTmux: options => enterWagaDock({...options,workspace})}),
       overview: options => runOverview({...options, defaultCwd:${JSON.stringify(root)}, workspace, refreshMs:100,
@@ -103,7 +107,7 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   const hostsFile = path.join(root, "hosts.json");
   fs.writeFileSync(hostsFile, JSON.stringify({ version: 1, local: { id: "work", name: "Work Ubuntu" }, hosts: [host] }));
   const summary = await queryHost(host, { run: (command, args, options) => exec(command, args, { ...options, env }) });
-  assert.deepEqual(summary.sessions, [session], "quoted executable path works over actual SSH");
+  assert.deepEqual(summary.sessions, [session, sibling], "quoted executable path works over actual SSH");
   const payload = `한글 인계 ' 첫 줄\n둘째 줄 $(touch ${root}/must-not-exist)`;
   const sent = await exec(process.execPath, [localCli, "send", session.id, payload, "--host", "home", "--hosts", hostsFile, "--json"], { env, timeout: 10_000 });
   const receipt = JSON.parse(sent.stdout);
@@ -118,17 +122,17 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   // No terminal-output parser: readiness and navigation use JSON and tmux's documented format fields.
   client.onData(() => {});
   await until(() => Boolean(view("local")), true, "local Dock starts");
-  client.write("\r"); // PC list, initially selected local row.
-  client.write("\x1b[B\r"); // Select the registered remote PC.
+  await until(() => fs.existsSync(path.join(root, 'remote-summary.json')), true, 'integrated Dock discovers remote sessions');
+  client.write("\t\t\r"); // All PCs -> local PC -> remote PC -> exact session.
   await until(() => Boolean(view("remote")), true, "remote Dock starts through SSH");
   const firstView = view("remote");
   const nativeTarget = retainedSessionName(session.id);
-  client.write("\x1b[B\x1b[B\r"); // PC back row -> project -> session.
   await until(() => call(remoteSocket, "display-message", "-p", "-t", firstView, "#{@waga_session_id}"), session.id, "remote native view selected");
   const nativePid = await call(remoteSocket, "display-message", "-p", "-t", nativeTarget, "#{pane_pid}");
   await until(() => fs.existsSync(path.join(root, "native-ready")), true, "fixture is ready for terminal input");
-  client.write("waga-proof-input\r");
-  await until(() => { try { return fs.readFileSync(path.join(root, "native-input"), "utf8"); } catch { return ""; } }, "waga-proof-input\r", "input reaches only the remote fixture");
+  const typedInput = "waga-proof-input\r\t\x1b[Z";
+  client.write(typedInput);
+  await until(() => { try { return fs.readFileSync(path.join(root, "native-input"), "utf8"); } catch { return ""; } }, typedInput, "native input including Tab and Shift+Tab reaches only the remote fixture");
   ownerClient = pty.spawn("tmux", ["-L", remoteSocket, "attach-session", "-t", nativeTarget], { cwd: root, env, name: "xterm-256color", cols: 150, rows: 40 });
   ownerClient.onData(() => {});
   await until(() => call(remoteSocket, "display-message", "-p", "-t", nativeTarget, "#{pane_width}"), "150", "the owning PC has its own larger native terminal");
@@ -136,7 +140,7 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   client.resize(90, 25);
   await until(() => call(remoteSocket, "list-clients", "-t", firstView, "-F", "#{client_width}"), "90", "remote client received the new viewport");
   client.write("resize-proof");
-  await until(() => fs.readFileSync(path.join(root, "native-input"), "utf8"), "waga-proof-input\rresize-proof", "remote activity does not take ownership of the local viewport");
+  await until(() => fs.readFileSync(path.join(root, "native-input"), "utf8"), `${typedInput}resize-proof`, "remote activity does not take ownership of the local viewport");
   assert.equal(await call(remoteSocket, "display-message", "-p", "-t", nativeTarget, "#{pane_width},#{pane_height}"), originalSize, "remote viewport does not resize a locally attached provider terminal");
   const ownerExited = new Promise(resolve => ownerClient.onExit(resolve)); ownerClient.kill(); await ownerExited;
   client.write("\x1ba");
@@ -146,12 +150,27 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   await new Promise(resolve => setTimeout(resolve, 250));
   assert.equal(await call(remoteSocket, 'display-message', '-p', '-t', `${firstView}:overview`, '#{pane_pid}'), oldOverviewPid, 'update leaves the native TUI and hidden Dock alone');
   client.write("\x1bg");
-  await until(() => call(remoteSocket, "display-message", "-p", "-t", firstView, "#{window_name}"), "overview", "Alt+G passes the outer tmux and returns to remote Dock");
+  await until(() => call(localSocket, "display-message", "-p", "-t", view('local'), "#{window_name}"), "overview", "Alt+G returns directly to the originating integrated Dock");
+  client.write('\x1b[B\r');
+  await until(() => view('remote') !== firstView, true, 'another session on the same PC gets its own connection');
+  const siblingView = view('remote');
+  await until(() => call(remoteSocket, 'display-message', '-p', '-t', siblingView, '#{@waga_session_id}'), sibling.id, 'the second selection opens the second native session');
+  client.write('\x1bg');
+  await until(() => call(localSocket, 'display-message', '-p', '-t', view('local'), '#{window_name}'), 'overview', 'second remote session returns to the same Dock');
+  client.write('\x1b[A\r');
+  await until(() => call(localSocket, 'display-message', '-p', '-t', view('local'), '#{window_name}'), 'PC Home WSL', 'original remote session connection is reused');
+  assert.equal(await call(remoteSocket, 'display-message', '-p', '-t', firstView, '#{@waga_session_id}'), session.id);
+  client.write('\x1bg');
+  await until(() => call(localSocket, 'display-message', '-p', '-t', view('local'), '#{window_name}'), 'overview', 'original selection returns again');
+  assert.equal(await call(remoteSocket, 'display-message', '-p', '-t', nativeTarget, '#{pane_pid}'), nativePid);
+  // Show only this fixture's remote overview to exercise its existing release reload contract.
+  await call(remoteSocket, 'select-window', '-t', `${firstView}:overview`);
   await until(() => call(remoteSocket, 'display-message', '-p', '-t', `${firstView}:overview`, '#{@waga_release}'), 'new', 'visible Dock automatically applies the installed release');
   assert.notEqual(await call(remoteSocket, 'display-message', '-p', '-t', `${firstView}:overview`, '#{pane_pid}'), oldOverviewPid);
+  await new Promise(resolve => setTimeout(resolve, 600));
+  assert.equal(await call(remoteSocket, 'display-message', '-p', '-t', firstView, '#{window_name}'), 'overview', 'a release reload does not repeat the one-time native session open');
   assert.equal(await call(remoteSocket, 'display-message', '-p', '-t', nativeTarget, '#{pane_pid}'), nativePid, 'only the Dock process was replaced');
-  client.write("\x1b[A\x1b[A\r");
-  await until(() => call(localSocket, "display-message", "-p", "-t", view("local"), "#{window_name}"), "overview", "remote PC back returns to original Global Dock");
+  await call(remoteSocket, 'kill-session', '-t', firstView);
   assert.equal(await call(remoteSocket, "display-message", "-p", "-t", nativeTarget, "#{pane_pid}"), nativePid);
   const workspace = new TmuxWorkspace({ env: { ...env, WAGA_TMUX_SESSION: view("local") }, eventLog: { record() {} }, run: async args => {
     try { return { ...await exec("tmux", ["-L", localSocket, ...args], { env, timeout: 3000 }), code: 0 }; }
@@ -161,9 +180,8 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   await until(() => call(localSocket, "display-message", "-p", "-t", failed.windowId, "#{pane_dead_status}"), "23", "failed connection remains visible");
   client.write("\x1bg");
   await until(() => call(localSocket, "display-message", "-p", "-t", view("local"), "#{window_name}"), "overview", "Alt+G can leave a failed connection");
-  client.write("\r"); // Global selection is still the same remote PC.
+  client.write("\r"); // Integrated selection is still the same exact remote session.
   await until(() => view("remote") !== firstView, true, "remote Dock can reopen");
-  client.write("\r"); // Saved canonical session selection is restored.
   await until(() => call(remoteSocket, "display-message", "-p", "-t", view("remote"), "#{@waga_session_id}"), session.id, "saved remote selection opens the original session");
   assert.equal(await call(remoteSocket, "display-message", "-p", "-t", nativeTarget, "#{pane_pid}"), nativePid);
   const exited = new Promise(resolve => client.onExit(resolve)); client.kill(); await exited;
