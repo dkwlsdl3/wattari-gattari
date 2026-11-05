@@ -1,0 +1,53 @@
+{
+  "BackendState": "Running",
+  "Self": {
+    "ID": "self-node",
+    "HostName": "waga-proof-work",
+    "DNSName": "work.example.ts.net.",
+    "OS": "linux",
+    "Online": true
+  },
+  "Peer": {
+    "0": {
+      "ID": "proof-oracle",
+      "HostName": "waga-proof-oracle",
+      "DNSName": "oracle.example.ts.net.",
+      "OS": "linux",
+      "Online": true,
+      "sshHostKeys": [
+        "<redacted public SSH host key>"
+      ]
+    },
+    "1": {
+      "ID": "proof-home",
+      "HostName": "waga-proof-desktop",
+      "DNSName": "home.example.ts.net.",
+      "OS": "linux",
+      "Online": false,
+      "sshHostKeys": [
+        "<redacted public SSH host key>"
+      ]
+    },
+    "2": {
+      "ID": "proof-windows",
+      "HostName": "waga-proof-desktop",
+      "DNSName": "windows.example.ts.net.",
+      "OS": "windows",
+      "Online": false
+    },
+    "3": {
+      "ID": "proof-mac",
+      "HostName": "waga-proof-mac",
+      "DNSName": "mac.example.ts.net.",
+      "OS": "macOS",
+      "Online": false
+    },
+    "4": {
+      "ID": "proof-phone",
+      "HostName": "waga-proof-phone",
+      "DNSName": "phone.example.ts.net.",
+      "OS": "android",
+      "Online": true
+    }
+  }
+}

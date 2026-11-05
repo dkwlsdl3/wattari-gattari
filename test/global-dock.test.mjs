@@ -80,6 +80,60 @@ function dockFixture(t, options = {}) {
   return { input, session, running, press: async (name, text = "", extra = {}) => { input.emit("keypress", text, { name, sequence: text, ...extra }); await setImmediate(); } };
 }
 
+test('first connection keeps the account editable on failure, then registers and opens only that PC', async t => {
+  const candidate = { ...config.hosts[0], discovered: true };
+  const opened = [], accounts = [], updates = [];
+  let fail = true, frame = '';
+  const dock = new GlobalDock({ ...config, hosts: [candidate] }, { connect: async (host, username) => {
+    if (!username) throw Error('Account required');
+    accounts.push(username);
+    if (fail) throw Error('SSH refused');
+    return { host: { ...host, discovered: false, ssh: `${username}@home-box` }, summary: { sessions: [], warnings: [] } };
+  } });
+  const output = Object.assign(new EventEmitter(), { isTTY: true, columns: 120, rows: 30, write(text) { frame = text; } });
+  const f = dockFixture(t, { globalDock: dock, outputStream: output, hostUpdater: async hosts => { updates.push(hosts); return []; }, workspace: { openRemoteHost: async host => { opened.push(host); } } });
+  await setImmediate(); await f.press('return'); await f.press('down'); await f.press('return');
+  assert.match(frame, /SSH 계정/);
+  await f.press('u', 'ubuntu'); await f.press('return');
+  assert.match(frame, /SSH refused/); assert.match(frame, /ubuntu/);
+  assert.deepEqual(opened, []); assert.deepEqual(updates, []);
+  fail = false; await f.press('return');
+  assert.deepEqual(accounts, ['ubuntu', 'ubuntu']);
+  assert.equal(opened.length, 1); assert.equal(opened[0].id, 'home'); assert.equal(opened[0].ssh, 'ubuntu@home-box');
+});
+
+test('automatic discovery failure preserves known PCs, and offline candidates never start SSH or updates', async t => {
+  const known = config.hosts[0], offline = { id: 'off', name: 'Off', ssh: 'off', command: 'waga', discovered: true, online: false };
+  const queries = [];
+  let fail = false;
+  const dock = new GlobalDock({ ...config, hosts: [known] }, {
+    discover: async current => { if (fail) throw Error('Tailscale stopped'); return { ...current, hosts: [known, offline] }; },
+    query: async host => { queries.push(host.id); return { sessions: [], warnings: [] }; },
+    connect: async () => { throw Error('must not connect offline'); },
+  });
+  await dock.refresh(); fail = true; await dock.refresh(() => {}, { force: true });
+  assert.deepEqual(queries, ['home', 'home']);
+  assert.equal(dock.states.get('off').status, 'offline'); assert.match(dock.discoveryError, /Tailscale stopped/);
+  const updates = [];
+  const f = dockFixture(t, { globalDock: dock, workspace: {}, hostUpdater: async hosts => { updates.push(hosts.map(row => row.id)); return []; } });
+  await setImmediate(); await f.press('return'); await f.press('u', 'U', { shift: true });
+  assert.deepEqual(updates, [['home']]);
+});
+
+test('selecting a PC during automatic connection cannot start a competing account attempt', async t => {
+  const host = { ...config.hosts[0], discovered: true };
+  let finish, frame = '', calls = 0;
+  const opened = [];
+  const dock = new GlobalDock({ ...config, hosts: [host] }, { connect: () => { calls++; return new Promise(resolve => { finish = resolve; }); } });
+  const output = Object.assign(new EventEmitter(), { isTTY: true, columns: 120, rows: 30, write(text) { frame = text; } });
+  const f = dockFixture(t, { globalDock: dock, outputStream: output, workspace: { openRemoteHost: async ready => { opened.push(ready.id); } } });
+  await setImmediate(); await f.press('return'); await f.press('down'); await f.press('return');
+  assert.doesNotMatch(frame, /SSH 계정/);
+  finish({ host: { ...host, discovered: false }, summary: { sessions: [], warnings: [] } }); await setImmediate();
+  await f.press('return');
+  assert.equal(calls, 1); assert.deepEqual(opened, ['home']);
+});
+
 test("PC switching preserves local session selection and global search never becomes local native input", async t => {
   const opened = [], native = [];
   const globalDock = new GlobalDock(config, { query: async () => ({ sessions: [], warnings: [] }) });

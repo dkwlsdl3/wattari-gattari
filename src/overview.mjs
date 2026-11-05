@@ -512,12 +512,12 @@ function previewWindow(text, width, count, offset = 0) {
   };
 }
 
-export function buildGlobalDockFrame({ rows, selectedId, currentHost, query = "", searching = false, width = 100, height = 30, notice = "" }) {
+export function buildGlobalDockFrame({ rows, selectedId, currentHost, query = "", searching = false, width = 100, height = 30, notice = "", connection = null }) {
   const usableWidth = Math.max(1, width - 4);
-  const count = Math.max(1, Math.floor((height - 10) / 3));
+  const count = Math.max(1, Math.floor((height - (connection ? 13 : 10)) / 3));
   const selected = Math.max(0, rows.findIndex(row => row.id === selectedId));
   const start = Math.max(0, selected - count + 1);
-  const labels = { local: "현재 PC", unknown: "미조회", available: "연결됨", partial: "일부 조회 실패", stale: "조회 실패 · 이전 자료", unavailable: "조회 실패" };
+  const labels = { local: "현재 PC", unknown: "미조회", available: "연결됨", partial: "일부 조회 실패", stale: "조회 실패 · 이전 자료", unavailable: "조회 실패", setup: '첫 연결 필요 · Enter', connecting: '자동 연결 확인 중', offline: 'Tailscale 연결 안 됨' };
   const types = { pc: { label: "PC", color: THEME.pc }, wsl: { label: "WSL", color: THEME.wsl }, vm: { label: "VM", color: THEME.vm } };
   const lines = [];
   const line = (text, style = THEME.muted) => lines.push(`  ${color(style, fit(text, usableWidth))}`);
@@ -529,19 +529,19 @@ export function buildGlobalDockFrame({ rows, selectedId, currentHost, query = ""
     const type = types[row.type] ?? types.pc;
     const background = active ? `;${THEME.selected}` : "";
     const statusStyle = row.status === "available" ? THEME.working : row.status === "local" ? THEME.pc
-      : row.status === "unavailable" ? THEME.error : ["partial", "stale"].includes(row.status) ? THEME.warning : THEME.muted;
-    const marker = ["local", "available"].includes(row.status) ? "●" : ["partial", "stale", "unavailable"].includes(row.status) ? "!" : "○";
+      : row.status === "unavailable" ? THEME.error : ["partial", "stale", 'offline', 'setup'].includes(row.status) ? THEME.warning : THEME.muted;
+    const marker = ["local", "available"].includes(row.status) ? "●" : ["partial", "stale", "unavailable", 'offline', 'setup'].includes(row.status) ? "!" : "○";
     const sessions = row.summary?.sessions;
     const projects = sessions ? new Set(sessions.map(s => s.projectCwd || s.cwd)).size : 0;
     const working = sessions?.filter(s => s.status === "working").length ?? 0;
     const summary = sessions ? `${projects}개 프로젝트 · ${row.status === "partial" ? "확인된 " : ""}${sessions.length}개 세션 · 작업 중 ${working}` : "세션 미확인";
     line(`${active ? "›" : " "} [${type.label}] ${row.name}${row.local ? "   [현재 PC]" : ""}`, `${active ? THEME.primary : type.color}${background}`);
-    line(`    ${marker} ${labels[row.status]}   ·   ${summary}`, `${statusStyle}${background}`);
+    line(`    ${marker} ${labels[row.status]}${row.status === 'offline' && row.summary ? ' · 이전 자료' : ''}   ·   ${summary}`, `${statusStyle}${background}`);
     line("");
   }
   if (!rows.length) line("검색 결과가 없습니다.", THEME.warning);
   const row = rows[selected];
-  if (row && height - lines.length >= 7) {
+  if (row && height - lines.length >= (connection ? 10 : 7)) {
     const type = types[row.type] ?? types.pc;
     line(`${row.name} · ${type.label} · 등록 ID: ${row.id}`, type.color);
     if (row.update) line(`업데이트: ${{ updating: '설치 중', updated: '설치 완료 · 화면 확인 중', current: '이미 최신', failed: '실패' }[row.update.state]} ${row.update.revision.slice(0, 8)}${row.update.error ? ` · ${row.update.error}` : ''}`, row.update.state === 'failed' ? THEME.error : THEME.pc);
@@ -557,10 +557,14 @@ export function buildGlobalDockFrame({ rows, selectedId, currentHost, query = ""
       const folder = session.projectCwd || session.cwd;
       projects.set(folder, (projects.get(folder) ?? 0) + 1);
     }
-    for (const [folder, total] of [...projects].slice(0, Math.max(0, height - lines.length - 4))) line(`  ${folder} · ${total}개 세션`);
+    for (const [folder, total] of [...projects].slice(0, Math.max(0, height - lines.length - (connection ? 7 : 4)))) line(`  ${folder} · ${total}개 세션`);
   }
   line("─".repeat(usableWidth), THEME.divider);
-  line("↑↓ 선택   Enter PC 열기   u 업데이트 · U 전체   / 검색   Esc 복귀   Alt+R 갱신", THEME.primary);
+  if (connection) {
+    line(`${connection.name} · SSH 계정 (처음 한 번만 저장)`, THEME.primary);
+    lines.push(`  ${editorLine(connection.value, connection.cursor, usableWidth)}`);
+  }
+  line(connection ? 'Enter 연결 · Esc 취소 · Ctrl+U 지우기' : "↑↓ 선택   Enter PC 열기   u 업데이트 · U 전체   / 검색   Esc 복귀   Alt+R 갱신", THEME.primary);
   line(searching || query ? `PC 검색: ${query}` : notice);
   return lines.slice(0, height).join("\n");
 }
@@ -799,6 +803,7 @@ export async function runOverview({
   let searching = false;
   let newTask = null;
   let renameTask = null;
+  let hostConnection = null;
   let pasteBuffer = null;
   let provider = null;
   const refreshStates = new Map((bridge.providerNames?.() ?? [undefined]).map(name =>
@@ -855,11 +860,11 @@ export async function runOverview({
 
   const visibleSessions = () => selectOverviewSessions(allSessions, { query, provider });
   const visibleHosts = () => globalDock.rows(allSessions, warnings, localObserved).filter(row => `${row.name} ${row.id}`.toLowerCase().includes(globalQuery.toLowerCase()));
-  const refreshHosts = async () => {
+  const refreshHosts = async ({ force = false } = {}) => {
     if (closed || busy || nativeOpen || !globalVisible) return;
     try {
       if (workspace.shouldRefreshOverview && !await workspace.shouldRefreshOverview()) return;
-      if (!closed && globalVisible) await globalDock.refresh(render);
+      if (!closed && globalVisible) await globalDock.refresh(render, { force });
     } catch (error) { notice = `PC 목록 조회 실패: ${error.message}`; render(); }
   };
   const visibleNodes = () => tree(visibleSessions());
@@ -896,7 +901,7 @@ export async function runOverview({
       const rows = visibleHosts();
       if (!rows.some(row => row.id === globalDock.selectedId) && rows.length) globalDock.selectedId = rows[0].id;
       outputStream.write(`${ESC}H${ESC}J${buildGlobalDockFrame({ rows, selectedId: globalDock.selectedId, currentHost: globalDock.config.local.name,
-        query: globalQuery, searching: globalSearching, width: outputStream.columns || 100, height: outputStream.rows || 30, notice })}`);
+        query: globalQuery, searching: globalSearching, width: outputStream.columns || 100, height: outputStream.rows || 30, notice: notice || globalDock.discoveryError, connection: hostConnection })}`);
       return;
     }
     const sessions = visibleSessions();
@@ -1376,6 +1381,17 @@ export async function runOverview({
       .finally(() => { busy = false; nativeOpen = false; render(); });
   };
 
+  const openHost = async host => {
+    if (!workspace.openRemoteHost) { notice = '원격 PC 열기는 tmux backend가 필요합니다. waga --backend tmux를 사용하세요.'; render(); return; }
+    busy = true;
+    nativeOpen = true;
+    try {
+      const result = await workspace.openRemoteHost(host, remoteCommand(host, { interactive: true }));
+      if (result?.code) throw Error(`${host.name} SSH 연결 종료: exit ${result.code}`);
+    } catch (error) { notice = error.message; }
+    finally { busy = false; nativeOpen = false; render(); }
+  };
+
   const onKeypress = (text, key = {}) => {
     if (busy || closed || reloading) return;
     restoringSelection = null;
@@ -1399,6 +1415,28 @@ export async function runOverview({
       return;
     }
     if (globalVisible) {
+      if (hostConnection) {
+        const edit = hostConnection;
+        if (key.name === 'escape') { hostConnection = null; notice = ''; }
+        else if (key.name === 'return') {
+          busy = true; notice = 'SSH 접속과 Waga 설치를 확인하는 중입니다.'; render();
+          void globalDock.connect(edit.id, edit.value)
+            .then(async host => { hostConnection = null; notice = 'PC를 등록했습니다.'; await openHost(host); })
+            .catch(error => { notice = error.stderr?.trim() || error.message; })
+            .finally(() => { busy = false; render(); });
+          return;
+        } else if (key.name === 'left') edit.cursor = Math.max(0, edit.cursor - 1);
+        else if (key.name === 'right') edit.cursor = Math.min(edit.value.length, edit.cursor + 1);
+        else if (key.name === 'home') edit.cursor = 0;
+        else if (key.name === 'end') edit.cursor = edit.value.length;
+        else if (key.ctrl && key.name === 'u') { edit.value = ''; edit.cursor = 0; }
+        else if (key.name === 'backspace' && edit.cursor) { edit.value = edit.value.slice(0, edit.cursor - 1) + edit.value.slice(edit.cursor); edit.cursor--; }
+        else if (key.name === 'delete') edit.value = edit.value.slice(0, edit.cursor) + edit.value.slice(edit.cursor + 1);
+        else if (!key.ctrl && !key.meta && /^[a-zA-Z0-9_.-]+$/.test(text ?? '') && edit.value.length + text.length <= 64) {
+          edit.value = edit.value.slice(0, edit.cursor) + text + edit.value.slice(edit.cursor); edit.cursor += text.length;
+        }
+        render(); return;
+      }
       const rows = visibleHosts();
       let index = Math.max(0, rows.findIndex(row => row.id === globalDock.selectedId));
       if (key.name === "escape") {
@@ -1413,9 +1451,9 @@ export async function runOverview({
         index = Math.max(0, Math.min(rows.length - 1, index + (key.name === "up" ? -1 : 1)));
         if (rows[index]) globalDock.selectedId = rows[index].id;
       } else if (key.meta && key.name === "r") {
-        void refreshHosts();
+        void refreshHosts({ force: true });
       } else if (key.name === 'u' && !key.meta && !key.ctrl && !globalSearching) {
-        const targets = key.shift || text === 'U' ? globalDock.config.hosts : rows[index]?.local ? [] : rows[index] ? globalDock.config.hosts.filter(host => host.id === rows[index].id) : [];
+        const targets = (key.shift || text === 'U' ? globalDock.config.hosts : rows[index]?.local ? [] : rows[index] ? globalDock.config.hosts.filter(host => host.id === rows[index].id) : []).filter(host => !host.discovered);
         if (updating) notice = 'PC 업데이트가 진행 중입니다.';
         else if (!targets.length) notice = '업데이트할 원격 PC를 선택해 주세요.';
         else {
@@ -1433,15 +1471,9 @@ export async function runOverview({
         const host = rows[index];
         if (!host) return;
         if (host.local) returnToLocal();
-        else if (!workspace.openRemoteHost) notice = "원격 PC 열기는 tmux backend가 필요합니다. waga --backend tmux를 사용하세요.";
-        else {
-          busy = true;
-          nativeOpen = true;
-          void workspace.openRemoteHost(host, remoteCommand(host, { interactive: true }))
-            .then(result => { if (result?.code) throw Error(`${host.name} SSH 연결 종료: exit ${result.code}`); })
-            .catch(error => { notice = error.message; })
-            .finally(() => { busy = false; nativeOpen = false; render(); });
-        }
+        else if (host.status === 'connecting') notice = '자동 연결을 확인 중입니다. 잠시 후 다시 선택해 주세요.';
+        else if (host.discovered) { hostConnection = { id: host.id, name: host.name, value: '', cursor: 0 }; notice = '접속할 PC의 계정명을 입력해 주세요.'; }
+        else void openHost(host);
       }
       render();
       return;

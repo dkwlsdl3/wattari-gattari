@@ -40,27 +40,60 @@ export class DockNavigationStore {
 }
 
 export class GlobalDock {
-  constructor(config, { query = queryHost } = {}) {
+  constructor(config, { query = queryHost, discover = null, connect = null } = {}) {
     this.config = config;
     this.query = query;
     this.selectedId = config.local.id;
     this.states = new Map(config.hosts.map(host => [host.id, { status: "unknown", summary: null }]));
     this.pending = null;
     this.updates = new Map();
+    this.discover = discover;
+    this.connector = connect;
+    this.nextDiscovery = 0;
+    this.discoveryError = '';
   }
 
-  refresh(changed = () => {}) {
+  async connect(id, username) {
+    const host = this.config.hosts.find(row => row.id === id);
+    if (!host?.discovered || !this.connector) throw Error('연결 설정이 필요한 PC를 선택해 주세요.');
+    const { host: ready, summary } = await this.connector(host, username, this.config);
+    this.config.hosts = this.config.hosts.map(row => row.id === id ? ready : row);
+    this.states.set(id, { status: summary.warnings?.length ? 'partial' : 'available', summary, release: summary.release, updatedAt: Date.now() });
+    return ready;
+  }
+
+  refresh(changed = () => {}, { force = false } = {}) {
     if (this.pending) return this.pending;
-    this.pending = Promise.all(this.config.hosts.map(async host => {
-      const previous = this.states.get(host.id);
-      try {
-        const summary = await this.query(host);
-        this.states.set(host.id, { status: summary.warnings?.length ? "partial" : "available", summary, release: summary.release, updatedAt: Date.now() });
-      } catch (error) {
-        this.states.set(host.id, { ...previous, release: error.release ?? previous.release, status: previous.summary ? "stale" : "unavailable", error: error.stderr?.trim() || error.message });
+    this.pending = (async () => {
+      if (this.discover && (force || Date.now() >= this.nextDiscovery)) {
+        this.nextDiscovery = Date.now() + 30_000;
+        try { this.config = await this.discover(this.config); this.discoveryError = ''; }
+        catch (error) { this.discoveryError = `PC 자동 탐색: ${error.message}`; }
+        changed();
       }
-      changed();
-    })).finally(() => { this.pending = null; });
+      if (force) for (const state of this.states.values()) if (state.status === 'setup') state.attempted = false;
+      await Promise.all(this.config.hosts.map(async host => {
+        if (!this.states.has(host.id)) this.states.set(host.id, { status: 'unknown', summary: null });
+        const previous = this.states.get(host.id);
+        if (host.online === false) { this.states.set(host.id, { ...previous, status: 'offline' }); changed(); return; }
+        if (host.discovered) {
+          if (!previous.attempted && this.connector) {
+            this.states.set(host.id, { ...previous, status: 'connecting', attempted: true }); changed();
+            try { await this.connect(host.id); }
+            catch (error) { this.states.set(host.id, { ...previous, status: 'setup', attempted: true, error: error.stderr?.trim() || error.message }); }
+            changed();
+          }
+          return;
+        }
+        try {
+          const summary = await this.query(host);
+          this.states.set(host.id, { status: summary.warnings?.length ? "partial" : "available", summary, release: summary.release, updatedAt: Date.now() });
+        } catch (error) {
+          this.states.set(host.id, { ...previous, release: error.release ?? previous.release, status: previous.summary ? "stale" : "unavailable", error: error.stderr?.trim() || error.message });
+        }
+        changed();
+      }));
+    })().finally(() => { this.pending = null; });
     return this.pending;
   }
 

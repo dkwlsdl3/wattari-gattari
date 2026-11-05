@@ -2,6 +2,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import os from 'node:os';
 import { fileURLToPath } from "node:url";
 
 import { parseCliArgs } from "./cli-options.mjs";
@@ -30,6 +31,7 @@ import { validateWorkPlan } from './work-plan.mjs';
 import { executePlan, planRequest } from './work-plan-client.mjs';
 import { releaseInfo } from './release-install.mjs';
 import { updateHosts, saveUpdatedHosts } from './host-update.mjs';
+import { createGlobalDock, loadConnectedHosts } from './host-discovery.mjs';
 
 async function describeRelease() {
   return { ...releaseInfo(), docks: await new TmuxWorkspace().dockReleases() };
@@ -110,6 +112,7 @@ export async function runCli(args = process.argv.slice(2), {
   handleSignals = false,
   remoteRunner = runRemoteCommand,
   hostUpdater = updateHosts,
+  globalDockFactory = createGlobalDock,
 } = {}) {
   let options;
   try { options = parseCliArgs(args); }
@@ -120,7 +123,7 @@ export async function runCli(args = process.argv.slice(2), {
   }
   if (options.command === 'update') {
     try {
-      const config = loadHosts(options.hosts);
+      const config = await loadConnectedHosts(options.hosts);
       const hosts = options.all ? config.hosts : config.hosts.filter(host => host.id === options.host);
       if (!hosts.length) throw Error('업데이트할 등록 PC가 없습니다.');
       const results = await hostUpdater(hosts);
@@ -132,7 +135,7 @@ export async function runCli(args = process.argv.slice(2), {
   }
   if (options.host) {
     try {
-      const host = loadHosts(options.hosts).hosts.find(host => host.id === options.host);
+      const host = (await loadConnectedHosts(options.hosts)).hosts.find(host => host.id === options.host);
       if (!host) throw Error(`Registered remote PC not found: ${options.host}`);
       const remoteArgs = [options.command];
       if (options.target) remoteArgs.push(options.target, options.message);
@@ -237,7 +240,7 @@ export async function runCli(args = process.argv.slice(2), {
       let data;
       try { data = await bridge.discover({}); }
       catch (error) { data = { sessions: null, warnings: [{ provider: 'waga', message: error.message }] }; }
-      stdout.write(`${JSON.stringify({ ...data, release })}\n`);
+      stdout.write(`${JSON.stringify({ ...data, release, host: { type: os.release().toLowerCase().includes('microsoft') ? 'wsl' : 'pc' } })}\n`);
     }
     else if (options.command === "serve") return await web({ bridge, cwd, filterCwd: options.cwd ? cwd : undefined, port: options.port, output: stdout, orderStore });
     else if (options.command === "help") stdout.write(`${usage()}\n`);
@@ -248,6 +251,7 @@ export async function runCli(args = process.argv.slice(2), {
       backend: options.backend,
       hostsPath: options.hosts,
       hosts: loadHosts(options.hosts),
+      globalDock: globalDockFactory(loadHosts(options.hosts), { file: options.hosts }),
       bridge,
       inputStream: stdin,
       outputStream: stdout,
@@ -255,7 +259,7 @@ export async function runCli(args = process.argv.slice(2), {
       orderStore,
       settingsStore,
     })).code;
-    else if (options.command === "overview") return await overview({ hosts: loadHosts(options.hosts), hostsPath: options.hosts, filterCwd: options.cwd ? cwd : null, defaultCwd: cwd, bridge, inputStream: stdin, outputStream: stdout, errorOutput: stderr, orderStore, settingsStore });
+    else if (options.command === "overview") return await overview({ hosts: loadHosts(options.hosts), globalDock: globalDockFactory(loadHosts(options.hosts), { file: options.hosts }), hostsPath: options.hosts, filterCwd: options.cwd ? cwd : null, defaultCwd: cwd, bridge, inputStream: stdin, outputStream: stdout, errorOutput: stderr, orderStore, settingsStore });
     else if (options.command === "tmux-agents-view") return (await tmuxAgentsView(options.windowId)).code ?? 0;
     else if (options.command === "list" || options.command === "default") writeList(stdout, stderr, await bridge.discover({ provider: options.provider, cwd: options.cwd ? cwd : undefined }), options.json);
     else if (options.command === "send") {

@@ -73,6 +73,7 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
     import {runCli} from ${JSON.stringify(cliUrl)};
     import {runOverview} from ${JSON.stringify(overviewUrl)};
     import {TmuxWorkspace,enterWagaDock} from ${JSON.stringify(workspaceUrl)};
+    import {GlobalDock} from ${JSON.stringify(new URL('../src/global-dock.mjs', import.meta.url).href)};
     import {enterSessionDock} from ${JSON.stringify(dockUrl)};
     const side = process.env.WAGA_PROOF_SIDE;
     const runningRevision = JSON.parse(fs.readFileSync(${JSON.stringify(releaseFile)})).installedRevision;
@@ -88,7 +89,7 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
       fs.writeFileSync(${JSON.stringify(path.join(root, "message.json"))},JSON.stringify({target,payload,kind:options.kind}));
       return {requestId:'aaaaaaaa-1111-4222-8333-bbbbbbbbbbbb',target,delivery:'local-queued'};
     },recover:async()=>{}};
-    process.exitCode = await runCli(process.argv.slice(2), {bridge,delivery,
+    process.exitCode = await runCli(process.argv.slice(2), {bridge,delivery,globalDockFactory:config=>new GlobalDock(config),
       tmuxAgentsView: async window => { fs.writeFileSync(${JSON.stringify(path.join(root, "agents-key.json"))},JSON.stringify({side,window})); return {code:0}; },
       dock: options => enterSessionDock({...options,enterTmux: options => enterWagaDock({...options,workspace})}),
       overview: options => runOverview({...options, defaultCwd:${JSON.stringify(root)}, workspace, refreshMs:100,

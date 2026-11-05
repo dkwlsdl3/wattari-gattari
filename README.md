@@ -25,10 +25,12 @@ Open **↑ PC 목록으로** at the top of the local Dock, then select a registe
 The remote PC runs its own Waga Dock; `Alt+G` returns to that PC's Dock.
 Registration order stays fixed. Failed queries retain the last successful summary with an error.
 
-Copy the [host example](integrations/hosts.example.json) to your own file and set the local identity,
-remote SSH destination (an alias or `user@host`) and Waga executable. The executable must work in a noninteractive SSH shell.
-Remote PCs require this version of Waga and tmux. Establish SSH authentication and host trust first;
-Waga does not register keys or modify your SSH settings.
+Opening the PC list discovers Tailscale PCs automatically. Connections verified with the current
+account and an installed Waga are saved automatically. If a PC uses another account, press Enter
+on it and enter its SSH username once. Remote PCs need Waga and tmux. Tailscale SSH peers use the
+official `tailscale ssh` host-key checks; other peers use existing OpenSSH authentication and trust.
+Waga does not enable SSH servers or change SSH keys. Without Tailscale, use the
+[host example](integrations/hosts.example.json) to register hosts manually.
 
 ```sh
 waga --hosts /absolute/path/hosts.json
@@ -38,7 +40,8 @@ waga result <request-ID> --host home-wsl --hosts /absolute/path/hosts.json --jso
 ```
 
 The optional default registry is `$XDG_CONFIG_HOME/wattari-gattari/hosts.json`, falling back to
-`~/.config`. It is never created automatically. Tailscale membership alone does not register a host.
+`~/.config`. Only verified connections are saved. Offline PCs and PCs needing connection setup remain
+visible; phones are excluded. Existing names, IDs and order are preserved. CLI `--host` uses the registered ID shown in the list.
 `local-queued` confirms storage by the remote Waga, not native receipt or a reply.
 Ambiguous SSH failures never trigger automatic message resubmission. This is direct SSH;
 an always-on Oracle relay and offline inbox are separate work. See the [connection contract](docs/adr/2026-11-03-global-dock.md).

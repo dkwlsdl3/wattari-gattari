@@ -13,6 +13,7 @@ export async function enterDirectDock({
   settingsStore = null,
   hosts = null,
   hostsPath = null,
+  globalDock,
   overview = runOverview,
   workspace = new DirectWorkspace({ inputStream, outputStream, errorOutput }),
 } = {}) {
@@ -28,6 +29,7 @@ export async function enterDirectDock({
     settingsStore,
     hosts,
     hostsPath,
+    globalDock,
     nativeHint: "복귀: Claude CLI prefix+d · BG Ctrl+Z · Codex Ctrl+D",
   });
   return { code, mode: "direct" };

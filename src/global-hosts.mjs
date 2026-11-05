@@ -15,8 +15,9 @@ export function validateHosts(config) {
     if (!host || typeof host.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(host.id) || ids.has(host.id)) throw invalid("Host IDs must be unique safe identifiers");
     if (typeof host.name !== "string" || !host.name.trim() || host.name.length > 80 || /[\x00-\x1f\x7f-\x9f]/.test(host.name)) throw invalid("Host name must be printable text of at most 80 characters");
     if (host.type !== undefined && !["pc", "wsl", "vm"].includes(host.type)) throw invalid("Host type must be pc, wsl or vm");
+    if (host.tailscaleId !== undefined && (typeof host.tailscaleId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(host.tailscaleId))) throw invalid('Invalid Tailscale node ID');
     ids.add(host.id);
-    return { id: host.id, name: host.name, ...(host.type === undefined ? {} : { type: host.type }) };
+    return { id: host.id, name: host.name, ...(host.type === undefined ? {} : { type: host.type }), ...(host.tailscaleId ? { tailscaleId: host.tailscaleId } : {}) };
   };
   const local = identity(config.local);
   const hosts = config.hosts.map(host => {
@@ -27,7 +28,8 @@ export function validateHosts(config) {
       if (field === 'node' && value === undefined) continue;
       if (typeof value !== 'string' || !value || value.startsWith('-') || value.length > 4096 || /[\x00-\x1f\x7f-\x9f]/.test(value) || (value.includes('/') && !path.posix.isAbsolute(value))) throw invalid(`${field} must be an executable name or absolute path`);
     }
-    return { ...base, ssh: host.ssh, command: host.command, ...(host.node === undefined ? {} : { node: host.node }) };
+    if (host.transport !== undefined && host.transport !== 'tailscale') throw invalid('Invalid host transport');
+    return { ...base, ssh: host.ssh, command: host.command, ...(host.node === undefined ? {} : { node: host.node }), ...(host.transport ? { transport: host.transport } : {}) };
   });
   return { version: 1, local, hosts };
 }
@@ -51,6 +53,7 @@ export function remoteCommand(host, { interactive = false, args = ["list", "--js
   const command = interactive
     ? shellCommand("env", [`WAGA_REMOTE_HOST=${host.name}`, `WAGA_REMOTE_HOST_ID=${host.id}`, host.command, "--backend", "tmux"])
     : shellCommand(host.command, args);
+  if (host.transport === 'tailscale') return { command: 'tailscale', args: ['ssh', host.ssh, interactive ? '-tt' : '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2', command] };
   return { command: "ssh", args: [interactive ? "-tt" : "-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "UpdateHostKeys=no", "-o", "ConnectTimeout=5", "-o", "ServerAliveInterval=5", "-o", "ServerAliveCountMax=2", "--", host.ssh, command] };
 }
 
@@ -73,11 +76,16 @@ export async function queryHost(host, { run = execute } = {}) {
     spec = remoteCommand(host);
     result = await run(spec.command, spec.args, options);
   }
-  const data = JSON.parse(result.stdout);
+  const data = validateHostStatus(JSON.parse(result.stdout));
+  if (data.sessions === null) throw Object.assign(Error(data.warnings?.[0]?.message || 'Remote discovery failed'), { release: data.release });
+  return data;
+}
+
+export function validateHostStatus(data) {
+  if (data?.host !== undefined && !['pc', 'wsl', 'vm'].includes(data.host?.type)) throw invalid('Remote status returned invalid PC type');
   if (data?.release && ((data.release.installedRevision !== null && typeof data.release.installedRevision !== 'string')
     || !Array.isArray(data.release.docks) || data.release.docks.some(dock => !dock || (dock.revision !== null && typeof dock.revision !== 'string')))) throw invalid('Remote status returned invalid release information');
-  if (data?.sessions === null && data?.release) throw Object.assign(Error(data.warnings?.[0]?.message || 'Remote discovery failed'), { release: data.release });
-  if (!Array.isArray(data?.sessions) || data.sessions.some(s => !s || typeof s.id !== "string" || typeof s.cwd !== "string" || typeof s.name !== "string")) throw invalid("Remote list returned invalid sessions");
+  if (!(data?.sessions === null && data?.release) && (!Array.isArray(data?.sessions) || data.sessions.some(s => !s || typeof s.id !== "string" || typeof s.cwd !== "string" || typeof s.name !== "string"))) throw invalid("Remote list returned invalid sessions");
   if (!Array.isArray(data.warnings ?? []) || data.warnings?.some(w => !w || typeof w.message !== "string")) throw invalid("Remote list returned invalid warnings");
-  return { sessions: data.sessions, warnings: data.warnings ?? [], ...(data.release ? { release: data.release } : {}) };
+  return { sessions: data.sessions, warnings: data.warnings ?? [], ...(data.release ? { release: data.release } : {}), ...(data.host ? { host: data.host } : {}) };
 }
