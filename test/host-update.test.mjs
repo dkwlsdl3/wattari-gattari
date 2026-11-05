@@ -23,6 +23,10 @@ function fixture(t) {
       const dir=path.dirname(path.dirname(fileURLToPath(import.meta.url))), running=JSON.parse(fs.readFileSync(path.join(dir,'release.json')));
       let installed=null; try {installed=JSON.parse(fs.readFileSync(path.join(running.root,'current/release.json')));}catch(e){if(e.code!=='ENOENT')throw e;}
       if(${failActivation} && installed?.revision===running.revision) process.exit(19);
+      if(process.argv[2]==='spawn-provider') {
+        const { spawnSync } = await import('node:child_process');
+        const r=spawnSync('waga-proof-npm-provider',[],{encoding:'utf8'}); if(r.error) throw r.error; process.stdout.write(r.stdout); process.exit(r.status);
+      }
       console.log(JSON.stringify({runningRevision:running.revision,installedRevision:installed?.revision??null}));`);
     const archive = path.join(root, `${digit}.tar.gz`);
     execFileSync('tar', ['-czf', archive, '-C', source, '.']);
@@ -44,6 +48,20 @@ test('release switch preserves old files, is idempotent and rolls back an unheal
   assert.equal(installRelease(next).revision, next.revision);
   assert.ok(fs.existsSync(path.join(f.install, 'releases', first.revision, 'src/cli.mjs')), 'running old processes retain their files');
   assert.equal(fs.statSync(path.join(f.install, 'releases', next.revision, 'waga')).mode & 0o777, 0o700);
+});
+
+test('generated launcher exposes the npm global bin to child processes', t => {
+  const f = fixture(t), release = f.bundle('1');
+  const prefix = path.join(f.root, 'npm global'), bin = path.join(prefix, 'bin');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, 'waga-proof-npm-provider'), '#!/bin/sh\necho npm-provider-fixture\n', { mode: 0o755 });
+  const saved = process.env.NPM_CONFIG_PREFIX;
+  process.env.NPM_CONFIG_PREFIX = prefix;
+  let receipt;
+  try { receipt = installRelease(release); }
+  finally { if (saved === undefined) delete process.env.NPM_CONFIG_PREFIX; else process.env.NPM_CONFIG_PREFIX = saved; }
+  assert.ok(!process.env.PATH.split(':').includes(bin));
+  assert.equal(execFileSync(receipt.command, ['spawn-provider'], { encoding: 'utf8' }).trim(), 'npm-provider-fixture');
 });
 
 test('bad archive and failed dependency installation leave the current launcher untouched', t => {

@@ -57,7 +57,8 @@ export function installRelease({ archive, sha256, revision, root = path.join(os.
       checked(process.execPath, ['--input-type=module', '-e', "import fs from 'node:fs'; const p=JSON.parse(fs.readFileSync('package.json')); for(const name of ['node-pty','@xterm/headless']) if(p.dependencies?.[name]) await import(name);"], { cwd: source, env });
       checked('tmux', ['-V'], { env });
       fs.writeFileSync(path.join(source, 'release.json'), JSON.stringify({ revision, sha256, root, node: process.execPath }), { mode: 0o600 });
-      const prefix = `${path.dirname(process.execPath)}:${path.join(os.homedir(), '.local/bin')}`;
+      const npmBin = path.join(checked('npm', ['prefix', '--global'], { env }).trim(), 'bin');
+      const prefix = `${path.dirname(process.execPath)}:${path.join(os.homedir(), '.local/bin')}:${npmBin}`;
       fs.writeFileSync(path.join(source, 'waga'), `#!/bin/sh\nPATH=${quote(prefix)}:"$PATH"\nexport PATH\n${shellCommand(process.execPath, [path.join(target, 'src/cli.mjs')])} "$@"\n`, { mode: 0o700 });
       fs.copyFileSync(archive, path.join(source, 'release.tar.gz'));
       fs.renameSync(source, target);
