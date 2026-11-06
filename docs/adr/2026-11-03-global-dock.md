@@ -114,6 +114,12 @@ Claude, 기존 사용자 tmux server와 전역 테마는 바꾸지 않습니다.
 남깁니다. 마우스 휠은 바깥 SSH 창에서 원격 tmux로 전달하고, Codex가 마우스를 처리하지
 않을 때 원격 tmux의 copy-mode로 이전 대화를 봅니다. 로컬 Codex의 화면 모드와 사용자
 전역 설정은 유지합니다.
+Waga 전용 격리 tmux 서버는 `set-clipboard on`으로 원격 copy-mode의 OSC 52 복사를
+로컬 터미널까지 전달하고 `hyperlinks` 기능으로 OSC 8 링크를 보존합니다. 기존 사용자
+tmux 서버의 정책은 변경하지 않습니다. 실제 OS 클립보드와 브라우저 열기는 로컬 터미널이
+처리합니다. WezTerm에서 마우스 보고 중에도 로컬 링크를 열려면 Ctrl+클릭의 Down/Up을
+함께 바인딩해야 하며, 일반 클릭·드래그·휠은 tmux로 전달합니다. Waga가 사용자 터미널의
+설정을 자동 설치하지는 않습니다.
 원격 재연결은 `-c check_for_update_on_startup=false`로 실행해 provider 업데이트 안내가
 접속 준비를 막지 않게 합니다. provider 설치나 전역 업데이트 설정은 변경하지 않습니다.
 

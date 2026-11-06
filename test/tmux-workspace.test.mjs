@@ -60,6 +60,8 @@ test("enter uses switch-client instead of nesting when already inside tmux", asy
   assert.doesNotMatch(created.at(-1), /--cwd/);
   assert.ok(calls.some((args) => args[0] === "switch-client"));
   assert.ok(!calls.flat().includes("attach-session"));
+  assert.ok(!calls.flat().includes("set-clipboard"), "an existing user server keeps its clipboard policy");
+  assert.ok(!calls.flat().includes("terminal-features"), "an existing user server keeps its terminal capabilities");
   assert.deepEqual(
     calls.filter((args) => args.includes("mouse")),
     [["set-option", "-t", viewName, "mouse", "on"]],

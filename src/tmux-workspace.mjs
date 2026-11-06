@@ -612,7 +612,9 @@ export class TmuxWorkspace {
     for (const windowId of windows.stdout.split("\n").filter(Boolean)) await this.#styleWindow(prefix, windowId);
     if (mode === "isolated") {
       await this.#call([...prefix, "set-option", "-g", "default-terminal", "tmux-256color"]);
-      await this.#call([...prefix, "set-option", "-as", "terminal-features", ",*:RGB:extkeys"]);
+      await this.#call([...prefix, "set-option", "-as", "terminal-features", ",*:RGB:extkeys:hyperlinks"]);
+      // Nested tmux copies arrive as application OSC 52; "external" drops them.
+      await this.#call([...prefix, "set-option", "-s", "set-clipboard", "on"]);
       await this.#call([...prefix, "set-option", "-s", "extended-keys", "on"]);
       await this.#call([...prefix, "set-option", "-s", "escape-time", "0"]);
       for (const key of ["M-g", "M-G", "M-ㅎ"]) {

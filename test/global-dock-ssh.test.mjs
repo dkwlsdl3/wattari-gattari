@@ -7,6 +7,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import test from "node:test";
 import pty from "node-pty";
+import headless from "@xterm/headless";
 import crypto from 'node:crypto';
 import { deployHost } from '../src/host-update.mjs';
 import { queryHost } from "../src/global-hosts.mjs";
@@ -32,9 +33,13 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   const localSocket = `waga-proof-global-local-${process.pid}`;
   const remoteSocket = `waga-proof-global-remote-${process.pid}`;
   let sshd, client, ownerClient;
+  const terminal = new headless.Terminal({ cols: 120, rows: 35, allowProposedApi: true });
+  const clipboardWrites = [];
+  terminal.parser.registerOscHandler(52, data => { clipboardWrites.push(data); return true; });
   t.after(async () => {
     client?.kill();
     ownerClient?.kill();
+    terminal.dispose();
     for (const socket of [localSocket, remoteSocket]) await exec("tmux", ["-L", socket, "kill-server"]).catch(() => {});
     if (sshd && sshd.exitCode === null && sshd.signalCode === null) {
       const exited = new Promise(resolve => sshd.once("exit", resolve)); sshd.kill(); await exited;
@@ -135,8 +140,8 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   const call = async (socket, ...args) => (await exec("tmux", ["-L", socket, ...args], { env, timeout: 3000 })).stdout.trim();
   const view = side => { try { return JSON.parse(fs.readFileSync(path.join(root, `${side}-view.json`), "utf8")).view; } catch { return null; } };
   client = pty.spawn(process.execPath, [localCli, "--hosts", hostsFile], { cwd: root, env, name: "xterm-256color", cols: 120, rows: 35 });
-  // No terminal-output parser: readiness and navigation use JSON and tmux's documented format fields.
-  client.onData(() => {});
+  // Xterm parses terminal protocols; readiness and navigation use JSON and tmux format fields.
+  client.onData(data => terminal.write(data));
   await until(() => Boolean(view("local")), true, "local Dock starts");
   await until(() => fs.existsSync(path.join(root, 'remote-summary.json')), true, 'integrated Dock discovers remote sessions');
   client.write("\t\t\r"); // All PCs -> local PC -> remote PC -> exact session.
@@ -157,6 +162,13 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   client.write('\x1b[<65;10;10M');
   await until(async () => Number(await call(remoteSocket, 'display-message', '-p', '-t', nativeTarget, '#{scroll_position}')) < scrolled, true, 'wheel down moves toward the live prompt');
   await call(remoteSocket, 'send-keys', '-t', nativeTarget, '-X', 'cancel');
+  client.write('\x1b[<0;1;5M\x1b[<32;11;5M');
+  await until(() => call(remoteSocket, 'display-message', '-p', '-t', nativeTarget, '#{selection_present}'), '1', 'remote drag starts a selection before mouse release');
+  client.write('\x1b[<0;11;5m');
+  await until(() => call(remoteSocket, 'show-buffer'), 'waga-proof', 'ordinary drag copies text in the remote tmux');
+  await until(() => call(localSocket, 'show-buffer').catch(() => ''), 'waga-proof', 'outer tmux accepts the inner clipboard write');
+  await until(() => clipboardWrites.includes(`;${Buffer.from('waga-proof').toString('base64')}`), true, 'remote drag reaches the local terminal clipboard through SSH and outer tmux');
+  assert.equal(await call(localSocket, 'display-message', '-p', '-t', view('local'), '#{pane_in_mode}'), '0', 'copying does not trap the outer SSH pane in copy-mode');
   ownerClient = pty.spawn("tmux", ["-L", remoteSocket, "attach-session", "-t", nativeTarget], { cwd: root, env, name: "xterm-256color", cols: 150, rows: 40 });
   ownerClient.onData(() => {});
   await until(() => call(remoteSocket, "display-message", "-p", "-t", nativeTarget, "#{pane_width}"), "150", "the owning PC has its own larger native terminal");

@@ -255,6 +255,11 @@ agent window shares that window's screen and input. Closing one dock preserves t
 other docks and retained agent windows. Existing docks keep their previous behavior;
 independent views apply to newly launched docks.
 
+Waga's isolated tmux forwards remote drag selections to the local terminal clipboard
+and preserves hyperlinks. This requires OSC 52 support in the terminal. In WezTerm,
+Shift+click opens links in the local browser; Ctrl+click also works if configured
+for mouse-reporting mode.
+
 Claude rows distinguish CLI and BG. Waga-created CLI sessions keep the same
 process when reopened, including F4; closing a terminal or dock leaves them
 running in tmux. This preserves Claude's native usage-limit wait, when enabled

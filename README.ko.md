@@ -256,6 +256,11 @@ version 1 Codex 전환 설정은 읽을 때 provider 설정으로 변환되며, 
 - 기존 tmux 안: prefix 뒤 `0`으로 dock
 - direct: Claude BG는 `Ctrl+Z`, Claude CLI는 tmux prefix 뒤 `d`, Codex는 `Ctrl+D`로 native view 종료·분리
 
+Waga 격리 tmux는 원격 화면에서 드래그한 텍스트를 로컬 터미널의 클립보드로 전달하고
+하이퍼링크를 보존합니다. 터미널의 OSC 52 지원이 필요합니다. WezTerm에서는
+`Shift+클릭`으로 로컬 브라우저에서 링크를 열 수 있습니다. 마우스 보고 중의
+Ctrl+클릭을 별도로 설정했다면 그 조합도 사용할 수 있습니다.
+
 Claude `←`나 Codex `/agents`로 내부 이동해도, dock에서 다시 선택하면 해당 세션으로
 연결합니다. 창 재사용 판정은 [ADR](docs/adr/README.md)에 있습니다.
 
