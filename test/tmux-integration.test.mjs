@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
+import headless from '@xterm/headless';
 
 import { TmuxWorkspace, shellCommand } from "../src/tmux-workspace.mjs";
 import { defaultEventLogPath } from "../src/event-log.mjs";
@@ -23,14 +24,16 @@ async function waitFor(check, timeoutMs = 2_000) {
   throw new Error(`condition was not met within ${timeoutMs}ms`);
 }
 
-test('remote Codex receives explicit pane colours before starting while local and Claude keep their defaults', { skip: !hasTmux, timeout: 10_000 }, async t => {
+test('remote Codex keeps input shading after restoring transparent pane defaults; local and Claude keep their defaults', { skip: !hasTmux, timeout: 10_000 }, async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'waga-proof-pane-colours-'));
   const prefix = ['-S', path.join(root, 'tmux.sock'), '-f', '/dev/null'];
   const host = new URL('../src/native-session-host.mjs', import.meta.url).pathname;
   const child = path.join(root, 'frontend.mjs');
   fs.writeFileSync(child, `import fs from 'node:fs'; import {execFileSync} from 'node:child_process';
     const colours=execFileSync('tmux',['display-message','-p','-t',process.env.TMUX_PANE,'#{pane_fg},#{pane_bg}'],{encoding:'utf8'}).trim();
-    fs.writeFileSync(process.argv[2],JSON.stringify({colours}));setInterval(()=>{},1000);`);
+    fs.writeFileSync(process.argv[2],JSON.stringify({colours,pane:process.env.TMUX_PANE}));
+    process.stdout.write('\\x1b]0;'+process.argv[3]+'\\x07\\x1b[48;2;53;54;64m› Ask Codex to do anything\\x1b[0m\\r\\n');
+    setInterval(()=>{},1000);`);
   t.after(() => {
     spawnSync('tmux', [...prefix, 'kill-server'], { stdio: 'ignore', timeout: commandTimeoutMs });
     fs.rmSync(root, { recursive: true, force: true });
@@ -41,6 +44,30 @@ test('remote Codex receives explicit pane colours before starting while local an
     ['claude', 'claude', '1', 'default,default'],
   ]) {
     const receipt = path.join(root, `${name}.json`);
+    if (name === 'remote') {
+      const env = { ...process.env, WAGA_TMUX_MODE: 'isolated', WAGA_TMUX_INDEPENDENT: '1', WAGA_TMUX_SESSION: 'waga-proof-remote', WAGA_REMOTE_HOST: 'waga-proof-remote' };
+      const run = async args => {
+        try { return { ...await execFileAsync('tmux', [...prefix, ...args], { env, encoding: 'utf8', timeout: commandTimeoutMs }), code: 0 }; }
+        catch (error) { return { stdout: error.stdout ?? '', stderr: error.stderr ?? error.message, code: error.code }; }
+      };
+      assert.equal((await run(['new-session', '-d', '-s', env.WAGA_TMUX_SESSION, '-n', 'overview', '-x', '110', '-y', '35', 'sleep 30'])).code, 0);
+      const session = { id: 'codex:11111111-1111-4111-8111-111111111111', nativeId: '11111111-1111-4111-8111-111111111111', provider, cwd: root, name: 'waga-proof-remote' };
+      const workspace = new TmuxWorkspace({ run, env, eventLog: { record() {} } });
+      const opened = await workspace.focusOrOpen(session, { command: process.execPath, args: [child, receipt, session.nativeId], cwd: root,
+        afterAttach: async () => {
+          assert.equal(JSON.parse(fs.readFileSync(receipt)).colours, expected);
+          assert.equal((await run(['display-message', '-p', '-t', JSON.parse(fs.readFileSync(receipt)).pane, '#{pane_fg},#{pane_bg}'])).stdout.trim(), 'default,default');
+        } });
+      assert.equal((await run(['display-message', '-p', '-t', opened.windowId, '#{pane_fg},#{pane_bg}'])).stdout.trim(), 'default,default');
+      const terminal = new headless.Terminal({ cols: 110, rows: 35, convertEol: true, allowProposedApi: true });
+      try {
+        const captured = await run(['capture-pane', '-e', '-p', '-t', opened.windowId]);
+        assert.equal(captured.code, 0);
+        await new Promise(resolve => terminal.write(captured.stdout, resolve));
+        assert.equal(terminal.buffer.active.getLine(0).getCell(3).getBgColor(), 0x353640);
+      } finally { terminal.dispose(); }
+      continue;
+    }
     await execFileAsync('tmux', [...prefix, 'new-session', '-d', '-s', `waga-proof-${name}`, '-c', root,
       shellCommand('env', ['WAGA_WAIT_FOR_VISIBLE=', `WAGA_CODEX_TERMINAL_STYLE=${enabled}`, process.execPath, host,
         provider, `${provider}:waga-proof-${name}`, '--', process.execPath, child, receipt])], { timeout: commandTimeoutMs });

@@ -270,6 +270,9 @@ export class TmuxWorkspace {
     const finish = async (windowId, launched) => {
       if (stagedCodex) {
         if (launched) await this.#waitForCodexAttach(windowId, session.nativeId);
+        if (this.#env.WAGA_REMOTE_HOST && this.#env.WAGA_TMUX_MODE === 'isolated') {
+          await this.#call(['set-option', '-p', '-u', '-t', windowId, 'window-style']);
+        }
         await commandSpec.afterAttach();
       }
       await select(windowId);

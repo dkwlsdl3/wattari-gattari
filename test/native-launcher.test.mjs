@@ -45,6 +45,21 @@ test("native session commands attach exact provider sessions", async () => {
   await codex.afterAttach();
 });
 
+test('remote Codex keeps native scrollback without changing the local terminal mode', async () => {
+  const previous = process.env.WAGA_REMOTE_HOST;
+  const codexProvider = { async daemonInfo() { return { status: 'running', socketPath: '/tmp/codex.sock' }; } };
+  const session = { provider: 'codex', nativeId: 'waga-proof-thread', cwd: '/tmp/waga-proof-scroll' };
+  try {
+    delete process.env.WAGA_REMOTE_HOST;
+    assert.equal((await nativeSessionCommand(session, { codexProvider })).args.includes('--no-alt-screen'), false);
+    process.env.WAGA_REMOTE_HOST = 'waga-proof-oracle';
+    assert.equal((await nativeSessionCommand(session, { codexProvider })).args.includes('--no-alt-screen'), true);
+  } finally {
+    if (previous === undefined) delete process.env.WAGA_REMOTE_HOST;
+    else process.env.WAGA_REMOTE_HOST = previous;
+  }
+});
+
 test("a resumed Codex view carries no CLI permission overrides", async () => {
   // 2026-09-22, codex 0.155.1: `codex resume --remote` exits 1 with
   // "Permission overrides are not supported when resuming a remote task."

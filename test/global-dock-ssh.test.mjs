@@ -72,7 +72,7 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   fs.mkdirSync(path.join(root, 'managed'));
   fs.writeFileSync(releaseFile, JSON.stringify({ root: path.join(root, 'managed'), installedRevision: 'old' }));
   fs.writeFileSync(path.join(root, 'managed/waga'), `#!/bin/sh\n${shellCommand(process.execPath, [path.join(root, "remote waga's.mjs")])} "$@"\n`, { mode: 0o700 });
-  const nativeCode = `process.stdin.setRawMode(true); process.stdin.resume(); require('node:fs').writeFileSync(${JSON.stringify(path.join(root, "native-ready"))},'ready'); process.stdout.write('waga-proof-ready\\r\\n'); process.stdin.on('data', data => require('node:fs').appendFileSync(${JSON.stringify(path.join(root, "native-input"))}, data));`;
+  const nativeCode = `process.stdin.setRawMode(true); process.stdin.resume(); require('node:fs').writeFileSync(${JSON.stringify(path.join(root, "native-ready"))},'ready'); process.stdout.write(Array.from({length:100},(_,i)=>'waga-proof-history-'+i+'\\r\\n').join('')+'waga-proof-ready\\r\\n'); process.stdin.on('data', data => require('node:fs').appendFileSync(${JSON.stringify(path.join(root, "native-input"))}, data));`;
   const fixture = path.join(root, "fixture.mjs");
   fs.writeFileSync(fixture, `
     import fs from 'node:fs';
@@ -142,6 +142,14 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   const typedInput = "waga-proof-input\r\t\x1b[Z";
   client.write(typedInput);
   await until(() => { try { return fs.readFileSync(path.join(root, "native-input"), "utf8"); } catch { return ""; } }, typedInput, "native input including Tab and Shift+Tab reaches only the remote fixture");
+  // Xterm SGR mouse wheel events; inspect tmux's state rather than parsing the PTY output.
+  client.write('\x1b[<64;10;10M'.repeat(3));
+  await until(async () => Number(await call(remoteSocket, 'display-message', '-p', '-t', nativeTarget, '#{scroll_position}')) > 0, true, 'wheel up reaches remote scrollback');
+  assert.equal(await call(localSocket, 'display-message', '-p', '-t', view('local'), '#{pane_in_mode}'), '0', 'the outer SSH pane does not consume scrolling');
+  const scrolled = Number(await call(remoteSocket, 'display-message', '-p', '-t', nativeTarget, '#{scroll_position}'));
+  client.write('\x1b[<65;10;10M');
+  await until(async () => Number(await call(remoteSocket, 'display-message', '-p', '-t', nativeTarget, '#{scroll_position}')) < scrolled, true, 'wheel down moves toward the live prompt');
+  await call(remoteSocket, 'send-keys', '-t', nativeTarget, '-X', 'cancel');
   ownerClient = pty.spawn("tmux", ["-L", remoteSocket, "attach-session", "-t", nativeTarget], { cwd: root, env, name: "xterm-256color", cols: 150, rows: 40 });
   ownerClient.onData(() => {});
   await until(() => call(remoteSocket, "display-message", "-p", "-t", nativeTarget, "#{pane_width}"), "150", "the owning PC has its own larger native terminal");

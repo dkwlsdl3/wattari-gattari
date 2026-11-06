@@ -78,9 +78,15 @@ Codex daemon을 시작하지 않습니다. 연결 5초·전체 10초·출력 1Mi
 원격 Waga 격리 tmux의 Codex pane은 frontend를 시작하기 전에 기본 전경 `#c0caf5`와
 배경 `#1a1b26`을 명시합니다. Codex 0.166.0은 OSC 10/11 조회 실패를 캐시하고 입력창 배경을
 생략하므로, 중첩 SSH terminal이 팔레트를 보고하기 전에도 tmux가 두 색을 응답하게 합니다.
-해당 pane의 바탕만 어둡게 고정하며 Codex가 입력줄의 밝은 배경을 계산합니다. 로컬 Codex,
+첫 입력 화면을 확인하면 임시 pane 스타일을 해제합니다. Codex가 기억한 색상으로 입력줄의
+밝은 배경을 유지하고, 답변 영역은 terminal의 기본 반투명 배경으로 돌아갑니다. 로컬 Codex,
 Claude, 기존 사용자 tmux server와 전역 테마는 바꾸지 않습니다. 이미 열린 frontend는
 같은 대화 ID로 화면을 다시 연결해야 새 색상을 읽습니다.
+
+원격 Codex는 공개 `--no-alt-screen` 옵션으로 실행하여 이전 대화를 tmux scrollback에
+남깁니다. 마우스 휠은 바깥 SSH 창에서 원격 tmux로 전달하고, Codex가 마우스를 처리하지
+않을 때 원격 tmux의 copy-mode로 이전 대화를 봅니다. 로컬 Codex의 화면 모드와 사용자
+전역 설정은 유지합니다.
 
 중첩 tmux에서 `Alt+G`는 시작 PC의 Dock으로 복귀하고 `Alt+A`는 원격으로 전달합니다. 실패한 연결은 오류를
 읽을 수 있도록 남기며 `Alt+G`로 원래 목록에 돌아옵니다. 원격 PC 이름은 Dock과 tmux 상태 줄에 표시합니다.
