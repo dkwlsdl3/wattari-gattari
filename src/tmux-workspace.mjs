@@ -526,7 +526,8 @@ export class TmuxWorkspace {
       ...commandSpec.args,
     ];
     if (provider === "codex" && this.#env.WAGA_TMUX_INDEPENDENT === "1") {
-      return shellCommand("env", [`WAGA_WAIT_FOR_VISIBLE=${commandSpec.afterAttach ? "0" : "1"}`, this.#nodePath, ...args]);
+      const remoteStyle = this.#env.WAGA_REMOTE_HOST && this.#env.WAGA_TMUX_MODE === 'isolated' ? '1' : '';
+      return shellCommand("env", [`WAGA_WAIT_FOR_VISIBLE=${commandSpec.afterAttach ? "0" : "1"}`, `WAGA_CODEX_TERMINAL_STYLE=${remoteStyle}`, this.#nodePath, ...args]);
     }
     return this.#colorCommand(provider, this.#nodePath, args);
   }

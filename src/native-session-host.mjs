@@ -72,6 +72,13 @@ export async function runNativeSessionHost(args = process.argv.slice(2), {
   }
   const context = { provider, sessionId, hostPid: processId };
   try {
+    if (provider === 'codex' && process.env.WAGA_CODEX_TERMINAL_STYLE === '1') {
+      const pane = process.env.TMUX_PANE;
+      if (!/^%[0-9]+$/.test(pane ?? '')) throw new Error('Codex terminal colours require a tmux pane');
+      // Explicit pane defaults let tmux answer Codex's OSC 10/11 startup probes even
+      // before the nested SSH terminal has reported a palette.
+      await execFileAsync('tmux', ['set-option', '-p', '-t', pane, 'window-style', 'fg=#c0caf5,bg=#1a1b26'], { timeout: 2000 });
+    }
     if (waitForTerminal) await waitForTerminal();
     eventLog.record("native_session_started", { ...context, command });
     const result = await launch(command, commandArgs, {

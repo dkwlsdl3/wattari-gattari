@@ -23,6 +23,32 @@ async function waitFor(check, timeoutMs = 2_000) {
   throw new Error(`condition was not met within ${timeoutMs}ms`);
 }
 
+test('remote Codex receives explicit pane colours before starting while local and Claude keep their defaults', { skip: !hasTmux, timeout: 10_000 }, async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'waga-proof-pane-colours-'));
+  const prefix = ['-S', path.join(root, 'tmux.sock'), '-f', '/dev/null'];
+  const host = new URL('../src/native-session-host.mjs', import.meta.url).pathname;
+  const child = path.join(root, 'frontend.mjs');
+  fs.writeFileSync(child, `import fs from 'node:fs'; import {execFileSync} from 'node:child_process';
+    const colours=execFileSync('tmux',['display-message','-p','-t',process.env.TMUX_PANE,'#{pane_fg},#{pane_bg}'],{encoding:'utf8'}).trim();
+    fs.writeFileSync(process.argv[2],JSON.stringify({colours}));setInterval(()=>{},1000);`);
+  t.after(() => {
+    spawnSync('tmux', [...prefix, 'kill-server'], { stdio: 'ignore', timeout: commandTimeoutMs });
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  for (const [name, provider, enabled, expected] of [
+    ['remote', 'codex', '1', '#c0caf5,#1a1b26'],
+    ['local', 'codex', '', 'default,default'],
+    ['claude', 'claude', '1', 'default,default'],
+  ]) {
+    const receipt = path.join(root, `${name}.json`);
+    await execFileAsync('tmux', [...prefix, 'new-session', '-d', '-s', `waga-proof-${name}`, '-c', root,
+      shellCommand('env', ['WAGA_WAIT_FOR_VISIBLE=', `WAGA_CODEX_TERMINAL_STYLE=${enabled}`, process.execPath, host,
+        provider, `${provider}:waga-proof-${name}`, '--', process.execPath, child, receipt])], { timeout: commandTimeoutMs });
+    await waitFor(() => fs.existsSync(receipt));
+    assert.equal(JSON.parse(fs.readFileSync(receipt)).colours, expected);
+  }
+});
+
 test('new docks keep their own local or remote identity on a server started by a remote dock', { skip: !hasTmux, timeout: 15_000 }, async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'waga-proof-dock-origin-'));
   const socketName = path.basename(root), prefix = ['-L', socketName, '-f', '/dev/null'];
