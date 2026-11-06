@@ -94,7 +94,7 @@ test('a provider-less Waga can register, but malformed sessions and unsafe regis
   await assert.rejects(connectHost(candidate, 'ubuntu', { file: link, run: async () => response(summary) }), /소유/);
 });
 
-test('production Dock discovers before querying, prompts only after one failed automatic account, and CLI reads the saved registration', async t => {
+test('production Dock discovers without attempting an account, connects explicitly, and CLI reads the saved registration', async t => {
   const file = fileFor(t); fs.writeFileSync(file, JSON.stringify(config));
   const onlyOracle = { ...status, Peer: { oracle: status.Peer['0'] } };
   let probes = 0;
@@ -106,7 +106,7 @@ test('production Dock discovers before querying, prompts only after one failed a
   };
   const dock = createGlobalDock(config, { file, run });
   await dock.refresh(); await dock.refresh();
-  assert.equal(dock.rows()[1].status, 'setup'); assert.equal(probes, 1);
+  assert.equal(dock.rows()[1].status, 'setup'); assert.equal(probes, 0);
   await dock.connect('proof-oracle', 'ubuntu');
   assert.equal(dock.rows()[1].status, 'available');
   await dock.refresh(() => {}, { force: true });

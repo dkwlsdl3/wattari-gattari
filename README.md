@@ -24,13 +24,17 @@ from one local dock or browser workspace. Native providers own session execution
 `waga` opens the unified Dock for all PCs. `Tab` cycles All PCs → this PC → remote PCs → All PCs.
 `Shift+Tab` independently cycles All providers → Codex → Claude → All providers.
 Enter opens the selected native session on its owning PC; `Alt+G` returns to the originating Dock.
-PC registration order stays fixed. Failed queries retain the last successful summary with an error.
-Use **PC 연결 설정** for first connections and updates. Remote create/rename/archive/order actions
-open that PC's own management Dock; remote conversation previews are available inside the native TUI.
+PC registration order stays fixed. Normal tabs show connected PCs and hide folders with no sessions.
+**Alt+P** opens connection settings, including disconnected PCs, errors and their last successful summary.
+On a remote PC header or project, **Alt+D** directly opens its new-session composer with provider defaults;
+**Alt+N** opens it with routing. A PC header uses the remote default directory; a project/session uses its
+remote working directory. Escape cancels the remote composer and returns to the unified Dock.
+Rename/archive/order actions use that PC's management Dock.
 
-The visible unified Dock discovers Tailscale PCs automatically. Connections verified with the current
-account and an installed Waga are saved automatically. If a PC uses another account, press Enter
-on it and enter its SSH username once. Remote PCs need Waga and tmux. Tailscale SSH peers use the
+The visible unified Dock discovers Tailscale PCs without automatically connecting to new peers.
+Open Alt+P, select a PC, and enter its SSH username once. Verified connection details are saved
+and its PC tab is selected after registration. Saved details are reused for status checks.
+Remote PCs need Waga and tmux. Tailscale SSH peers use the
 official `tailscale ssh` host-key checks; other peers use existing OpenSSH authentication and trust.
 Waga does not enable SSH servers or change SSH keys. Without Tailscale, use the
 [host example](integrations/hosts.example.json) to register hosts manually.

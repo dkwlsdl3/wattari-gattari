@@ -172,14 +172,8 @@ test("overview groups sessions into collapsible workspace trees", () => {
   ]);
 });
 
-test("overview tree includes the launch workspace even when it has no sessions", () => {
-  assert.deepEqual(buildOverviewTree([], { rootCwd: "/work/current" }), [{
-    type: "workspace",
-    key: "workspace:/work/current",
-    cwd: "/work/current",
-    name: "current",
-    sessionCount: 0,
-  }]);
+test("overview tree omits folders without sessions", () => {
+  assert.deepEqual(buildOverviewTree([]), []);
 });
 
 test("overview groups provider worktrees by their owning project", () => {
@@ -1335,7 +1329,7 @@ test("overview creates a provider-owned session from its prompt composer", async
   };
   const running = runOverview({ bridge, workspace, defaultCwd: "/work/new", inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
   await new Promise((resolve) => setImmediate(resolve));
-  assert.match(plain(output.writes.at(-1)), /▾\s+new.*0 sessions/);
+  assert.doesNotMatch(plain(output.writes.at(-1)), /0 sessions/);
 
   input.emit("keypress", "n", { name: "n", sequence: "n" });
   assert.doesNotMatch(plain(output.writes.at(-1)), /새 세션 생성/);

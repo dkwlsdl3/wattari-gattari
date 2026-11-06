@@ -50,6 +50,11 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   fs.writeFileSync(serverConfig, `Port ${port}\nListenAddress 127.0.0.1\nHostKey ${root}/server-key\nPidFile ${root}/sshd.pid\nAuthorizedKeysFile ${root}/client-key.pub\nStrictModes no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nUsePAM no\nAllowUsers ${os.userInfo().username}\nLogLevel ERROR\n`);
   await exec("/usr/sbin/sshd", ["-t", "-f", serverConfig]);
   sshd = spawn("/usr/sbin/sshd", ["-D", "-f", serverConfig, "-E", path.join(root, "sshd.log")], { stdio: "ignore" });
+  await until(() => new Promise(resolve => {
+    const socket = net.createConnection({ host: '127.0.0.1', port });
+    socket.once('connect', () => { socket.end(); resolve(true); });
+    socket.once('error', () => resolve(false));
+  }), true, 'disposable SSH server is listening');
   const publicKey = fs.readFileSync(`${root}/server-key.pub`, "utf8");
   fs.writeFileSync(path.join(root, "known_hosts"), `waga-proof-global ${publicKey}`);
   const clientConfig = path.join(root, "ssh.conf");
@@ -86,6 +91,10 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
     const bridge = {discover: async () => {
       if(process.argv[2] === 'overview') fs.writeFileSync(${JSON.stringify(root)} + '/' + side + '-view.json', JSON.stringify({view:process.env.WAGA_TMUX_SESSION}));
       return {sessions: side === 'remote' ? [${JSON.stringify(session)},${JSON.stringify(sibling)}] : [], warnings: []};
+    }, create: async (provider,prompt,options) => {
+      if(side!=='remote') throw Error('creation reached the wrong PC');
+      fs.writeFileSync(${JSON.stringify(path.join(root, 'created.json'))},JSON.stringify({side,provider,prompt,cwd:options.cwd,routing:options.routing}));
+      return {provider,nativeId:'waga-proof-created'};
     }, result: async requestId => ({requestId, target:${JSON.stringify(session.id)}, state:'replied', reply:'waga-proof-reply'})};
     const delivery = {enqueue: async (target,payload,options) => {
       fs.writeFileSync(${JSON.stringify(path.join(root, "message.json"))},JSON.stringify({target,payload,kind:options.kind}));
@@ -184,6 +193,23 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   await until(() => view("remote") !== firstView, true, "remote Dock can reopen");
   await until(() => call(remoteSocket, "display-message", "-p", "-t", view("remote"), "#{@waga_session_id}"), session.id, "saved remote selection opens the original session");
   assert.equal(await call(remoteSocket, "display-message", "-p", "-t", nativeTarget, "#{pane_pid}"), nativePid);
+  client.write('\x1bg');
+  await until(() => call(localSocket, 'display-message', '-p', '-t', view('local'), '#{window_name}'), 'overview', 'return before creating a remote session');
+  client.write('\x1b[A\x1b[A'); // Selected session -> its project -> the remote PC header.
+  const beforeCreateView = view('remote');
+  client.write('\x1bd');
+  await until(() => view('remote') !== beforeCreateView, true, 'Alt+D opens the remote composer');
+  const canceledView = view('remote');
+  client.write('\x1b');
+  await until(() => call(localSocket, 'display-message', '-p', '-t', view('local'), '#{window_name}'), 'overview', 'Escape cancels the remote composer and returns to the originating Dock');
+  assert.equal(fs.existsSync(path.join(root, 'created.json')), false);
+  client.write('\x1bd');
+  await until(() => view('remote') !== canceledView, true, 'Alt+D opens a fresh composer after cancellation');
+  client.write('waga-proof-create-prompt\r');
+  await until(() => fs.existsSync(path.join(root, 'created.json')), true, 'the prompt directly creates on the owning PC without another Alt+D');
+  const created = JSON.parse(fs.readFileSync(path.join(root, 'created.json'), 'utf8'));
+  assert.equal(created.side, 'remote'); assert.equal(created.prompt, 'waga-proof-create-prompt'); assert.equal(created.cwd, root);
+  assert.match(created.routing.reasons[0], /조회 생략/);
   const exited = new Promise(resolve => client.onExit(resolve)); client.kill(); await exited;
   await until(() => call(remoteSocket, "display-message", "-p", "-t", nativeTarget, "#{session_attached}"), "0", "SSH disconnect detaches its native view");
   assert.equal(await call(remoteSocket, "display-message", "-p", "-t", nativeTarget, "#{pane_pid}"), nativePid);

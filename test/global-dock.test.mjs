@@ -108,7 +108,7 @@ test('startup combines PCs and Tab and Shift+Tab independently wrap PC and provi
 test('same canonical ID and cwd on two PCs open their own session and remote management never uses the local bridge', async t => {
   const session = { id: 'codex:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', nativeId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', provider: 'codex', cwd: '/same/project', name: 'same' };
   let openSession = true;
-  const globalDock = new GlobalDock(config, { query: async () => ({ sessions: [session], warnings: [], openSession }) });
+  const globalDock = new GlobalDock(config, { query: async () => ({ sessions: [session], warnings: [], openSession, createSession: true }) });
   const local = [], remote = [], previews = [];
   const f = dockFixture(t, { globalDock, previewDebounceMs: 0,
     bridge: { discover: async () => ({ sessions: [session], warnings: [] }), preview: async target => { previews.push(target); return {}; },
@@ -141,7 +141,7 @@ test('remote target opens once by exact canonical ID without selecting a PC or s
   assert.deepEqual(opened, ['codex:local']);
 });
 
-test('first connection keeps the account editable on failure, then registers and opens only that PC', async t => {
+test('first connection keeps the account editable on failure, then registers and selects that PC in the unified Dock', async t => {
   const candidate = { ...config.hosts[0], discovered: true };
   const opened = [], accounts = [], updates = [];
   let fail = true, frame = '';
@@ -153,23 +153,25 @@ test('first connection keeps the account editable on failure, then registers and
   } });
   const output = Object.assign(new EventEmitter(), { isTTY: true, columns: 120, rows: 30, write(text) { frame = text; } });
   const f = dockFixture(t, { globalDock: dock, outputStream: output, hostUpdater: async hosts => { updates.push(hosts); return []; }, workspace: { openRemoteHost: async host => { opened.push(host); } } });
-  await setImmediate(); await f.press('return'); await f.press('down'); await f.press('return');
+  await setImmediate(); assert.doesNotMatch(stripVTControlCharacters(frame), /Home/);
+  await f.press('p', '', { meta: true }); await f.press('down'); await f.press('return');
   assert.match(frame, /SSH 계정/);
   await f.press('u', 'ubuntu'); await f.press('return');
   assert.match(frame, /SSH refused/); assert.match(frame, /ubuntu/);
   assert.deepEqual(opened, []); assert.deepEqual(updates, []);
   fail = false; await f.press('return');
   assert.deepEqual(accounts, ['ubuntu', 'ubuntu']);
-  assert.equal(opened.length, 1); assert.equal(opened[0].id, 'home'); assert.equal(opened[0].ssh, 'ubuntu@home-box');
+  assert.equal(opened.length, 0); assert.match(stripVTControlCharacters(frame), /\[Home\]/);
+  assert.equal(dock.config.hosts[0].ssh, 'ubuntu@home-box');
 });
 
 test('automatic discovery failure preserves known PCs, and offline candidates never start SSH or updates', async t => {
   const known = config.hosts[0], offline = { id: 'off', name: 'Off', ssh: 'off', command: 'waga', discovered: true, online: false };
   const queries = [];
-  let fail = false;
+  let fail = false, unavailable = false;
   const dock = new GlobalDock({ ...config, hosts: [known] }, {
     discover: async current => { if (fail) throw Error('Tailscale stopped'); return { ...current, hosts: [known, offline] }; },
-    query: async host => { queries.push(host.id); return { sessions: [], warnings: [] }; },
+    query: async host => { queries.push(host.id); if (unavailable) throw Error('SSH refused'); return { sessions: [], warnings: [] }; },
     connect: async () => { throw Error('must not connect offline'); },
   });
   await dock.refresh(); fail = true; await dock.refresh(() => {}, { force: true });
@@ -177,11 +179,16 @@ test('automatic discovery failure preserves known PCs, and offline candidates ne
   assert.equal(dock.states.get('off').status, 'offline'); assert.match(dock.discoveryError, /Tailscale stopped/);
   const updates = [];
   const f = dockFixture(t, { globalDock: dock, workspace: {}, hostUpdater: async hosts => { updates.push(hosts.map(row => row.id)); return []; } });
-  await setImmediate(); await f.press('return'); await f.press('u', 'U', { shift: true });
+  await setImmediate(); assert.doesNotMatch(f.frame(), /\bOff\b/);
+  await f.press('p', '', { meta: true }); assert.match(f.frame(), /\bOff\b/);
+  await f.press('u', 'U', { shift: true });
   assert.deepEqual(updates, [['home']]);
+  await f.press('escape'); unavailable = true; await dock.refresh(); await f.press('tab');
+  assert.doesNotMatch(f.frame(), /Home|\bOff\b/);
+  await f.press('p', '', { meta: true }); assert.match(f.frame(), /Home/); assert.match(f.frame(), /\bOff\b/);
 });
 
-test('selecting a PC during automatic connection cannot start a competing account attempt', async t => {
+test('discovered PCs require an explicit account and repeated Enter cannot submit a second connection', async t => {
   const host = { ...config.hosts[0], discovered: true };
   let finish, frame = '', calls = 0;
   const opened = [];
@@ -189,10 +196,11 @@ test('selecting a PC during automatic connection cannot start a competing accoun
   const output = Object.assign(new EventEmitter(), { isTTY: true, columns: 120, rows: 30, write(text) { frame = text; } });
   const f = dockFixture(t, { globalDock: dock, outputStream: output, workspace: { openRemoteHost: async ready => { opened.push(ready.id); } } });
   await setImmediate(); await f.press('return'); await f.press('down'); await f.press('return');
-  assert.doesNotMatch(frame, /SSH 계정/);
+  assert.equal(calls, 0); assert.match(frame, /SSH 계정/);
+  await f.press('u', 'ubuntu'); await f.press('return'); await f.press('return');
+  assert.equal(calls, 1);
   finish({ host: { ...host, discovered: false }, summary: { sessions: [], warnings: [] } }); await setImmediate();
-  await f.press('return');
-  assert.equal(calls, 1); assert.deepEqual(opened, ['home']);
+  assert.equal(calls, 1); assert.deepEqual(opened, []); assert.match(stripVTControlCharacters(frame), /\[Home\]/);
 });
 
 test("PC switching preserves local session selection and global search never becomes local native input", async t => {

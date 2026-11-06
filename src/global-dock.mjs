@@ -71,18 +71,12 @@ export class GlobalDock {
         catch (error) { this.discoveryError = `PC 자동 탐색: ${error.message}`; }
         changed();
       }
-      if (force) for (const state of this.states.values()) if (state.status === 'setup') state.attempted = false;
       await Promise.all(this.config.hosts.map(async host => {
         if (!this.states.has(host.id)) this.states.set(host.id, { status: 'unknown', summary: null });
         const previous = this.states.get(host.id);
         if (host.online === false) { this.states.set(host.id, { ...previous, status: 'offline' }); changed(); return; }
         if (host.discovered) {
-          if (!previous.attempted && this.connector) {
-            this.states.set(host.id, { ...previous, status: 'connecting', attempted: true }); changed();
-            try { await this.connect(host.id); }
-            catch (error) { this.states.set(host.id, { ...previous, status: 'setup', attempted: true, error: error.stderr?.trim() || error.message }); }
-            changed();
-          }
+          this.states.set(host.id, { ...previous, status: 'setup' }); changed();
           return;
         }
         try {
