@@ -10,6 +10,7 @@ import {
   applyOverviewOrder,
   buildOverviewFrame,
   buildOverviewTree,
+  groupOverviewStatus,
   formatClaudeUsage,
   formatCodexUsage,
   moveOverviewSession,
@@ -92,6 +93,72 @@ function pressAlt(input, name) {
 
 test("overview preserves supplied session order instead of sorting by status", () => {
   assert.deepEqual(selectOverviewSessions(sessions).map((session) => session.id), ["codex:1", "claude:2", "codex:3"]);
+});
+
+test("status groups have fixed order, omit empty groups and retain workspace/manual order", () => {
+  const rows = ['idle', 'working', 'needs-input', 'error', 'done', 'unavailable', 'unknown', 'idle']
+    .map((status, index) => ({ ...sessions[0], id: `codex:${index}`, status, cwd: index === 7 ? '/other' : '/shared', updatedAt: 100 - index }));
+  const nodes = groupOverviewStatus(buildOverviewTree(rows));
+  assert.deepEqual(nodes.filter(node => node.type === 'status').map(node => node.status),
+    ['needs-input', 'error', 'working', 'idle', 'done', 'unavailable']);
+  assert.deepEqual(nodes.filter(node => node.session).map(node => node.session.id),
+    ['codex:2', 'codex:3', 'codex:1', 'codex:0', 'codex:7', 'codex:4', 'codex:5', 'codex:6']);
+  assert.deepEqual(groupOverviewStatus(buildOverviewTree([rows[0]])).map(node => node.type), ['status', 'session']);
+  assert.deepEqual(groupOverviewStatus([]), []);
+});
+
+test("compact status rows show ID before provider and selected context and full ID below", () => {
+  const session = { ...sessions[0], id: 'codex:12345678-aaaa-bbbb-cccc-123456789012', cwd: '/work/project', name: 'Selected' };
+  const frame = plain(buildOverviewFrame({ sessions: [session], viewMode: 'status', selected: 1, width: 60, height: 24, hostLabel: 'Work' }));
+  assert.match(frame, /\[12345678\] CODEX\s+Selected/);
+  assert.match(frame, /Work \/ \/work\/project/);
+  assert.match(frame, /codex:12345678-aaaa-bbbb-cccc-123456789012/);
+  assert.doesNotMatch(frame, /▾|▸/);
+  assert.ok(frame.split('\n').every(line => [...line].length <= 60));
+});
+
+test("status toggle ignores editors, preserves regrouped selection and reveals its tree parent", async () => {
+  const input = ttyInput(), output = capturedOutput();
+  let rows = [{ ...sessions[0], name: 'Chosen' }, { ...sessions[1], name: 'Other' }];
+  let saves = 0, opens = 0;
+  runOverview({ bridge: { discover: async () => ({ sessions: rows, warnings: [] }) },
+    workspace: { focusOrOpen: async () => { opens++; } }, commandFor: () => ({}),
+    orderStore: { load: () => new Map(), saveWorkspace() { saves++; } },
+    settingsStore: { load: () => ({ providers: defaultProviderExecutionSettings() }) },
+    inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
+  await waitFor(() => plain(output.writes.at(-1)).includes('Chosen'));
+  input.emit('keypress', '', { name: 'return' }); // Collapse the initial workspace.
+  pressAlt(input, 'v');
+  assert.match(plain(output.writes.at(-1)), /Chosen/);
+  // Select the target through the Dock, then keep it selected through regrouping.
+  for (let i = 0; i < 8 && selectedSessionName(output) !== 'Chosen'; i++) input.emit('keypress', '', { name: 'down' });
+  assert.equal(selectedSessionName(output), 'Chosen');
+  input.emit('keypress', '', { name: 'up', shift: true });
+  assert.equal(saves, 0);
+  rows = rows.map(row => row.name === 'Chosen' ? { ...row, status: 'needs-input' } : row);
+  pressAlt(input, 'r');
+  await waitFor(() => plain(output.writes.at(-1)).includes('입력 필요'));
+  assert.equal(selectedSessionName(output), 'Chosen');
+  pressAlt(input, 'v');
+  assert.equal(selectedSessionName(output), 'Chosen');
+  input.emit('keypress', '/', { sequence: '/' });
+  pressAlt(input, 'v');
+  assert.match(plain(output.writes.at(-1)), /\[폴더 트리\]/);
+  input.emit('keypress', '', { name: 'escape' });
+  pressAlt(input, 'n'); pressAlt(input, 'v');
+  assert.match(plain(output.writes.at(-1)), /\[폴더 트리\]/);
+  input.emit('keypress', '', { name: 'escape' });
+  pressAlt(input, 's');
+  assert.match(plain(output.writes.at(-1)), /실행 설정/);
+  pressAlt(input, 'v');
+  input.emit('keypress', '', { name: 'escape' });
+  assert.match(plain(output.writes.at(-1)), /\[폴더 트리\]/);
+  input.emit('keypress', '', { name: 'down' });
+  input.emit('keypress', '', { name: 'f2' });
+  assert.match(plain(output.writes.at(-1)), /세션 이름 변경/);
+  pressAlt(input, 'v');
+  assert.match(plain(output.writes.at(-1)), /\[폴더 트리\]/);
+  assert.equal(opens, 0);
 });
 
 test("overview does not silently hide sessions beyond the first forty", () => {
@@ -581,6 +648,8 @@ test("Korean Alt input opens and controls the composer when ESC plus jamo reache
   const running = runOverview({ bridge, workspace: {}, inputStream: input, outputStream: output, refreshMs: 60_000, listenForSignals: false });
   try {
     await new Promise((resolve) => setImmediate(resolve));
+    input.write("\x1bㅍ"); // Alt+V in a Korean two-set layout.
+    await waitFor(() => /\[상태별\]/.test(plain(output.writes.at(-1))));
     input.write("\x1bㅜ"); // Alt+N in a Korean two-set layout.
     await waitFor(() => /새 세션 생성/.test(plain(output.writes.at(-1))));
     input.write("\x1bㅇ"); // Alt+D toggles provider defaults in the composer.

@@ -236,6 +236,7 @@ version 1 Codex 전환 설정은 읽을 때 provider 설정으로 변환되며, 
 | 세션에서 `F4` | 네이티브 TUI 강제 재접속 |
 | `/` | 세션 검색 |
 | `Tab` / `Shift+Tab` | PC 순환 / 전체 → Codex → Claude 순환 |
+| `Alt+V` | 트리 / 상태 보기 전환 (일반 Dock에서만, PC·제공자 필터 유지) |
 | `F2` | 선택한 세션 이름 변경 |
 | `Alt+N` / `Alt+R` | 새 세션 / 새로고침 |
 | `Alt+D` | local-llm-router를 거치지 않는 provider 기본값 새 세션 (편집 중 `Alt+D`로 전환) |

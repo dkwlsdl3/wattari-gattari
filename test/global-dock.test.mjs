@@ -105,6 +105,42 @@ test('startup combines PCs and Tab and Shift+Tab independently wrap PC and provi
   for (const session of [...local, ...remote]) assert.match(f.frame(), new RegExp(session.name));
 });
 
+test('status mode retains host identity, filters and native Enter/F4 ownership', async t => {
+  const session = { id: 'codex:same-canonical-id', provider: 'codex', cwd: '/same/project', name: 'Shared', status: 'idle' };
+  const local = [], remote = [];
+  let remoteStatus = 'idle';
+  const globalDock = new GlobalDock(config, { query: async () => ({ sessions: [{ ...session, status: remoteStatus }], warnings: [], openSession: true }) });
+  const f = dockFixture(t, { globalDock,
+    bridge: { discover: async () => ({ sessions: [session], warnings: [] }) },
+    commandFor: target => { local.push(target.id); return {}; },
+    workspace: { focusOrOpen: async () => {}, openRemoteHost: async (host, spec) => { remote.push({ host: host.id, spec }); } } });
+  await setImmediate();
+  await f.press('v', '', { meta: true });
+  assert.doesNotMatch(f.frame(), /▾|▸|━━ \[PC\]/);
+  assert.equal((f.frame().match(/Shared/g) ?? []).length, 2);
+  await f.press('return'); // A group header must not launch a session.
+  await f.press('f4');
+  assert.deepEqual(local, []); assert.deepEqual(remote, []);
+  await f.press('tab'); // Current PC, first session.
+  await f.press('tab', '', { shift: true }); // Codex filter.
+  await f.press('return');
+  assert.deepEqual(local, [session.id]);
+  await f.press('tab'); // Remote PC, same canonical ID.
+  await f.press('v', '', { meta: true });
+  assert.match(f.frame(), /\[Home\]/); assert.match(f.frame(), /제공자: CODEX/);
+  await f.press('v', '', { meta: true });
+  remoteStatus = 'needs-input';
+  await globalDock.refresh();
+  // Repaint after regrouping without choosing another row.
+  await f.press('left'); // No tree parent in status mode.
+  assert.match(f.frame(), /입력 필요/);
+  await f.press('return'); await f.press('f4');
+  assert.equal(remote.length, 2);
+  assert.ok(remote.every(row => row.host === 'home' && row.spec.sessionId === session.id));
+  assert.equal(remote[1].spec.force, true);
+  assert.deepEqual(local, [session.id]);
+});
+
 test('same canonical ID and cwd on two PCs open their own session and remote management never uses the local bridge', async t => {
   const session = { id: 'codex:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', nativeId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', provider: 'codex', cwd: '/same/project', name: 'same' };
   let openSession = true;

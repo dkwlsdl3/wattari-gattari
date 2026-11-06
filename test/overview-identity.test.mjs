@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { stripVTControlCharacters } from "node:util";
+import headless from "@xterm/headless";
 import { buildOverviewFrame } from "../src/overview.mjs";
 
 const sessions = [
@@ -8,6 +9,21 @@ const sessions = [
   { provider: "claude", kind: "background", id: "claude:12345678-bbbb-4000-8000-000000000002", nativeId: "short-command", name: "Background", status: "working", cwd: "/work" },
   { provider: "codex", id: "codex:12345678-aaaa-4000-8000-000000000003", name: "Codex", status: "idle", cwd: "/work" },
 ];
+
+test("status rows fit real terminal cells and keep the project visible for long paths", async () => {
+  const session = { ...sessions[2], name: "긴 세션 이름 ".repeat(8), cwd: "/home/ubuntu/Projects/keeper" };
+  for (const width of [40, 80, 150]) {
+    const frame = buildOverviewFrame({ sessions: [session], viewMode: "status", selected: 1,
+      hostLabel: "oracle-vm", width, height: 30 });
+    const terminal = new headless.Terminal({ cols: width, rows: 30, convertEol: true, allowProposedApi: true });
+    try {
+      await new Promise(resolve => terminal.write(frame, resolve));
+      assert.equal(terminal.buffer.active.baseY, 0, "the frame must not push content into scrollback");
+      for (let row = 0; row < 30; row++) assert.equal(terminal.buffer.active.getLine(row).isWrapped, false, `unexpected wrap at ${width} columns, row ${row}`);
+      assert.match(stripVTControlCharacters(frame), width >= 80 ? /oracle-vm \/ keeper/ : /oracle-vm \/ \/home\/ubuntu\/Projects/);
+    } finally { terminal.dispose(); }
+  }
+});
 
 function render(rows = sessions, options = {}) {
   return stripVTControlCharacters(buildOverviewFrame({

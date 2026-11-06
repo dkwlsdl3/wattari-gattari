@@ -238,6 +238,7 @@ No model calls or additional transcript files are created.
 | `F4` on a session | Force a native TUI reattach |
 | `/` | Search sessions |
 | `Tab` / `Shift+Tab` | Cycle PCs / cycle All → Codex → Claude |
+| `Alt+V` | Toggle Tree / Status view (ordinary Dock only; PC/provider filters stay active) |
 | `F2` | Rename the selected session |
 | `Alt+N` / `Alt+R` | New session / refresh |
 | `Alt+D` | New session with provider defaults, skipping local-llm-router (`Alt+D` toggles it while composing) |

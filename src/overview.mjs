@@ -28,6 +28,7 @@ const ESC = "\x1b[";
 const KOREAN_META_KEYS = new Map([
   ["ㅁ", "a"], ["ㅇ", "d"], ["ㅎ", "g"], ["ㅜ", "n"], ["ㅔ", "p"],
   ["ㅂ", "q"], ["ㄱ", "r"], ["ㄴ", "s"], ["ㅌ", "x"], ["ㅛ", "y"],
+  ["ㅍ", "v"],
 ]);
 const RESET = `${ESC}0m`;
 const BRACKETED_PASTE_ON = `${ESC}?2004h`;
@@ -335,6 +336,17 @@ export function buildOverviewTree(sessions, { collapsed = new Set(), query = "" 
   return nodes;
 }
 
+export function groupOverviewStatus(nodes) {
+  const groups = [["needs-input", "입력 필요"], ["error", "오류"], ["working", "작업 중"],
+    ["idle", "대기"], ["done", "완료"], ["unavailable", "확인 불가"]];
+  const known = new Set(groups.map(([status]) => status));
+  return groups.flatMap(([status, name]) => {
+    const entries = nodes.filter(node => node.type === "session"
+      && (known.has(node.session.status) ? node.session.status : "unavailable") === status);
+    return entries.length ? [{ type: "status", key: `status:${status}`, status, name, sessionCount: entries.length }, ...entries] : [];
+  });
+}
+
 function statusView(status) {
   if (status === "needs-input") return ["!", "needs input", THEME.needsInput];
   if (status === "working") return ["●", "working", THEME.working];
@@ -596,7 +608,7 @@ function previewLines(session, preview, width, height, outputOffset = 0) {
   return lines;
 }
 
-export function buildOverviewFrame({ sessions, hostLabel = null, pcTabs = null, collapsed = new Set(), query = "", nodes = buildOverviewTree(sessions, { collapsed, query }), selected = 0, width = 100, height = 30, warnings = [], provider = null, providerUsage = {}, notice = "", newTask = null, renameTask = null, preview = null, previewOutputOffset = 0, nativeHint = nativeReturnHint(null), codexExecutionMode = CODEX_EXECUTION_MODES.DEFAULT, providerSettings = defaultProviderExecutionSettings(), settingsPanel = null }) {
+export function buildOverviewFrame({ sessions, viewMode = "tree", hostLabel = null, pcTabs = null, collapsed = new Set(), query = "", nodes = viewMode === "status" ? groupOverviewStatus(buildOverviewTree(sessions)) : buildOverviewTree(sessions, { collapsed, query }), selected = 0, width = 100, height = 30, warnings = [], provider = null, providerUsage = {}, notice = "", newTask = null, renameTask = null, preview = null, previewOutputOffset = 0, nativeHint = nativeReturnHint(null), codexExecutionMode = CODEX_EXECUTION_MODES.DEFAULT, providerSettings = defaultProviderExecutionSettings(), settingsPanel = null }) {
   if (settingsPanel) return buildSettingsFrame({ settingsPanel, hostLabel, width, height, notice });
   const usableWidth = Math.max(1, width - 4);
   const split = hasOverviewPreview(width, height);
@@ -608,15 +620,25 @@ export function buildOverviewFrame({ sessions, hostLabel = null, pcTabs = null, 
   const editorHeight = newTask ? Math.min(5, String(newTask.prompt).split("\n").length) : 1;
   const safeSelected = Math.max(0, Math.min(selected, Math.max(0, nodes.length - 1)));
   const selectedSession = nodes[safeSelected]?.session;
+  const context = (node, fullPath = false) => {
+    const cwd = node?.cwd ?? sessionWorkspace(node?.session ?? {});
+    return `${node?.host?.name ?? node?.session?.hostName ?? hostLabel ?? "현재 PC"} / ${fullPath ? cwd : path.basename(cwd) || cwd}`;
+  };
   const identityLines = !newTask && !renameTask && selectedSession
-    ? wrapPreviewLines(safeText(selectedSession.id), usableWidth) : [];
+    ? [...(viewMode === "status" && listWidth < 64 ? [fit(context(nodes[safeSelected], true), usableWidth)] : []), ...wrapPreviewLines(safeText(selectedSession.id), usableWidth)] : [];
   const visibleRows = Math.max(1, height - (usageLabels.length ? 10 : 9) - (pcTabs ? 1 : 0) - identityLines.length - (newTask ? editorHeight + 3 : 0));
   const offset = Math.max(0, Math.min(safeSelected - Math.floor(visibleRows / 2), Math.max(0, nodes.length - visibleRows)));
   const wide = listWidth >= 64;
-  const nameWidth = wide ? Math.max(12, listWidth - 31) : Math.max(1, listWidth - 22);
+  const contextWidth = viewMode === "status" && wide ? Math.min(32, Math.floor(listWidth * 0.32)) : 0;
+  const nameWidth = viewMode === "status" ? Math.max(1, listWidth - 14 - (contextWidth ? contextWidth + 3 : 0))
+    : wide ? Math.max(12, listWidth - 31) : Math.max(1, listWidth - 22);
   const lines = [];
   const title = wide ? "WATTARI GATTARI  Claude + Codex session dock" : "WAGA · session dock";
-  lines.push(`  ${color(THEME.title, fit(hostLabel ? `PC: ${hostLabel} · ${title}` : title, usableWidth))}`);
+  const viewTabs = usableWidth < 32
+    ? color(THEME.tabActive, fit(`${viewMode === "tree" ? "[폴더 트리]" : "[상태별]"} Alt+V`, usableWidth))
+    : `${color(viewMode === "tree" ? THEME.tabActive : THEME.muted, viewMode === "tree" ? " [폴더 트리] " : " 폴더 트리 ")} ${color(viewMode === "status" ? THEME.tabActive : THEME.muted, viewMode === "status" ? " [상태별] " : " 상태별 ")} ${color(THEME.muted, "Alt+V")}`;
+  const titleWidth = Math.max(0, usableWidth - widthOf(stripVTControlCharacters(viewTabs)) - 2);
+  lines.push(`  ${color(THEME.title, fit(hostLabel ? `PC: ${hostLabel} · ${title}` : title, titleWidth))}${titleWidth ? "  " : ""}${viewTabs}`);
   if (pcTabs) {
     const labels = pcTabs.items.map(host => ({ id: host.id, text: host.id === pcTabs.selectedId ? `[${safeText(host.name)}]` : safeText(host.name) }));
     const current = labels.findIndex(host => host.id === pcTabs.selectedId);
@@ -647,6 +669,13 @@ export function buildOverviewFrame({ sessions, hostLabel = null, pcTabs = null, 
     const node = nodes[index];
     const active = index === safeSelected;
     const marker = active ? color(THEME.cursor, "›") : " ";
+    if (node.type === "status") {
+      const [symbol, , ink] = statusView(node.status);
+      const label = `${active ? "›" : " "} ━━ ${symbol} ${node.name} · ${node.sessionCount} `;
+      const title = fit(label, Math.min(widthOf(label), listWidth));
+      lines.push(color(`${active ? THEME.selected : '48;2;30;41;59'};${ink}`, `${title}${"─".repeat(Math.max(0, listWidth - widthOf(title)))}`));
+      continue;
+    }
     if (node.type === 'host') {
       const label = `${active ? '›' : ' '} ━━ ${safeText(node.name)} `;
       const title = fit(label, Math.min(widthOf(label), listWidth));
@@ -683,14 +712,15 @@ export function buildOverviewFrame({ sessions, hostLabel = null, pcTabs = null, 
       while (common < nativeId.length && common < otherId.length && nativeId[common] === otherId[common]) common++;
       prefixLength = Math.max(prefixLength, Math.min(nativeId.length, common + 1));
     }
-    const label = `[${nativeId.slice(0, prefixLength)}] `;
+    const label = `[${nativeId.slice(0, viewMode === "status" ? Math.min(prefixLength, Math.max(1, nameWidth - 3)) : prefixLength)}] `;
     const labelWidth = widthOf(label);
-    const showLabel = nameWidth - labelWidth >= 12;
+    const showLabel = viewMode === "status" || nameWidth - labelWidth >= 12;
     const idCell = showLabel ? color(THEME.muted, label) : "";
     const nameCell = fit(displayName, nameWidth - (showLabel ? labelWidth : 0));
-    const row = wide
-      ? `${marker}   ${color(statusColor, symbol)} ${idCell}${color(providerColor, providerName)}  ${nameCell}  ${color(statusColor, fit(status, 11))}`
-      : `${marker}   ${color(statusColor, symbol)} ${idCell}${color(providerColor, providerName)} ${nameCell} ${color(statusColor, fit(status, 8))}`;
+    const rowStart = `${marker}   ${color(statusColor, symbol)} ${idCell}${color(providerColor, providerName)}${wide || viewMode === "status" ? "  " : " "}${nameCell}`;
+    const row = viewMode === "status"
+      ? `${rowStart}${contextWidth ? ` │ ${color(THEME.muted, fit(context(node), contextWidth))}` : ""}`
+      : `${rowStart}${wide ? "  " : " "}${color(statusColor, fit(status, wide ? 11 : 8))}`;
     lines.push(active ? `${ESC}${THEME.selected}m${row}${RESET}` : row);
   }
   if (split) {
@@ -799,6 +829,7 @@ export async function runOverview({
   let globalVisible = false;
   const integrated = Boolean(globalDock && !remoteHost);
   let pcFilter = null;
+  let viewMode = 'tree';
   const pcSelections = new Map();
   let globalQuery = "";
   let globalSearching = false;
@@ -807,7 +838,10 @@ export async function runOverview({
   const hostRow = globalDock || remoteHost ? [{ type: "hosts", key: "global:hosts", name: remoteHost ? "← 전체 PC 통합 Dock · Tab / Alt+G" : integrated ? "PC 연결 설정" : "↑ PC 목록으로" }] : [];
   const sessionKey = session => session.hostId ? `remote:${session.hostId}:${session.id}` : session.id;
   const tree = sessions => {
-    if (!integrated) return [...hostRow, ...buildOverviewTree(sessions, { collapsed, query })];
+    if (!integrated) {
+      const entries = buildOverviewTree(sessions, { collapsed: viewMode === 'status' ? new Set() : collapsed, query });
+      return viewMode === 'status' ? groupOverviewStatus(entries) : [...hostRow, ...entries];
+    }
     const nodes = [...hostRow];
     for (const host of connectedHosts()) {
       if (pcFilter && host.id !== pcFilter) continue;
@@ -818,13 +852,13 @@ export async function runOverview({
       const projects = buildOverviewTree(entries, { query });
       for (const node of projects) {
         const collapseKey = host.local ? node.cwd : `remote:${host.id}:${node.cwd}`;
-        if (node.type === 'session' && collapsed.has(collapseKey) && !query) continue;
+        if (viewMode !== 'status' && node.type === 'session' && collapsed.has(collapseKey) && !query) continue;
         nodes.push({ ...node, host, collapseKey,
           key: node.type === 'session' ? sessionKey(node.session) : host.local ? node.key : `remote:${host.id}:${node.key}`,
           ...(node.workspaceKey ? { workspaceKey: host.local ? node.workspaceKey : `remote:${host.id}:${node.workspaceKey}` } : {}) });
       }
     }
-    return nodes;
+    return viewMode === 'status' ? groupOverviewStatus(nodes) : nodes;
   };
   let warnings = [];
   let missingSessionCounts = new Map();
@@ -988,6 +1022,7 @@ export async function runOverview({
     previewReader.select(typeof bridge.preview === "function" && !previewSession?.hostId ? previewSession : null);
     outputStream.write(`${ESC}H${ESC}J${buildOverviewFrame({
       sessions,
+      viewMode,
       hostLabel: integrated ? pcFilter ? globalDock.rows().find(host => host.id === pcFilter)?.name : '전체 PC 통합 Dock' : remoteHost ? `${remoteHost} · 원격 관리` : hosts?.local.name,
       pcTabs: integrated ? { items: [{ id: null, name: '전체 PC' }, ...connectedHosts()], selectedId: pcFilter }
         : remoteHost ? { items: [{ id: null, name: '전체 PC' }, { id: remoteHost, name: remoteHost }], selectedId: remoteHost } : null,
@@ -1737,6 +1772,18 @@ export async function runOverview({
     const nodes = visibleNodes();
     reconcileSelection(nodes);
     const owner = nodes[selected]?.host ?? (pcFilter ? globalDock?.rows().find(host => host.id === pcFilter) : null);
+    if (key.meta && key.name === 'v' && !nativeOpen) {
+      const target = nodes[selected]?.session ? nodes[selected] : nodes.find(node => node.key === lastContentKey);
+      viewMode = viewMode === 'tree' ? 'status' : 'tree';
+      if (target) {
+        selectedKey = target.key;
+        if (viewMode === 'tree') collapsed.delete(target.collapseKey ?? target.cwd);
+      }
+      render(); return;
+    }
+    if (viewMode === 'status' && key.shift && ['up', 'down'].includes(key.name)) {
+      notice = '순서 변경은 폴더 트리 보기에서 실행해 주세요.'; render(); return;
+    }
     if (key.meta && key.name === 'p' && globalDock) {
       globalVisible = true; notice = ''; render(); void refreshHosts(); return;
     }
