@@ -35,6 +35,8 @@ const BRACKETED_PASTE_ON = `${ESC}?2004h`;
 const BRACKETED_PASTE_OFF = `${ESC}?2004l`;
 const ESCAPE_CODE_TIMEOUT_MS = 25;
 const SESSION_REMOVAL_CONFIRMATIONS = 2;
+const WORKING_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const STATUS_LABELS = { "needs-input": "입력 필요", error: "오류", working: "작업 중", idle: "대기", done: "완료", unavailable: "확인 불가" };
 const color = (code, text) => `${ESC}${code}m${text}${RESET}`;
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 const THEME = {
@@ -54,6 +56,7 @@ const THEME = {
   needsInput: "1;31",
   error: "1;38;2;224;154;164",
   warning: "1;38;2;224;190;132",
+  changed: "1;38;2;250;204;21",
   pc: "1;38;2;125;211;252",
   wsl: "1;38;2;94;234;212",
   vm: "1;38;2;196;181;253",
@@ -337,12 +340,9 @@ export function buildOverviewTree(sessions, { collapsed = new Set(), query = "" 
 }
 
 export function groupOverviewStatus(nodes) {
-  const groups = [["needs-input", "입력 필요"], ["error", "오류"], ["working", "작업 중"],
-    ["idle", "대기"], ["done", "완료"], ["unavailable", "확인 불가"]];
-  const known = new Set(groups.map(([status]) => status));
-  return groups.flatMap(([status, name]) => {
+  return Object.entries(STATUS_LABELS).flatMap(([status, name]) => {
     const entries = nodes.filter(node => node.type === "session"
-      && (known.has(node.session.status) ? node.session.status : "unavailable") === status);
+      && (Object.hasOwn(STATUS_LABELS, node.session.status) ? node.session.status : "unavailable") === status);
     return entries.length ? [{ type: "status", key: `status:${status}`, status, name, sessionCount: entries.length }, ...entries] : [];
   });
 }
@@ -608,7 +608,7 @@ function previewLines(session, preview, width, height, outputOffset = 0) {
   return lines;
 }
 
-export function buildOverviewFrame({ sessions, viewMode = "tree", hostLabel = null, pcTabs = null, collapsed = new Set(), query = "", nodes = viewMode === "status" ? groupOverviewStatus(buildOverviewTree(sessions)) : buildOverviewTree(sessions, { collapsed, query }), selected = 0, width = 100, height = 30, warnings = [], provider = null, providerUsage = {}, notice = "", newTask = null, renameTask = null, preview = null, previewOutputOffset = 0, nativeHint = nativeReturnHint(null), codexExecutionMode = CODEX_EXECUTION_MODES.DEFAULT, providerSettings = defaultProviderExecutionSettings(), settingsPanel = null }) {
+export function buildOverviewFrame({ sessions, viewMode = "tree", hostLabel = null, pcTabs = null, collapsed = new Set(), query = "", nodes = viewMode === "status" ? groupOverviewStatus(buildOverviewTree(sessions)) : buildOverviewTree(sessions, { collapsed, query }), selected = 0, width = 100, height = 30, warnings = [], provider = null, providerUsage = {}, notice = "", newTask = null, renameTask = null, preview = null, previewOutputOffset = 0, nativeHint = nativeReturnHint(null), codexExecutionMode = CODEX_EXECUTION_MODES.DEFAULT, providerSettings = defaultProviderExecutionSettings(), settingsPanel = null, now = Date.now(), statusChanges = new Map(), recentChange = null }) {
   if (settingsPanel) return buildSettingsFrame({ settingsPanel, hostLabel, width, height, notice });
   const usableWidth = Math.max(1, width - 4);
   const split = hasOverviewPreview(width, height);
@@ -697,7 +697,10 @@ export function buildOverviewFrame({ sessions, viewMode = "tree", hostLabel = nu
       continue;
     }
     const session = node.session;
-    const [symbol, status, statusColor] = statusView(session.status);
+    const [staticSymbol, status, statusColor] = statusView(session.status);
+    const symbol = session.status === "working" ? WORKING_FRAMES[Math.floor(now / 120) % WORKING_FRAMES.length] : staticSymbol;
+    const changedAt = statusChanges.get(node.key ?? session.id)?.changedAt;
+    const changed = changedAt != null && now >= changedAt && now - changedAt < 1000;
     const providerName = session.provider === "claude" ? "CLAUDE" : "CODEX ";
     const providerColor = session.provider === "claude" ? THEME.claude : THEME.codex;
     const displayName = session.provider === "claude" && session.kind
@@ -717,7 +720,7 @@ export function buildOverviewFrame({ sessions, viewMode = "tree", hostLabel = nu
     const showLabel = viewMode === "status" || nameWidth - labelWidth >= 12;
     const idCell = showLabel ? color(THEME.muted, label) : "";
     const nameCell = fit(displayName, nameWidth - (showLabel ? labelWidth : 0));
-    const rowStart = `${marker}   ${color(statusColor, symbol)} ${idCell}${color(providerColor, providerName)}${wide || viewMode === "status" ? "  " : " "}${nameCell}`;
+    const rowStart = `${marker}   ${color(changed ? THEME.changed : statusColor, symbol)} ${idCell}${color(providerColor, providerName)}${wide || viewMode === "status" ? "  " : " "}${changed ? color(THEME.changed, nameCell) : nameCell}`;
     const row = viewMode === "status"
       ? `${rowStart}${contextWidth ? ` │ ${color(THEME.muted, fit(context(node), contextWidth))}` : ""}`
       : `${rowStart}${wide ? "  " : " "}${color(statusColor, fit(status, wide ? 11 : 8))}`;
@@ -780,7 +783,14 @@ export function buildOverviewFrame({ sessions, viewMode = "tree", hostLabel = nu
     if (warnings.length) lines.push(`  ${color(THEME.warning, fit(`경고: ${safeText(warnings[0].provider)} · ${safeText(warnings[0].message)}`, usableWidth))}`);
     else lines.push(`  ${color(THEME.muted, fit(notice || "세션 상태는 자동으로 새로고침됩니다.", usableWidth))}`);
     for (const help of helpLines) lines.push(`  ${color(THEME.muted, fit(help, usableWidth))}`);
-    lines.push(`  ${color(THEME.muted, fit(nativeHint, usableWidth))}`);
+    if (recentChange) {
+      const { session, hostName, from, to, at } = recentChange;
+      const elapsed = Math.max(0, Math.floor((now - at) / 1000));
+      const delta = `${STATUS_LABELS[from] ?? STATUS_LABELS.unavailable} → ${STATUS_LABELS[to] ?? STATUS_LABELS.unavailable} · ${elapsed}초 전`;
+      const label = `최근 변경: ${hostName} / ${path.basename(sessionWorkspace(session)) || "/"} · ${session.name}`;
+      const labelWidth = Math.max(0, usableWidth - widthOf(delta) - 3);
+      lines.push(`  ${color(THEME.muted, labelWidth ? `${fit(label, labelWidth)} · ${delta}` : fit(delta, usableWidth))}`);
+    } else lines.push(`  ${color(THEME.muted, fit(nativeHint, usableWidth))}`);
     if (query) lines.push(`  ${color(THEME.cursor, fit(`검색: ${query}`, usableWidth))}`);
     else lines.push("");
   }
@@ -817,6 +827,7 @@ export async function runOverview({
   previewDebounceMs = 150,
   previewCacheMs = 5_000,
   listenForSignals = true,
+  now = Date.now,
   nativeHint = nativeReturnHint(process.env.WAGA_TMUX_MODE),
 } = {}) {
   if (!inputStream.isTTY || !outputStream.isTTY) {
@@ -904,6 +915,9 @@ export async function runOverview({
   let closed = false;
   let busy = false;
   let nativeOpen = false;
+  let overviewVisible = true;
+  let statusChanges = new Map();
+  let recentChange = null;
   let settingsPanel = null;
   let pendingArchiveId = null;
   let pendingCreated = null;
@@ -951,11 +965,10 @@ export async function runOverview({
   });
 
   const connectedHosts = () => globalDock.rows(allSessions, warnings, localObserved).filter(host => host.local || ['available', 'partial'].includes(host.status));
+  const observedSessions = () => !integrated ? allSessions : connectedHosts()
+    .flatMap(host => (host.summary?.sessions ?? []).map(session => host.local ? session : { ...session, hostId: host.id, hostName: host.name }));
   const visibleSessions = () => {
-    if (!integrated) return selectOverviewSessions(allSessions, { query, provider });
-    const sessions = connectedHosts()
-      .filter(host => !pcFilter || host.id === pcFilter)
-      .flatMap(host => (host.summary?.sessions ?? []).map(session => host.local ? session : { ...session, hostId: host.id, hostName: host.name }));
+    const sessions = observedSessions().filter(session => !integrated || !pcFilter || (session.hostId ?? globalDock.config.local.id) === pcFilter);
     return selectOverviewSessions(sessions, { query, provider });
   };
   const visibleHosts = () => globalDock.rows(allSessions, warnings, localObserved).filter(row => `${row.name} ${row.id}`.toLowerCase().includes(globalQuery.toLowerCase()));
@@ -993,8 +1006,20 @@ export async function runOverview({
     selected = sessionIndex >= 0 ? sessionIndex : Math.max(0, nodes.findIndex(node => node.type === 'host'));
     selectedKey = nodes[selected]?.key ?? null;
   };
-  const render = () => {
+  const render = (animationFrame = false) => {
     if (closed || nativeOpen) return;
+    if (!animationFrame) {
+      const observedAt = now(), snapshot = new Map();
+      for (const session of observedSessions()) {
+        const key = sessionKey(session), previous = statusChanges.get(key);
+        const changed = previous && previous.status !== session.status;
+        const changedAt = changed ? observedAt : previous?.changedAt ?? null;
+        if (changed) recentChange = { session, from: previous.status, to: session.status, at: observedAt,
+          hostName: session.hostName ?? remoteHost ?? hosts?.local.name ?? "현재 PC" };
+        snapshot.set(key, { status: session.status, changedAt });
+      }
+      statusChanges = snapshot;
+    }
     if (integrated && pcFilter && !connectedHosts().some(host => host.id === pcFilter)) {
       pcFilter = null; selectedKey = null;
     }
@@ -1019,10 +1044,11 @@ export async function runOverview({
       restoredOffset = 0;
       if (nextPreviewSessionKey) lastContentOffset = previewOutputOffset;
     }
-    previewReader.select(typeof bridge.preview === "function" && !previewSession?.hostId ? previewSession : null);
+    if (!animationFrame) previewReader.select(typeof bridge.preview === "function" && !previewSession?.hostId ? previewSession : null);
     outputStream.write(`${ESC}H${ESC}J${buildOverviewFrame({
       sessions,
       viewMode,
+      now: now(), statusChanges, recentChange,
       hostLabel: integrated ? pcFilter ? globalDock.rows().find(host => host.id === pcFilter)?.name : '전체 PC 통합 Dock' : remoteHost ? `${remoteHost} · 원격 관리` : hosts?.local.name,
       pcTabs: integrated ? { items: [{ id: null, name: '전체 PC' }, ...connectedHosts()], selectedId: pcFilter }
         : remoteHost ? { items: [{ id: null, name: '전체 PC' }, { id: remoteHost, name: remoteHost }], selectedId: remoteHost } : null,
@@ -1190,7 +1216,10 @@ export async function runOverview({
     const generation = ++state.generation;
     let renderAfter = false;
     try {
-      if (!force && workspace.shouldRefreshOverview && !await workspace.shouldRefreshOverview()) return;
+      if (!force) {
+        overviewVisible = !workspace.shouldRefreshOverview || await workspace.shouldRefreshOverview();
+        if (!overviewVisible) return;
+      }
       renderAfter = true;
       const discovered = await bridge.discover({
         ...(providerName ? { provider: providerName } : {}),
@@ -1485,6 +1514,7 @@ export async function runOverview({
     notice = force ? `${target.name} 세션에 다시 연결하는 중입니다.` : `${target.name} 세션을 여는 중입니다.`;
     render();
     nativeOpen = true;
+    overviewVisible = false;
     void Promise.resolve().then(() => commandFor(target, { codexExecutionMode }))
       .then((command) => {
         if (!closed) return workspace.focusOrOpen(target, command, {
@@ -1509,6 +1539,7 @@ export async function runOverview({
     if (!workspace.openRemoteHost) { notice = '원격 PC 열기는 tmux backend가 필요합니다. waga --backend tmux를 사용하세요.'; render(); return; }
     busy = true;
     nativeOpen = true;
+    overviewVisible = false;
     try {
       const result = await workspace.openRemoteHost(host, { ...remoteCommand(host, { interactive: true, sessionId, create, force }), sessionId, force });
       if (result?.code) throw Error(`${host.name} SSH 연결 종료: exit ${result.code}`);
@@ -1897,6 +1928,18 @@ export async function runOverview({
     if (newTask?.submitting) render();
     else { void refresh(); if (globalVisible || integrated) void refreshHosts(); void reloadIfReady(); }
   }, refreshMs);
+  let animated = false;
+  const animationTimer = setInterval(() => {
+    if (closed || busy || nativeOpen || !overviewVisible || globalVisible || newTask || renameTask || settingsPanel || searching) { animated = false; return; }
+    const stamp = now();
+    const active = visibleNodes().some(node => {
+      const changedAt = statusChanges.get(node.key)?.changedAt;
+      return node.type === "session" && (node.session.status === "working"
+        || changedAt != null && stamp >= changedAt && stamp - changedAt < 1000);
+    });
+    if (active || animated) render(true);
+    animated = active;
+  }, 120);
   let resolveRun;
   const completed = new Promise((resolve) => { resolveRun = resolve; });
   const cleanup = () => {
@@ -1905,6 +1948,7 @@ export async function runOverview({
     closed = true;
     previewReader.close();
     clearInterval(timer);
+    clearInterval(animationTimer);
     inputStream.off("keypress", onKeypress);
     inputStream.off("end", cleanup);
     inputStream.off("close", cleanup);

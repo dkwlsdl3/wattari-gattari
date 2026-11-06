@@ -18,6 +18,48 @@ function setup(t, options = {}) {
   return { input, output, writes, running, key };
 }
 
+test("animation does not poll providers and pauses in editors, hidden Docks and after cleanup", async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  let now = 0, calls = 0, visible = true, status = 'working';
+  const ui = setup(t, { now: () => now, refreshMs: 600,
+    bridge: { discover: async () => { calls++; return snapshot([{ ...active, status }]); } },
+    workspace: { shouldRefreshOverview: async () => visible } });
+  await tick();
+  assert.doesNotMatch(ui.writes.at(-1), /최근 변경/);
+  const initial = ui.writes.length;
+  now = 120; t.mock.timers.tick(120); await tick();
+  assert.ok(ui.writes.length > initial, 'a visible working row animates');
+  assert.equal(calls, 1, 'painting a frame must not discover sessions');
+  ui.key('n', { meta: true });
+  const editing = ui.writes.length;
+  now = 240; t.mock.timers.tick(120); await tick();
+  assert.equal(ui.writes.length, editing);
+  ui.key('escape');
+  visible = false;
+  now = 600; t.mock.timers.tick(360); await tick();
+  const hidden = ui.writes.length;
+  now = 840; t.mock.timers.tick(240); await tick();
+  assert.equal(ui.writes.length, hidden);
+  assert.equal(calls, 1);
+  visible = true;
+  status = 'idle';
+  now = 1200; t.mock.timers.tick(360); await tick();
+  assert.equal(calls, 2);
+  assert.match(ui.writes.at(-1), /작업 중 → 대기/);
+  now = 1320; t.mock.timers.tick(120); await tick();
+  const highlighted = ui.writes.length;
+  now = 2500; t.mock.timers.tick(120); await tick();
+  assert.equal(ui.writes.length, highlighted + 1, 'one final frame clears expired highlighting');
+  const settled = ui.writes.length;
+  now = 2620; t.mock.timers.tick(120); await tick();
+  assert.equal(ui.writes.length, settled, 'idle rows do not keep repainting');
+  assert.equal(calls, 2);
+  ui.input.emit('end'); await ui.running;
+  const closed = ui.writes.length;
+  now = 1800; t.mock.timers.tick(600); await tick();
+  assert.equal(ui.writes.length, closed);
+});
+
 test("overview can close during initial discovery and ignores its late result", { timeout: 1000 }, async (t) => {
   const pending = deferred();
   let reconciles = 0;
@@ -45,11 +87,12 @@ test("overview cleanup removes process and stream listeners", async (t) => {
 });
 
 test("in-flight discovery and resize never paint over a native TUI", async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
   const pending = deferred();
   const native = deferred();
   let calls = 0;
   const ui = setup(t, {
-    bridge: { discover: async () => ++calls === 2 ? pending.promise : snapshot() },
+    bridge: { discover: async () => ++calls === 2 ? pending.promise : snapshot([{ ...active, status: 'working' }]) },
     commandFor: async () => ({}), workspace: { focusOrOpen: () => native.promise },
   });
   await tick();
@@ -59,6 +102,7 @@ test("in-flight discovery and resize never paint over a native TUI", async (t) =
   await tick();
   const count = ui.writes.length;
   ui.output.emit("resize");
+  t.mock.timers.tick(120);
   pending.resolve(snapshot([{ ...active, status: "working" }]));
   await tick();
   const busyWrites = ui.writes.length;

@@ -10,6 +10,39 @@ const sessions = [
   { provider: "codex", id: "codex:12345678-aaaa-4000-8000-000000000003", name: "Codex", status: "idle", cwd: "/work" },
 ];
 
+test("working feedback moves only its glyph and changed text returns to its normal colour", async () => {
+  const rows = [
+    { ...sessions[2], id: 'codex:working', name: 'Working', status: 'working' },
+    { ...sessions[2], id: 'codex:changed', name: 'Changed', status: 'idle' },
+    { ...sessions[2], id: 'codex:unchanged', name: 'Unchanged', status: 'idle' },
+  ];
+  const statusChanges = new Map([[rows[1].id, { status: 'idle', changedAt: 0 }]]);
+  const recentChange = { session: rows[1], hostName: 'Work', from: 'working', to: 'idle', at: 0 };
+  for (const now of [0, 120, 1200]) {
+    const frame = buildOverviewFrame({ sessions: rows, selected: 2, width: 100, height: 25, now, statusChanges, recentChange });
+    const terminal = new headless.Terminal({ cols: 100, rows: 25, convertEol: true, allowProposedApi: true });
+    try {
+      await new Promise(resolve => terminal.write(frame, resolve));
+      const text = stripVTControlCharacters(frame);
+      assert.match(text, now === 0 ? /⠋.*Working/ : now === 120 ? /⠙.*Working/ : /⠋.*Working/);
+      assert.match(text, /○.*Changed/);
+      assert.match(text, /○.*Unchanged/);
+      assert.match(text, new RegExp(`작업 중 → 대기 · ${Math.floor(now / 1000)}초 전`));
+      const colours = new Map();
+      for (let row = 0; row < 25; row++) {
+        const line = terminal.buffer.active.getLine(row);
+        for (const name of ['Changed', 'Unchanged']) {
+          const column = line.translateToString().indexOf(name);
+          if (column >= 0 && !line.translateToString().startsWith('  최근 변경')) colours.set(name, line.getCell(column).getFgColor());
+        }
+      }
+      assert.equal(colours.size, 2);
+      if (now < 1000) assert.notEqual(colours.get('Changed'), colours.get('Unchanged'));
+      else assert.equal(colours.get('Changed'), colours.get('Unchanged'));
+    } finally { terminal.dispose(); }
+  }
+});
+
 test("status rows fit real terminal cells and keep the project visible for long paths", async () => {
   const session = { ...sessions[2], name: "긴 세션 이름 ".repeat(8), cwd: "/home/ubuntu/Projects/keeper" };
   for (const width of [40, 80, 150]) {

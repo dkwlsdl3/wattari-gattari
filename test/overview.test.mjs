@@ -434,6 +434,7 @@ test("overview formats and displays cached Claude usage", () => {
 test("overview uses native provider colors and colors usage independently", () => {
   const frame = buildOverviewFrame({
     sessions,
+    now: 0,
     providerUsage: {
       claude: { fiveHour: { remainingPercent: 90 }, weekly: { remainingPercent: 6 } },
       codex: { remainingPercent: 2, windowDurationMins: 10_080 },
@@ -445,7 +446,7 @@ test("overview uses native provider colors and colors usage independently", () =
 
   assert.match(frame, /\x1b\[1;38;2;217;119;87mClaude 5시간 90% 남음 · 주간 6% 남음\x1b\[0m/);
   assert.match(frame, /\x1b\[1;36mCodex 주간 2% 남음\x1b\[0m/);
-  assert.match(frame, /\x1b\[1;32m●\x1b\[0m.*\x1b\[1;32mworking/);
+  assert.match(frame, /\x1b\[1;32m⠋\x1b\[0m.*\x1b\[1;32mworking/);
   assert.match(frame, /\x1b\[1;34m○\x1b\[0m.*\x1b\[1;34midle/);
   assert.match(frame, /\x1b\[1;31m!\x1b\[0m.*\x1b\[1;31mneeds input/);
   assert.doesNotMatch(frame, /38;2;(56;189;248|250;204;21|192;132;252|34;211;238|45;212;191)m/);

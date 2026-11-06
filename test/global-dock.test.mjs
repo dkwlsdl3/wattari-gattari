@@ -82,6 +82,28 @@ function dockFixture(t, options = {}) {
   return { input, session, running, frame: () => frame, press: async (name, text = "", extra = {}) => { input.emit("keypress", text, { name, sequence: text, ...extra }); await setImmediate(); } };
 }
 
+test('recent status changes include hidden PCs without confusing matching native IDs or filters', async t => {
+  let now = 0, localStatus = 'working', remoteStatus = 'working';
+  const session = { id: 'codex:same', provider: 'codex', cwd: '/work/project', name: 'Local feedback' };
+  const globalDock = new GlobalDock(config, { query: async () => ({ sessions: [{ ...session, name: 'Remote feedback', status: remoteStatus }], warnings: [] }) });
+  const f = dockFixture(t, { now: () => now, globalDock, workspace: {},
+    bridge: { discover: async () => ({ sessions: [{ ...session, status: localStatus }], warnings: [] }) } });
+  await setImmediate();
+  assert.doesNotMatch(f.frame(), /최근 변경/);
+  await f.press('v', '', { meta: true });
+  await f.press('tab'); await f.press('tab'); // Only the remote PC is visible.
+  await f.press('tab', '', { shift: true });
+  assert.doesNotMatch(f.frame(), /최근 변경/);
+  now = 1000; localStatus = 'idle';
+  await f.press('r', '', { meta: true }); await setImmediate();
+  assert.match(f.frame(), /최근 변경: Work \/ project · Local feedback/);
+  assert.match(f.frame(), /작업 중 → 대기 · 0초 전/);
+  now = 2000; remoteStatus = 'needs-input';
+  await f.press('r', '', { meta: true }); await setImmediate();
+  assert.match(f.frame(), /최근 변경: Home \/ project · Remote feedback/);
+  assert.match(f.frame(), /작업 중 → 입력 필요 · 0초 전/);
+});
+
 test('startup combines PCs and Tab and Shift+Tab independently wrap PC and provider filters', async t => {
   const local = ['codex', 'claude'].map(provider => ({ id: `${provider}:same`, nativeId: 'same', provider, cwd: '/same/project', name: `local-${provider}` }));
   const remote = local.map(session => ({ ...session, name: `remote-${session.provider}` }));
