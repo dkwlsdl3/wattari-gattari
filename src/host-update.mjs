@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { remoteCommand } from './global-hosts.mjs';
 import { shellCommand } from './shell-command.mjs';
-import { releaseInfo } from './release-install.mjs';
+import { releaseInfo, installRelease } from './release-install.mjs';
 import { withFileLock } from './file-lock.mjs';
 
 const exec = promisify(execFile);
@@ -62,8 +62,23 @@ export function deployHost(host, release, { env = process.env } = {}) {
   });
 }
 
-export async function updateHosts(hosts, { prepare = prepareRelease, deploy = deployHost, changed = () => {} } = {}) {
+export async function installLocalRelease(release) {
+  const stage = await fs.mkdtemp(path.join(os.tmpdir(), 'waga-release-'));
+  try {
+    const archive = path.join(stage, 'release.tar.gz'), source = path.join(stage, 'package');
+    await fs.writeFile(archive, release.archive); await fs.mkdir(source);
+    await exec('tar', ['-xzf', archive, '-C', source]);
+    return installRelease({ archive, source, sha256: release.sha256, revision: release.revision });
+  } finally { await fs.rm(stage, { recursive: true, force: true }); }
+}
+
+export async function updateHosts(hosts, { local = false, source, prepare = () => prepareRelease(source), deploy = deployHost, install = installLocalRelease, changed = () => {} } = {}) {
   const release = await prepare(), results = [];
+  if (local) {
+    changed({ id: 'local' }, { state: 'updating', revision: release.revision });
+    const result = { id: 'local', local: true, ...await install(release) };
+    results.push(result); changed({ id: 'local' }, result);
+  }
   // One deployment at a time; an unreachable PC does not cancel the others.
   for (const host of hosts) {
     const previous = { command: host.command, node: host.node, ssh: host.ssh };
@@ -83,6 +98,7 @@ export async function updateHosts(hosts, { prepare = prepareRelease, deploy = de
 }
 
 export function saveUpdatedHosts(file, results) {
+  results = results.filter(row => !row.local);
   const location = file ?? path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'wattari-gattari/hosts.json');
   if (!results.some(row => row.state !== 'failed')) return;
   return withFileLock(location, () => {

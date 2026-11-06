@@ -804,7 +804,7 @@ export async function runOverview({
   let globalSearching = false;
   let updating = false, reloading = false;
   const runningRelease = readRelease();
-  const hostRow = globalDock || remoteHost ? [{ type: "hosts", key: "global:hosts", name: integrated ? "PC 연결 설정" : "↑ PC 목록으로" }] : [];
+  const hostRow = globalDock || remoteHost ? [{ type: "hosts", key: "global:hosts", name: remoteHost ? "← 전체 PC 통합 Dock · Tab / Alt+G" : integrated ? "PC 연결 설정" : "↑ PC 목록으로" }] : [];
   const sessionKey = session => session.hostId ? `remote:${session.hostId}:${session.id}` : session.id;
   const tree = sessions => {
     if (!integrated) return [...hostRow, ...buildOverviewTree(sessions, { collapsed, query })];
@@ -988,8 +988,9 @@ export async function runOverview({
     previewReader.select(typeof bridge.preview === "function" && !previewSession?.hostId ? previewSession : null);
     outputStream.write(`${ESC}H${ESC}J${buildOverviewFrame({
       sessions,
-      hostLabel: integrated ? pcFilter ? globalDock.rows().find(host => host.id === pcFilter)?.name : '전체 PC 통합 Dock' : remoteHost ? `${remoteHost} · 원격` : hosts?.local.name,
-      pcTabs: integrated ? { items: [{ id: null, name: '전체 PC' }, ...connectedHosts()], selectedId: pcFilter } : null,
+      hostLabel: integrated ? pcFilter ? globalDock.rows().find(host => host.id === pcFilter)?.name : '전체 PC 통합 Dock' : remoteHost ? `${remoteHost} · 원격 관리` : hosts?.local.name,
+      pcTabs: integrated ? { items: [{ id: null, name: '전체 PC' }, ...connectedHosts()], selectedId: pcFilter }
+        : remoteHost ? { items: [{ id: null, name: '전체 PC' }, { id: remoteHost, name: remoteHost }], selectedId: remoteHost } : null,
       nodes,
       collapsed,
       selected,
@@ -1545,13 +1546,14 @@ export async function runOverview({
       } else if (key.meta && key.name === "r") {
         void refreshHosts({ force: true });
       } else if (key.name === 'u' && !key.meta && !key.ctrl && !globalSearching) {
-        const targets = (key.shift || text === 'U' ? globalDock.config.hosts : rows[index]?.local ? [] : rows[index] ? globalDock.config.hosts.filter(host => host.id === rows[index].id) : []).filter(host => !host.discovered);
+        const updateLocal = key.shift || text === 'U' || rows[index]?.local;
+        const targets = (updateLocal ? globalDock.config.hosts : rows[index] ? globalDock.config.hosts.filter(host => host.id === rows[index].id) : []).filter(host => !host.discovered);
         if (updating) notice = 'PC 업데이트가 진행 중입니다.';
-        else if (!targets.length) notice = '업데이트할 원격 PC를 선택해 주세요.';
+        else if (!targets.length && !updateLocal) notice = '업데이트할 원격 PC를 선택해 주세요.';
         else {
           updating = true;
           notice = '확정된 버전을 준비하고 있습니다.';
-          void hostUpdater(targets, { changed: (host, state) => { globalDock.updates.set(host.id, state); render(); } })
+          void hostUpdater(targets, { local: Boolean(updateLocal), changed: (host, state) => { globalDock.updates.set(host.id, state); render(); } })
             .then(results => {
               saveUpdatedHosts(hostsPath, results);
               notice = `업데이트 결과: ${results.filter(row => row.state !== 'failed').length}개 성공 · ${results.filter(row => row.state === 'failed').length}개 실패`;
@@ -1798,6 +1800,8 @@ export async function runOverview({
         const saved = pcSelections.get(pcFilter);
         selectedKey = saved?.key ?? null; restoredOffset = saved?.offset ?? 0;
         if (!selectedKey) selectFirstSession();
+      } else if (remoteHost) {
+        leave(); return;
       }
     }
     else if (key.sequence === "/") searching = true;

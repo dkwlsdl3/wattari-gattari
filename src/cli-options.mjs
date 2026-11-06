@@ -30,10 +30,14 @@ export function parseCliArgs(args) {
     if (arg === '--execute') { options.execute = true; continue; }
     if (arg === "--until-idle") { options.untilIdle = true; continue; }
     if (arg === "--notify-origin") { options.notifyOrigin = true; continue; }
-    if (["--host", "--hosts", "--resume", "--port", "--cwd", "--provider", "--backend", "--timeout", "--wait-timeout", "--reply-timeout"].includes(arg)) {
+    if (["--source", "--host", "--hosts", "--resume", "--port", "--cwd", "--provider", "--backend", "--timeout", "--wait-timeout", "--reply-timeout"].includes(arg)) {
       const value = args[++index];
       if (!value) throw invalid(`${arg} requires a value`);
       if (arg === "--host") options.host = value;
+      if (arg === '--source') {
+        if (!value.startsWith('/')) throw invalid('--source requires an absolute checkout path');
+        options.source = value;
+      }
       if (arg === "--hosts") {
         if (!value.startsWith("/")) throw invalid("--hosts requires an absolute path");
         options.hosts = value;
@@ -68,7 +72,8 @@ export function parseCliArgs(args) {
   if (options.host && !["update", "list", "send", "ask", "result"].includes(options.command)) throw invalid("--host is only valid for update, list, send, ask and result");
   if (options.host && options.notifyOrigin) throw invalid("--notify-origin cannot use a local Claude socket across PCs; use result --host instead");
   if (options.all && options.command !== 'update') throw invalid('--all is only valid for update');
-  if (options.command === 'update' && (!!options.host === !!options.all)) throw invalid('update requires exactly one of --host HOST_ID or --all');
+  if (options.source && options.command !== 'update') throw invalid('--source is only valid for update');
+  if (options.command === 'update' && options.host && options.all) throw invalid('update cannot combine --host HOST_ID and --all');
   if (options.hosts && !options.host && !["default", "overview", "update"].includes(options.command)) throw invalid("--hosts is only valid for the interactive dock or with --host");
   if (args.includes("--port") && options.command !== "serve") throw invalid("--port is only valid for serve");
   if (options.provider && !["claude", "codex"].includes(options.provider)) throw invalid(`Unknown provider: ${options.provider}`);

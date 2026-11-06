@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from 'node:os';
 import { fileURLToPath } from "node:url";
+import { spawnSync } from 'node:child_process';
 
 import { parseCliArgs } from "./cli-options.mjs";
 import { DockOrderStore } from "./dock-order.mjs";
@@ -40,7 +41,7 @@ async function describeRelease() {
 function usage() {
   return [
     `${CLI_NAME} [--cwd PATH] [--backend auto|direct|tmux] [--hosts /absolute/hosts.json]`,
-    "                                Open the local dock; its PC list opens the global dock. --cwd filters the local workspace.",
+    "                                Open the unified global dock for all PCs. --cwd filters the local workspace.",
     `${CLI_NAME} list [--provider claude|codex] [--cwd PATH] [--json]`,
     `${CLI_NAME} run <workflow.json> [--resume RUN_ID]    Run isolated native work with checks and independent review`,
     `${CLI_NAME} plan <provider:session-id> [plan.json] [--execute] [--json]    Record a skill plan, or hand its execution to Waga with --execute`,
@@ -55,7 +56,7 @@ function usage() {
     "                                ask: busy wait 1800s; reply wait 180s. Use explicit timeouts for long work.",
     `${CLI_NAME} open <claude|codex> [--cwd PATH]`,
     `${CLI_NAME} doctor`,
-    `${CLI_NAME} update (--host HOST_ID | --all) [--hosts /absolute/hosts.json] [--json]    Deploy this committed release over SSH`,
+    `${CLI_NAME} update [--source /absolute/checkout] [--host HOST_ID | --all] [--hosts /absolute/hosts.json] [--json]    Update local and registered PCs; --host updates only that PC`,
     `${CLI_NAME} --version`,
   ].join("\n");
 }
@@ -124,9 +125,9 @@ export async function runCli(args = process.argv.slice(2), {
   if (options.command === 'update') {
     try {
       const config = await loadConnectedHosts(options.hosts);
-      const hosts = options.all ? config.hosts : config.hosts.filter(host => host.id === options.host);
-      if (!hosts.length) throw Error('업데이트할 등록 PC가 없습니다.');
-      const results = await hostUpdater(hosts);
+      const hosts = options.host ? config.hosts.filter(host => host.id === options.host) : config.hosts;
+      if (options.host && !hosts.length) throw Error('업데이트할 등록 PC가 없습니다.');
+      const results = await hostUpdater(hosts, { local: !options.host, source: options.source });
       stdout.write(options.json ? `${JSON.stringify({ results })}\n` : results.map(row => `${row.id}\t${row.state}\t${row.revision.slice(0, 8)}${row.error ? `\t${row.error}` : ''}\n`).join(''));
       try { saveUpdatedHosts(options.hosts, results); }
       catch (error) { stderr.write(`원격 설치 결과는 위와 같습니다. PC 등록 경로 저장 실패: ${error.message}\n`); return 1; }
@@ -329,4 +330,14 @@ function isDirectExecution() {
   try { return fileURLToPath(import.meta.url) === fs.realpathSync(process.argv[1]); } catch { return false; }
 }
 
-if (isDirectExecution()) process.exitCode = await runCli(process.argv.slice(2), { handleSignals: true });
+if (isDirectExecution()) {
+  const managed = path.join(os.homedir(), '.local/share/wattari-gattari/waga');
+  // npm link may still point at the checkout. Public `waga` follows the installed
+  // release; `node src/cli.mjs` remains the explicit development entrypoint.
+  if (path.basename(process.argv[1]) === 'waga' && !releaseInfo().root && fs.existsSync(managed)) {
+    const result = spawnSync(managed, process.argv.slice(2), { stdio: 'inherit' });
+    if (result.error) { process.stderr.write(`${result.error.message}\n`); process.exitCode = 1; }
+    else if (result.signal) process.kill(process.pid, result.signal);
+    else process.exitCode = result.status ?? 1;
+  } else process.exitCode = await runCli(process.argv.slice(2), { handleSignals: true });
+}

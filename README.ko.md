@@ -30,7 +30,8 @@ PC별 순서는 등록 순서를 유지합니다. 기본 목록과 PC 탭에는 
 원격 PC 제목이나 프로젝트에서 **Alt+D**는 provider 기본값, **Alt+N**은 라우팅을 사용하는
 해당 PC의 새 세션 프롬프트 입력창을 바로 엽니다. PC 제목에서는 상대 PC의 기본 폴더를,
 프로젝트·세션에서는 그 작업 폴더를 사용합니다. 원격 입력창의 Esc는 통합 Dock으로 돌아옵니다.
-이름 변경·보관·순서 변경은 해당 PC의 관리 Dock에서 합니다.
+이름 변경·보관·순서 변경은 해당 PC의 관리 Dock에서 합니다. 같은 PC 탭 표시를 사용하며,
+편집 중이 아닐 때 Tab은 통합 Dock으로 복귀하고 Shift+Tab은 제공자를 전환합니다.
 
 통합 Dock이 보일 때 Tailscale의 PC를 자동으로 찾되 새 PC에 자동 접속하지 않습니다.
 Alt+P에서 PC를 선택하고 계정명을 한 번 입력해 연결합니다. 확인된 접속 정보는 저장하며,
@@ -48,24 +49,30 @@ waga result <요청-ID> --host home-wsl --hosts /absolute/path/hosts.json --json
 ```
 
 기본 등록 파일은 `~/.config/wattari-gattari/hosts.json`이며 XDG_CONFIG_HOME을 따릅니다.
-검증한 연결만 이 파일에 저장하며, 꺼진 PC와 연결 설정이 필요한 PC도 목록에서 구분합니다.
+검증한 연결만 이 파일에 저장하며, 꺼진 PC와 연결 설정이 필요한 PC는 Alt+P에서 구분합니다.
 휴대전화는 제외하고, 기존 등록의 이름·ID·순서는 유지합니다. CLI의 `--host`에는 목록에 표시된 등록 ID를 씁니다.
 `local-queued`는 상대 PC Waga의 접수이며 실제 수신·답변은 결과에서 확인합니다.
 연결 실패 후 메시지를 자동 재전송하지 않습니다. 이번 연결은 PC 간 직접 SSH이며
 Oracle의 상시 접수·중계는 포함하지 않습니다. [설계와 연결 계약](docs/adr/2026-11-03-global-dock.md).
 
-Global Dock에서 `u`는 선택 PC, `U`는 모든 등록 PC를 업데이트합니다. CLI에서도 실행할 수 있습니다.
+Alt+P에서 `u`는 선택한 원격 PC만 업데이트합니다. 현재 PC에서 `u`를 누르거나 어느 행에서든
+`U`를 누르면 로컬과 등록 PC 전체를 함께 업데이트합니다. CLI도 기본값은 로컬과 등록 PC 전체입니다.
 
 ```sh
-waga update --host home-wsl --hosts /absolute/path/hosts.json
-waga update --all --hosts /absolute/path/hosts.json
+waga update --source /absolute/path/wattari-gattari
+waga update --host home-wsl
 ```
 
-깨끗한 checkout의 현재 커밋을 배포하며, 설치본에서는 활성 버전의 소스 묶음을 전달합니다.
+`--source`로 지정한 깨끗한 checkout의 현재 커밋을 먼저 로컬에 설치하고 같은 소스 묶음을 등록 PC에 배포합니다.
+생략하면 활성 설치본의 소스 묶음을 재사용합니다. `--all`도 전체 갱신으로 사용할 수 있습니다.
+원격 실패는 PC별로 보고하며 로컬 갱신을 취소하거나 다른 PC의 배포를 막지 않습니다.
+Git 변경을 자동으로 내려받거나 주기적으로 배포하지는 않습니다. 꺼진 PC의 실패는 같은 명령으로 재시도합니다.
 원격의 Node가 SSH PATH에 없으면 등록 항목에 `node` 실행파일의 절대 경로를 지정하십시오.
 설치 성공 후 고정 실행 경로를 등록 파일에 저장합니다. 기존 Claude·Codex와 메시지 worker는
 유지하고 Dock 화면만 복귀 후 자동 적용합니다. 설치/기동 실패 시 이전 버전을 유지합니다.
 이 기능이 없던 예전 설치본은 첫 업데이트 뒤 원격 Dock을 한 번 다시 열어야 합니다.
+설치 시 `~/.local/bin/waga`도 연결합니다. npm link로 등록한 `waga`도 관리 설치본이 있으면
+그 버전을 실행합니다. 개발 코드는 명시적으로 `node src/cli.mjs`로 실행합니다.
 
 ## 요구 사항과 설치
 

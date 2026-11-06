@@ -3,11 +3,49 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import test from "node:test";
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 import { runCli } from "../src/cli.mjs";
 import { remoteCommand } from "../src/global-hosts.mjs";
 
 function output() { let value = ""; return { write(chunk) { value += chunk; }, get value() { return value; } }; }
+
+test('public waga launcher uses the managed installation while explicit source commands remain available', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'waga-proof-launcher-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const managed = path.join(root, '.local/share/wattari-gattari/waga');
+  fs.mkdirSync(path.dirname(managed), { recursive: true });
+  fs.writeFileSync(managed, `#!${process.execPath}\nconsole.log(JSON.stringify(process.argv.slice(2)));`, { mode: 0o700 });
+  const source = fileURLToPath(new URL('../src/cli.mjs', import.meta.url));
+  const publicBin = path.join(root, 'waga');
+  fs.symlinkSync(source, publicBin);
+  const env = { ...process.env, HOME: root };
+  assert.deepEqual(JSON.parse(execFileSync(process.execPath, [publicBin, '--version', '--json'], { env })), ['--version', '--json']);
+  const direct = JSON.parse(execFileSync(process.execPath, [source, '--version', '--json'], { env }));
+  assert.equal(direct.root, null);
+  fs.rmSync(managed);
+  assert.equal(JSON.parse(execFileSync(process.execPath, [publicBin, '--version', '--json'], { env })).root, null);
+});
+
+test('update without a selector updates local and all registered PCs, including an empty registry', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'waga-proof-update-all-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const file = path.join(root, 'hosts.json');
+  const host = { id: 'home', name: 'Home', ssh: 'home-wsl', command: '/old/waga' };
+  for (const hosts of [[host], []]) {
+    fs.writeFileSync(file, JSON.stringify({ version: 1, local: { id: 'here', name: 'Here' }, hosts }));
+    const stdout = output(), stderr = output();
+    const code = await runCli(['update', '--source', root, '--hosts', file, '--json'], { stdout, stderr,
+      hostUpdater: async (targets, options) => {
+        assert.deepEqual(targets, hosts); assert.equal(options.local, true);
+        assert.equal(options.source, root);
+        return [{ id: 'local', local: true, state: 'current', revision: 'a'.repeat(40) }];
+      } });
+    assert.equal(code, 0, stderr.value);
+    assert.equal(JSON.parse(stdout.value).results[0].local, true);
+  }
+});
 
 test("remote ask uses the owning PC cwd, exact target, receipt and timeouts without calling the local bridge", async t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "waga-proof-remote-cli-"));

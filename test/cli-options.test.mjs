@@ -86,8 +86,10 @@ test("remote targets apply only to messages, results and lists, with no local-so
   }
 });
 
-test('update requires a registered PC or all PCs and rejects an ambiguous selection', () => {
+test('update defaults to local and all PCs and rejects an ambiguous selection', () => {
+  assert.equal(parseCliArgs(['update']).command, 'update');
+  assert.equal(parseCliArgs(['update', '--source', '/tmp/waga']).source, '/tmp/waga');
   assert.equal(parseCliArgs(['update', '--all', '--hosts', '/tmp/hosts.json']).all, true);
   assert.equal(parseCliArgs(['update', '--host', 'home']).host, 'home');
-  for (const args of [['update'], ['update', '--all', '--host', 'home'], ['list', '--all']]) assert.throws(() => parseCliArgs(args), { code: 'INVALID_ARGUMENT' });
+  for (const args of [['update', '--all', '--host', 'home'], ['list', '--all'], ['update', '--source', 'relative'], ['list', '--source', '/tmp/waga']]) assert.throws(() => parseCliArgs(args), { code: 'INVALID_ARGUMENT' });
 });

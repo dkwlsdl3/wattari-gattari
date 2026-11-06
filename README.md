@@ -29,7 +29,8 @@ PC registration order stays fixed. Normal tabs show connected PCs and hide folde
 On a remote PC header or project, **Alt+D** directly opens its new-session composer with provider defaults;
 **Alt+N** opens it with routing. A PC header uses the remote default directory; a project/session uses its
 remote working directory. Escape cancels the remote composer and returns to the unified Dock.
-Rename/archive/order actions use that PC's management Dock.
+Rename/archive/order actions use that PC's management Dock, with the same PC tab style.
+Outside an editor, Tab returns from remote management to the unified Dock; Shift+Tab filters providers.
 
 The visible unified Dock discovers Tailscale PCs without automatically connecting to new peers.
 Open Alt+P, select a PC, and enter its SSH username once. Verified connection details are saved
@@ -48,24 +49,30 @@ waga result <request-ID> --host home-wsl --hosts /absolute/path/hosts.json --jso
 
 The optional default registry is `$XDG_CONFIG_HOME/wattari-gattari/hosts.json`, falling back to
 `~/.config`. Only verified connections are saved. Offline PCs and PCs needing connection setup remain
-visible; phones are excluded. Existing names, IDs and order are preserved. CLI `--host` uses the registered ID shown in the list.
+visible in Alt+P; phones are excluded. Existing names, IDs and order are preserved. CLI `--host` uses the registered ID shown in the list.
 `local-queued` confirms storage by the remote Waga, not native receipt or a reply.
 Ambiguous SSH failures never trigger automatic message resubmission. This is direct SSH;
 an always-on Oracle relay and offline inbox are separate work. See the [connection contract](docs/adr/2026-11-03-global-dock.md).
 
-In Global Dock, `u` updates the selected PC and `U` updates all registered remote PCs:
+In Alt+P, `u` updates the selected remote PC. On this PC, `u` updates local and all registered PCs;
+`U` does the same from any row. The CLI also updates local and all registered PCs by default:
 
 ```sh
-waga update --host home-wsl --hosts /absolute/path/hosts.json
-waga update --all --hosts /absolute/path/hosts.json
+waga update --source /absolute/path/wattari-gattari
+waga update --host home-wsl
 ```
 
-Updates deploy the current clean checkout commit, or the active installed release's saved source archive.
+`--source` installs a clean checkout's current commit locally, then deploys the same archive to registered PCs.
+Without it, updates reuse the active installed release's archive (`--all` is also accepted).
+Remote failures are reported individually and do not undo the local update or stop other PCs.
+Updates do not fetch Git changes or run on a background schedule; retry a failed/offline PC with the same command.
 Set the optional host `node` executable path if Node is absent from the noninteractive SSH PATH.
 Successful updates save a fixed launcher path in the registry. Versioned installs preserve native agents
 and message workers; managed Docks apply the new version when visible and not editing input/settings.
 Installation or startup failure keeps the previous release. Legacy Docks without this feature need
 one reconnect after their first update; subsequent managed updates apply automatically.
+Installation exposes `~/.local/bin/waga`. An npm-linked `waga` also follows the managed installation
+when present. Use `node src/cli.mjs` explicitly to run development code.
 
 ## Requirements and install
 

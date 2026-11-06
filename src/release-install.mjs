@@ -36,8 +36,8 @@ function checked(command, args, options) {
 }
 
 // Runs only in the verified archive's temporary directory, on the owning PC.
-export function installRelease({ archive, sha256, revision, root = path.join(os.homedir(), '.local/share/wattari-gattari'), source = sourceDirectory }) {
-  if (!/^[a-f0-9]{40}$/.test(revision) || !/^[a-f0-9]{64}$/.test(sha256) || !path.isAbsolute(root)) throw Error('Invalid release identity');
+export function installRelease({ archive, sha256, revision, root = path.join(os.homedir(), '.local/share/wattari-gattari'), source = sourceDirectory, binDirectory = path.join(os.homedir(), '.local/bin') }) {
+  if (!/^[a-f0-9]{40}$/.test(revision) || !/^[a-f0-9]{64}$/.test(sha256) || !path.isAbsolute(root) || !path.isAbsolute(binDirectory)) throw Error('Invalid release identity');
   if (fs.statSync(archive).size > 64 * 1024 * 1024 || crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex') !== sha256) throw Error('Release checksum mismatch');
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });
   const directory = fs.lstatSync(root);
@@ -50,6 +50,9 @@ export function installRelease({ archive, sha256, revision, root = path.join(os.
     try { previous = fs.readlinkSync(current); } catch (error) { if (error.code !== 'ENOENT') throw error; }
     const existingLauncher = fs.lstatSync(launcher, { throwIfNoEntry: false });
     if (existingLauncher && (!existingLauncher.isSymbolicLink() || fs.readlinkSync(launcher) !== 'current/waga')) throw Error('Installation launcher is not managed by Waga');
+    const publicLauncher = path.join(binDirectory, 'waga');
+    const existingPublic = fs.lstatSync(publicLauncher, { throwIfNoEntry: false });
+    if (existingPublic && (!existingPublic.isSymbolicLink() || path.resolve(binDirectory, fs.readlinkSync(publicLauncher)) !== launcher)) throw Error('Public waga launcher is not managed by Waga');
     const target = path.join(releases, revision), link = `releases/${revision}`;
     const env = { ...process.env, PATH: `${path.dirname(process.execPath)}:${path.join(os.homedir(), '.local/bin')}:${process.env.PATH}` };
     if (!fs.existsSync(target)) {
@@ -79,6 +82,10 @@ export function installRelease({ archive, sha256, revision, root = path.join(os.
       switchCurrent(link);
       const active = JSON.parse(checked(launcher, ['--version', '--json'], { env }));
       if (active.runningRevision !== revision || active.installedRevision !== revision) throw Error('Activated release did not identify itself');
+      if (!existingPublic) {
+        fs.mkdirSync(binDirectory, { recursive: true, mode: 0o700 });
+        fs.symlinkSync(launcher, publicLauncher);
+      }
     } catch (error) {
       if (previous) switchCurrent(previous); else fs.rmSync(current, { force: true });
       if (createdLauncher) fs.rmSync(launcher, { force: true });

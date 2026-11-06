@@ -223,7 +223,10 @@ test("PC switching preserves local session selection and global search never bec
 test("remote PC back exits only that Dock view without dispatching a native session locally", async t => {
   let leaves = 0;
   const f = dockFixture(t, { remoteHost: "Home", workspace: { leave: async () => { leaves++; return { closeOverview: true }; } }, commandFor: () => { throw Error("must not launch"); } });
-  await setImmediate(); await f.press("return");
+  await setImmediate();
+  assert.match(f.frame(), /\[Home\]/);
+  assert.match(f.frame(), /통합 Dock/);
+  await f.press('tab');
   assert.equal(await f.running, 0);
   assert.equal(leaves, 1);
 });
@@ -272,14 +275,15 @@ test("PC list round trip keeps the last session's response scroll position", asy
 });
 
 test('update keys select registered PCs and never deploy typed search text', async t => {
-  const targets = [];
+  const targets = [], locals = [];
   const globalDock = new GlobalDock(config, { query: async () => ({ sessions: [], warnings: [] }) });
-  const f = dockFixture(t, { globalDock, workspace: {}, hostUpdater: async hosts => { targets.push(hosts.map(host => host.id)); return []; } });
+  const f = dockFixture(t, { globalDock, workspace: {}, hostUpdater: async (hosts, options) => { targets.push(hosts.map(host => host.id)); locals.push(options.local); return []; } });
   await setImmediate(); await f.press('return');
-  await f.press('u', 'u'); assert.deepEqual(targets, []);
-  await f.press('down'); await f.press('u', 'u'); assert.deepEqual(targets, [['home']]);
-  await f.press('/', '/'); await f.press('u', 'u'); assert.equal(targets.length, 1);
-  await f.press('escape'); await f.press('u', 'U', { shift: true }); assert.deepEqual(targets, [['home'], ['home']]);
+  await f.press('u', 'u'); assert.deepEqual(targets, [['home']]);
+  await f.press('down'); await f.press('u', 'u'); assert.deepEqual(targets, [['home'], ['home']]);
+  await f.press('/', '/'); await f.press('u', 'u'); assert.equal(targets.length, 2);
+  await f.press('escape'); await f.press('u', 'U', { shift: true }); assert.deepEqual(targets, [['home'], ['home'], ['home']]);
+  assert.deepEqual(locals, [true, false, true]);
 });
 
 test('installed update waits for the owning Dock to become visible before reloading, retaining navigation', async t => {

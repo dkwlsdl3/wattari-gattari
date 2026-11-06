@@ -30,7 +30,7 @@ function fixture(t) {
       console.log(JSON.stringify({runningRevision:running.revision,installedRevision:installed?.revision??null}));`);
     const archive = path.join(root, `${digit}.tar.gz`);
     execFileSync('tar', ['-czf', archive, '-C', source, '.']);
-    return { source, archive, root: install, revision: digit.repeat(40), sha256: crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex') };
+    return { source, archive, root: install, binDirectory: path.join(root, 'bin'), revision: digit.repeat(40), sha256: crypto.createHash('sha256').update(fs.readFileSync(archive)).digest('hex') };
   };
   return { root, install, bundle };
 }
@@ -40,6 +40,7 @@ test('release switch preserves old files, is idempotent and rolls back an unheal
   const receipt = installRelease(first);
   assert.equal(receipt.state, 'updated');
   assert.equal(JSON.parse(execFileSync(receipt.command, ['--version', '--json'], { encoding: 'utf8' })).installedRevision, first.revision);
+  assert.equal(JSON.parse(execFileSync(path.join(first.binDirectory, 'waga'), ['--version', '--json'], { encoding: 'utf8' })).installedRevision, first.revision);
   assert.equal(installRelease(first).state, 'current');
   const failed = f.bundle('2', { failActivation: true });
   assert.throws(() => installRelease(failed), /failed/);
@@ -48,6 +49,21 @@ test('release switch preserves old files, is idempotent and rolls back an unheal
   assert.equal(installRelease(next).revision, next.revision);
   assert.ok(fs.existsSync(path.join(f.install, 'releases', first.revision, 'src/cli.mjs')), 'running old processes retain their files');
   assert.equal(fs.statSync(path.join(f.install, 'releases', next.revision, 'waga')).mode & 0o777, 0o700);
+});
+
+test('local update prepares once and distributes the installed revision; local failure prevents remote deployment', async () => {
+  const release = { revision: 'a'.repeat(40) }, host = { id: 'home', command: '/old', ssh: 'home' };
+  let preparations = 0, installed = false, deployments = 0;
+  const options = { local: true,
+    prepare: async () => { preparations++; return release; },
+    install: async received => { assert.equal(received, release); installed = true; return { revision: release.revision, state: 'updated' }; },
+    deploy: async (_host, received) => { assert.equal(installed, true); assert.equal(received, release); deployments++; return { revision: release.revision, state: 'updated' }; },
+  };
+  const results = await updateHosts([host], options);
+  assert.equal(results[0].local, true); assert.equal(results[1].id, 'home');
+  assert.equal(preparations, 1); assert.equal(deployments, 1);
+  await assert.rejects(updateHosts([host], { ...options, install: async () => { throw Error('local install failed'); } }), /local install failed/);
+  assert.equal(deployments, 1);
 });
 
 test('generated launcher exposes the npm global bin to child processes', t => {
@@ -70,6 +86,12 @@ test('bad archive and failed dependency installation leave the current launcher 
   const corrupt = f.bundle('2');
   assert.throws(() => installRelease({ ...corrupt, sha256: '0'.repeat(64) }), /checksum/);
   assert.throws(() => installRelease(f.bundle('3', { failInstall: true })), /failed/);
+  assert.equal(fs.readlinkSync(path.join(f.install, 'current')), `releases/${first.revision}`);
+  const next = f.bundle('4');
+  const publicLauncher = path.join(first.binDirectory, 'waga');
+  fs.rmSync(publicLauncher); fs.writeFileSync(publicLauncher, 'user executable');
+  assert.throws(() => installRelease(next), /Public waga launcher/);
+  assert.equal(fs.readFileSync(publicLauncher, 'utf8'), 'user executable');
   assert.equal(fs.readlinkSync(path.join(f.install, 'current')), `releases/${first.revision}`);
 });
 
