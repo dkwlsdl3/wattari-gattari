@@ -54,7 +54,7 @@ export async function nativeSessionCommand(session, { codexProvider = new CodexP
   return {
     command: "codex",
     args: ["resume", session.nativeId, "--remote", `unix://${daemon.socketPath}`, "-C", cwd,
-      ...(process.env.WAGA_REMOTE_HOST ? ['--no-alt-screen'] : []),
+      ...(process.env.WAGA_REMOTE_HOST ? ['--no-alt-screen', '-c', 'check_for_update_on_startup=false'] : []),
       "-c", 'tui.terminal_title=["thread-id"]'],
     cwd,
     afterAttach: () => codexProvider.prepareNativeSession(session, codexExecutionMode, { socketPath: daemon.socketPath }),

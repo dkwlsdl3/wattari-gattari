@@ -51,9 +51,13 @@ test('remote Codex keeps native scrollback without changing the local terminal m
   const session = { provider: 'codex', nativeId: 'waga-proof-thread', cwd: '/tmp/waga-proof-scroll' };
   try {
     delete process.env.WAGA_REMOTE_HOST;
-    assert.equal((await nativeSessionCommand(session, { codexProvider })).args.includes('--no-alt-screen'), false);
+    const local = await nativeSessionCommand(session, { codexProvider });
+    assert.equal(local.args.includes('--no-alt-screen'), false);
+    assert.equal(local.args.includes('check_for_update_on_startup=false'), false);
     process.env.WAGA_REMOTE_HOST = 'waga-proof-oracle';
-    assert.equal((await nativeSessionCommand(session, { codexProvider })).args.includes('--no-alt-screen'), true);
+    const remote = await nativeSessionCommand(session, { codexProvider });
+    assert.equal(remote.args.includes('--no-alt-screen'), true);
+    assert.equal(remote.args.includes('check_for_update_on_startup=false'), true);
   } finally {
     if (previous === undefined) delete process.env.WAGA_REMOTE_HOST;
     else process.env.WAGA_REMOTE_HOST = previous;

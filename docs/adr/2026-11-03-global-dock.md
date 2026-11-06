@@ -87,6 +87,8 @@ Claude, 기존 사용자 tmux server와 전역 테마는 바꾸지 않습니다.
 남깁니다. 마우스 휠은 바깥 SSH 창에서 원격 tmux로 전달하고, Codex가 마우스를 처리하지
 않을 때 원격 tmux의 copy-mode로 이전 대화를 봅니다. 로컬 Codex의 화면 모드와 사용자
 전역 설정은 유지합니다.
+원격 재연결은 `-c check_for_update_on_startup=false`로 실행해 provider 업데이트 안내가
+접속 준비를 막지 않게 합니다. provider 설치나 전역 업데이트 설정은 변경하지 않습니다.
 
 중첩 tmux에서 `Alt+G`는 시작 PC의 Dock으로 복귀하고 `Alt+A`는 원격으로 전달합니다. 실패한 연결은 오류를
 읽을 수 있도록 남기며 `Alt+G`로 원래 목록에 돌아옵니다. 원격 PC 이름은 Dock과 tmux 상태 줄에 표시합니다.
