@@ -189,6 +189,64 @@ test('same canonical ID and cwd on two PCs open their own session and remote man
   assert.match(f.frame(), /Waga 업데이트가 필요/);
 });
 
+test('remote F2 carries the exact rename target and status view into a fresh management screen', async t => {
+  const session = { id: 'codex:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', provider: 'codex', cwd: '/remote/project', name: 'Target', status: 'idle' };
+  const opened = [];
+  let canRename = true;
+  const globalDock = new GlobalDock(config, { query: async () => ({ sessions: [session], warnings: [], renameSession: canRename }) });
+  const f = dockFixture(t, { globalDock, workspace: { openRemoteHost: async (host, spec) => { opened.push({ host: host.id, spec }); } } });
+  await setImmediate();
+  await f.press('v', '', { meta: true });
+  await f.press('tab'); await f.press('tab');
+  await f.press('f2');
+  assert.equal(opened.length, 1);
+  assert.equal(opened[0].host, 'home');
+  assert.equal(opened[0].spec.renameSessionId, session.id);
+  assert.equal(opened[0].spec.viewMode, 'status');
+  assert.equal(opened[0].spec.force, true, 'a previous management screen must not swallow the edit request');
+  assert.equal(opened[0].spec.sessionId, undefined, 'rename must never attach the native TUI');
+  canRename = false; await globalDock.refresh();
+  await f.press('f2');
+  assert.equal(opened.length, 1);
+  assert.match(f.frame(), /Waga 업데이트가 필요/);
+});
+
+test('remote rename opens once for the exact target despite saved selection; cancel and retry keep the status view', async t => {
+  const target = { id: 'codex:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', provider: 'codex', cwd: '/remote/project', name: 'Target', status: 'idle' };
+  const other = { ...target, id: 'codex:bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', name: 'Other' };
+  let name = target.name, fail = true;
+  const calls = [];
+  const f = dockFixture(t, { remoteHost: 'Home', initialRenameId: target.id, initialViewMode: 'status', workspace: {},
+    navigationStore: { load: () => ({ selectedKey: other.id, collapsed: [target.cwd], query: 'Other', provider: 'claude', previewOutputOffset: 0 }), save() {} },
+    bridge: { discover: async () => ({ sessions: [other, { ...target, name }], warnings: [] }),
+      rename: async (id, value) => { calls.push({ id, value }); if (fail) throw Error('rename refused'); name = value; return { target: id, name }; } } });
+  await setImmediate();
+  assert.match(f.frame(), /\[상태별\]/);
+  assert.match(f.frame(), /세션 이름 변경/);
+  assert.match(f.frame(), /현재: Target/);
+  await f.press('escape');
+  await f.press('r', '', { meta: true });
+  assert.doesNotMatch(f.frame(), /세션 이름 변경/);
+  assert.match(f.frame(), new RegExp(target.id));
+  assert.deepEqual(calls, []);
+  await f.press('f2'); await f.press('u', '', { ctrl: true }); await f.press('x', 'Renamed'); await f.press('return');
+  assert.match(f.frame(), /rename refused/);
+  assert.match(f.frame(), /세션 이름 변경/);
+  fail = false;
+  await f.press('return'); await setImmediate();
+  assert.deepEqual(calls, [{ id: target.id, value: 'Renamed' }, { id: target.id, value: 'Renamed' }]);
+  assert.match(f.frame(), /\[상태별\]/);
+  assert.doesNotMatch(f.frame(), /세션 이름 변경/);
+  assert.match(f.frame(), new RegExp(target.id));
+});
+
+test('a vanished remote rename target reports its absence without editing another session', async t => {
+  const f = dockFixture(t, { remoteHost: 'Home', initialRenameId: 'codex:missing', initialViewMode: 'status', workspace: {} });
+  await setImmediate();
+  assert.match(f.frame(), /이름을 변경할 세션을 찾지 못했습니다: codex:missing/);
+  assert.doesNotMatch(f.frame(), /세션 이름 변경/);
+});
+
 test('remote target opens once by exact canonical ID without selecting a PC or session again', async t => {
   const opened = [];
   const f = dockFixture(t, { remoteHost: 'Home', initialSessionId: 'codex:local',

@@ -48,13 +48,17 @@ export function loadHosts(file, { env = process.env, read = fs.readFileSync } = 
   }
 }
 
-export function remoteCommand(host, { interactive = false, sessionId = null, create = null, force = false, args = ["list", "--json"] } = {}) {
-  if (sessionId !== null && (typeof sessionId !== 'string' || !/^(claude|codex):[^\s\x00-\x1f\x7f]{1,256}$/.test(sessionId))) throw invalid('Invalid remote session ID');
+export function remoteCommand(host, { interactive = false, sessionId = null, renameSessionId = null, viewMode = 'tree', create = null, force = false, args = ["list", "--json"] } = {}) {
+  for (const id of [sessionId, renameSessionId]) {
+    if (id !== null && (typeof id !== 'string' || !/^(claude|codex):[^\s\x00-\x1f\x7f]{1,256}$/.test(id))) throw invalid('Invalid remote session ID');
+  }
+  if (!['tree', 'status'].includes(viewMode) || renameSessionId && (sessionId || create)) throw invalid('Invalid remote rename request');
   if (create && (sessionId !== null || !['claude', 'codex'].includes(create.provider)
       || create.cwd != null && (typeof create.cwd !== 'string' || !path.posix.isAbsolute(create.cwd) || /[\x00-\x1f\x7f]/.test(create.cwd)))) throw invalid('Invalid remote session creation');
   // Hosts are validated when the registry is loaded; quote every remote argument.
   const command = interactive
     ? shellCommand("env", [`WAGA_REMOTE_HOST=${host.name}`, `WAGA_REMOTE_HOST_ID=${host.id}`, `WAGA_OPEN_SESSION=${sessionId ?? ''}`, `WAGA_OPEN_FORCE=${force ? '1' : ''}`,
+      `WAGA_RENAME_SESSION=${renameSessionId ?? ''}`, `WAGA_DOCK_VIEW=${renameSessionId ? viewMode : ''}`,
       `WAGA_CREATE_SESSION=${create ? create.skipRouting ? 'defaults' : 'routed' : ''}`, `WAGA_CREATE_PROVIDER=${create?.provider ?? ''}`, `WAGA_CREATE_CWD=${create?.cwd ?? ''}`, host.command, "--backend", "tmux"])
     : shellCommand(host.command, args);
   if (host.transport === 'tailscale') return { command: 'tailscale', args: ['ssh', host.ssh, interactive ? '-tt' : '-T', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-o', 'ServerAliveInterval=5', '-o', 'ServerAliveCountMax=2', command] };
@@ -91,5 +95,5 @@ export function validateHostStatus(data) {
     || !Array.isArray(data.release.docks) || data.release.docks.some(dock => !dock || (dock.revision !== null && typeof dock.revision !== 'string')))) throw invalid('Remote status returned invalid release information');
   if (!(data?.sessions === null && data?.release) && (!Array.isArray(data?.sessions) || data.sessions.some(s => !s || typeof s.id !== "string" || typeof s.cwd !== "string" || typeof s.name !== "string"))) throw invalid("Remote list returned invalid sessions");
   if (!Array.isArray(data.warnings ?? []) || data.warnings?.some(w => !w || typeof w.message !== "string")) throw invalid("Remote list returned invalid warnings");
-  return { sessions: data.sessions, warnings: data.warnings ?? [], ...(data.release ? { release: data.release } : {}), ...(data.host ? { host: data.host } : {}), ...(data.openSession === true ? { openSession: true } : {}), ...(data.createSession === true ? { createSession: true } : {}) };
+  return { sessions: data.sessions, warnings: data.warnings ?? [], ...(data.release ? { release: data.release } : {}), ...(data.host ? { host: data.host } : {}), ...(data.openSession === true ? { openSession: true } : {}), ...(data.createSession === true ? { createSession: true } : {}), ...(data.renameSession === true ? { renameSession: true } : {}) };
 }

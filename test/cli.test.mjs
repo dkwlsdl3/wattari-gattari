@@ -99,6 +99,7 @@ test('host status exposes release information even when no provider can be disco
   assert.match(status.warnings[0].message, /no providers/);
   assert.equal(typeof status.release.runningRevision, 'string');
   assert.ok(Array.isArray(status.release.docks));
+  assert.equal(status.renameSession, true);
 });
 
 test("CLI errors and JSON replies preserve exit codes and stdout/stderr separation", async () => {

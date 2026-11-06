@@ -62,6 +62,7 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   fs.writeFileSync(path.join(bin, "ssh"), `#!/bin/sh\n${shellCommand("/usr/bin/ssh", ["-F", clientConfig])} "$@"\n`, { mode: 0o700 });
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, XDG_CONFIG_HOME: path.join(root, "config"), XDG_STATE_HOME: path.join(root, "local-state") };
   delete env.TMUX; delete env.TMUX_PANE; delete env.WAGA_REMOTE_HOST; delete env.WAGA_REMOTE_HOST_ID;
+  delete env.WAGA_RENAME_SESSION; delete env.WAGA_DOCK_VIEW;
   const session = { id: "claude:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", nativeId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", provider: "claude", name: "waga-proof-native", cwd: root, status: "idle" };
   const sibling = { ...session, id: 'claude:bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', nativeId: 'bbbbbbbb-bbbb-cccc-dddd-eeeeeeeeeeee', name: 'waga-proof-sibling' };
   const cliUrl = new URL("../src/cli.mjs", import.meta.url).href;
@@ -89,8 +90,14 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
     process.env.XDG_STATE_HOME = ${JSON.stringify(root)} + '/' + side + '-state';
     const workspace = new TmuxWorkspace({socketName: side === 'remote' ? ${JSON.stringify(remoteSocket)} : ${JSON.stringify(localSocket)}, cliPath: process.argv[1], eventLog: {record(){}}, claudeViewMatches: async () => true});
     const bridge = {discover: async () => {
-      if(process.argv[2] === 'overview') fs.writeFileSync(${JSON.stringify(root)} + '/' + side + '-view.json', JSON.stringify({view:process.env.WAGA_TMUX_SESSION}));
-      return {sessions: side === 'remote' ? [${JSON.stringify(session)},${JSON.stringify(sibling)}] : [], warnings: []};
+      if(process.argv[2] === 'overview') fs.writeFileSync(${JSON.stringify(root)} + '/' + side + '-view.json', JSON.stringify({view:process.env.WAGA_TMUX_SESSION,renameSessionId:process.env.WAGA_RENAME_SESSION,viewMode:process.env.WAGA_DOCK_VIEW}));
+      const renamedFile = ${JSON.stringify(path.join(root, 'renamed.json'))};
+      const renamed = fs.existsSync(renamedFile) ? JSON.parse(fs.readFileSync(renamedFile)) : null;
+      return {sessions: side === 'remote' ? [${JSON.stringify(session)},${JSON.stringify(sibling)}].map(row=>renamed?.target===row.id?{...row,name:renamed.name}:row) : [], warnings: []};
+    }, rename: async (target,name) => {
+      if(side!=='remote'||target!==${JSON.stringify(session.id)}) throw Error('rename reached the wrong target');
+      fs.writeFileSync(${JSON.stringify(path.join(root, 'renamed.json'))},JSON.stringify({side,target,name}));
+      return {target,name,renamed:true};
     }, create: async (provider,prompt,options) => {
       if(side!=='remote') throw Error('creation reached the wrong PC');
       fs.writeFileSync(${JSON.stringify(path.join(root, 'created.json'))},JSON.stringify({side,provider,prompt,cwd:options.cwd,routing:options.routing}));
@@ -203,6 +210,26 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   assert.equal(await call(remoteSocket, "display-message", "-p", "-t", nativeTarget, "#{pane_pid}"), nativePid);
   client.write('\x1bg');
   await until(() => call(localSocket, 'display-message', '-p', '-t', view('local'), '#{window_name}'), 'overview', 'return before creating a remote session');
+  const beforeRenameView = view('remote');
+  client.write('\x1bv\x1bOQ'); // Status view, then the terminal's F2 sequence.
+  await until(() => view('remote') !== beforeRenameView, true, 'F2 opens the owning management view');
+  const renameView = view('remote');
+  const editRequest = JSON.parse(fs.readFileSync(path.join(root, 'remote-view.json'), 'utf8'));
+  assert.equal(editRequest.renameSessionId, session.id);
+  assert.equal(editRequest.viewMode, 'status');
+  assert.equal(await call(remoteSocket, 'display-message', '-p', '-t', renameView, '#{window_name}'), 'overview', 'F2 must not attach the native session');
+  client.write('\x15waga-proof-renamed\r');
+  await until(() => fs.existsSync(path.join(root, 'renamed.json')), true, 'F2 directly opens the selected name editor');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'renamed.json'), 'utf8')), {side:'remote',target:session.id,name:'waga-proof-renamed'});
+  const renameOverviewPid = await call(remoteSocket, 'display-message', '-p', '-t', `${renameView}:overview`, '#{pane_pid}');
+  fs.writeFileSync(releaseFile, JSON.stringify({ root: path.join(root, 'managed'), installedRevision: 'newer' }));
+  await until(() => call(remoteSocket, 'display-message', '-p', '-t', `${renameView}:overview`, '#{@waga_release}'), 'newer', 'management view can reload after saving');
+  assert.notEqual(await call(remoteSocket, 'display-message', '-p', '-t', `${renameView}:overview`, '#{pane_pid}'), renameOverviewPid);
+  await until(() => JSON.parse(fs.readFileSync(path.join(root, 'remote-view.json'), 'utf8')).renameSessionId, '', 'reload clears the consumed rename request');
+  assert.equal(await call(remoteSocket, 'display-message', '-p', '-t', nativeTarget, '#{pane_pid}'), nativePid);
+  client.write('\x1bg');
+  await until(() => call(localSocket, 'display-message', '-p', '-t', view('local'), '#{window_name}'), 'overview', 'return to the original status view after renaming');
+  client.write('\x1bv'); // Restore the tree for the following project-header creation check.
   client.write('\x1b[A\x1b[A'); // Selected session -> its project -> the remote PC header.
   const beforeCreateView = view('remote');
   client.write('\x1bd');

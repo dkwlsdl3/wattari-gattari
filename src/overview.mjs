@@ -817,6 +817,8 @@ export async function runOverview({
   readRelease = releaseInfo,
   remoteHost = process.env.WAGA_REMOTE_HOST || null,
   initialSessionId = process.env.WAGA_OPEN_SESSION || null,
+  initialRenameId = process.env.WAGA_RENAME_SESSION || null,
+  initialViewMode = process.env.WAGA_DOCK_VIEW || 'tree',
   initialSessionForce = process.env.WAGA_OPEN_FORCE === '1',
   initialCreate = process.env.WAGA_CREATE_SESSION ? {
     provider: process.env.WAGA_CREATE_PROVIDER || 'claude', cwd: process.env.WAGA_CREATE_CWD || defaultCwd,
@@ -840,7 +842,7 @@ export async function runOverview({
   let globalVisible = false;
   const integrated = Boolean(globalDock && !remoteHost);
   let pcFilter = null;
-  let viewMode = 'tree';
+  let viewMode = initialViewMode === 'status' ? 'status' : 'tree';
   const pcSelections = new Map();
   let globalQuery = "";
   let globalSearching = false;
@@ -1253,6 +1255,17 @@ export async function runOverview({
       state.warnings = reconcileWarning ? [reconcileWarning, ...discovered.warnings] : discovered.warnings;
       warnings = [...refreshStates.values()].flatMap(entry => entry.warnings);
       notice = `마지막 갱신 ${new Date().toLocaleTimeString()}`;
+      if (initialRenameId) {
+        const target = allSessions.find(session => session.id === initialRenameId);
+        if (target) {
+          initialRenameId = null; restoringSelection = null; query = ''; provider = null;
+          collapsed.delete(sessionWorkspace(target)); selectedKey = target.id;
+          beginRename(target);
+        } else if (!providerName || initialRenameId.startsWith(`${providerName}:`)) {
+          notice = `이름을 변경할 세션을 찾지 못했습니다: ${initialRenameId}`;
+          initialRenameId = null;
+        }
+      }
       if (initialSessionId) {
         const target = allSessions.find(session => session.id === initialSessionId);
         if (target) {
@@ -1423,6 +1436,9 @@ export async function runOverview({
     })();
   };
 
+  const beginRename = session => {
+    renameTask = { session, name: session.name, cursor: graphemes(session.name).length, error: "", submitting: false };
+  };
   const submitRename = () => {
     const name = renameTask.name.trim();
     if (!name) {
@@ -1535,13 +1551,14 @@ export async function runOverview({
       .finally(() => { busy = false; nativeOpen = false; render(); });
   };
 
-  const openHost = async (host, { sessionId, create, force = false } = {}) => {
+  const openHost = async (host, { sessionId, renameSessionId = null, viewMode = 'tree', create, force = false } = {}) => {
     if (!workspace.openRemoteHost) { notice = '원격 PC 열기는 tmux backend가 필요합니다. waga --backend tmux를 사용하세요.'; render(); return; }
     busy = true;
     nativeOpen = true;
     overviewVisible = false;
     try {
-      const result = await workspace.openRemoteHost(host, { ...remoteCommand(host, { interactive: true, sessionId, create, force }), sessionId, force });
+      const result = await workspace.openRemoteHost(host, { ...remoteCommand(host, { interactive: true, sessionId, renameSessionId, viewMode, create, force }), sessionId, force,
+        ...(renameSessionId ? { renameSessionId, viewMode } : {}) });
       if (result?.code) throw Error(`${host.name} SSH 연결 종료: exit ${result.code}`);
     } catch (error) { notice = error.message; }
     finally { busy = false; nativeOpen = false; render(); }
@@ -1830,6 +1847,14 @@ export async function runOverview({
     const manageRemote = nodes[selected]?.type === 'session'
       && (key.name === 'f2' || key.meta && key.name === 'x' || key.shift && ['up', 'down'].includes(key.name));
     if (owner && !owner.local && manageRemote) {
+      if (key.name === 'f2') {
+        if (!globalDock.states.get(owner.id)?.summary?.renameSession) {
+          notice = `${owner.name}의 Waga 업데이트가 필요합니다. Alt+P에서 업데이트해 주세요.`;
+          render(); return;
+        }
+        void openHost(owner, { renameSessionId: nodes[selected].session.id, viewMode, force: true });
+        return;
+      }
       notice = '이 PC의 관리 화면에서 이름 변경·보관·순서 변경을 실행해 주세요.';
       if (!owner.discovered && owner.online !== false) void openHost(owner);
       else { globalVisible = true; globalDock.selectedId = owner.id; }
@@ -1844,8 +1869,7 @@ export async function runOverview({
       return;
     }
     if (key.name === "f2" && nodes[selected]?.type === "session") {
-      const session = nodes[selected].session;
-      renameTask = { session, name: session.name, cursor: graphemes(session.name).length, error: "", submitting: false };
+      beginRename(nodes[selected].session);
       render();
       return;
     }

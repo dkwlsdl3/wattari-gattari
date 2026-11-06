@@ -241,7 +241,7 @@ export async function runCli(args = process.argv.slice(2), {
       let data;
       try { data = await bridge.discover({}); }
       catch (error) { data = { sessions: null, warnings: [{ provider: 'waga', message: error.message }] }; }
-      stdout.write(`${JSON.stringify({ ...data, release, openSession: true, createSession: true, host: { type: os.release().toLowerCase().includes('microsoft') ? 'wsl' : 'pc' } })}\n`);
+      stdout.write(`${JSON.stringify({ ...data, release, openSession: true, createSession: true, renameSession: true, host: { type: os.release().toLowerCase().includes('microsoft') ? 'wsl' : 'pc' } })}\n`);
     }
     else if (options.command === "serve") return await web({ bridge, cwd, filterCwd: options.cwd ? cwd : undefined, port: options.port, output: stdout, orderStore });
     else if (options.command === "help") stdout.write(`${usage()}\n`);

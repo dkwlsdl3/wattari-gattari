@@ -32,7 +32,7 @@ test("host IDs and SSH aliases are validated rather than interpreted as shell in
 
 test("SSH uses bounded public JSON command, quoted executable and strict noninteractive authentication", async () => {
   let calls = 0;
-  const summary = { sessions: [{ id: "codex:1", name: "proof", cwd: "/project" }], warnings: [] };
+  const summary = { sessions: [{ id: "codex:1", name: "proof", cwd: "/project" }], warnings: [], renameSession: true };
   assert.deepEqual(await queryHost(host, { run: async (command, args, options) => {
     calls++;
     assert.equal(command, "ssh");
@@ -46,7 +46,12 @@ test("SSH uses bounded public JSON command, quoted executable and strict noninte
   assert.equal(calls, 1);
   const spec = remoteCommand(host, { interactive: true });
   assert.equal(spec.args[0], "-tt");
-  assert.equal(spec.args.at(-1), shellCommand("env", ["WAGA_REMOTE_HOST=Dev PC", "WAGA_REMOTE_HOST_ID=dev", "WAGA_OPEN_SESSION=", "WAGA_OPEN_FORCE=", "WAGA_CREATE_SESSION=", "WAGA_CREATE_PROVIDER=", "WAGA_CREATE_CWD=", host.command, "--backend", "tmux"]));
+  assert.equal(spec.args.at(-1), shellCommand("env", ["WAGA_REMOTE_HOST=Dev PC", "WAGA_REMOTE_HOST_ID=dev", "WAGA_OPEN_SESSION=", "WAGA_OPEN_FORCE=", "WAGA_RENAME_SESSION=", "WAGA_DOCK_VIEW=", "WAGA_CREATE_SESSION=", "WAGA_CREATE_PROVIDER=", "WAGA_CREATE_CWD=", host.command, "--backend", "tmux"]));
+  const id = 'codex:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  assert.throws(() => remoteCommand(host, { renameSessionId: 'mutable name' }), { code: 'INVALID_HOSTS' });
+  assert.throws(() => remoteCommand(host, { renameSessionId: id, sessionId: id }), { code: 'INVALID_HOSTS' });
+  assert.throws(() => remoteCommand(host, { renameSessionId: id, create: { provider: 'codex' } }), { code: 'INVALID_HOSTS' });
+  assert.throws(() => remoteCommand(host, { renameSessionId: id, viewMode: 'invalid' }), { code: 'INVALID_HOSTS' });
 });
 
 test('old remote Waga falls back only for an unsupported command, and installation status survives missing providers', async () => {
