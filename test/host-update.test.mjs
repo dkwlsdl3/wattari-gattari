@@ -12,11 +12,12 @@ function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'waga-proof-update-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const install = path.join(root, 'installed');
-  const bundle = (digit, { failInstall = false, failActivation = false } = {}) => {
+  const bundle = (digit, { failInstall = false, failActivation = false, history = Array.from({ length: Number(digit) }, (_, index) => String(Number(digit) - index).repeat(40)) } = {}) => {
     const source = path.join(root, `source-${digit}`);
     fs.mkdirSync(path.join(source, 'src'), { recursive: true });
     fs.writeFileSync(path.join(source, 'package.json'), JSON.stringify({ name: 'waga-proof-release', version: '1.0.0', private: true,
       ...(failInstall ? { scripts: { install: 'exit 17' } } : {}) }));
+    if (history !== null) fs.writeFileSync(path.join(source, 'release-history.json'), JSON.stringify({ revision: digit.repeat(40), history }));
     execFileSync('npm', ['install', '--package-lock-only', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: source, stdio: 'ignore' });
     // A disposable CLI, not Claude/Codex. Its real exit status tests activation rollback.
     fs.writeFileSync(path.join(source, 'src/cli.mjs'), `import fs from 'node:fs'; import path from 'node:path'; import {fileURLToPath} from 'node:url';
@@ -51,7 +52,42 @@ test('release switch preserves old files, is idempotent and rolls back an unheal
   assert.equal(fs.statSync(path.join(f.install, 'releases', next.revision, 'waga')).mode & 0o777, 0o700);
 });
 
-test('local update prepares once and distributes the installed revision; local failure prevents remote deployment', async () => {
+test('a newer installation refuses an older or divergent release before changing current', t => {
+  const f = fixture(t), old = f.bundle('1'), latest = f.bundle('3');
+  installRelease(old); installRelease(latest);
+  assert.throws(() => installRelease(old), /downgrade|후속/);
+  assert.throws(() => installRelease(f.bundle('4', { history: ['4'.repeat(40), '1'.repeat(40)] })), /downgrade|후속/);
+  assert.throws(() => installRelease(f.bundle('5', { history: null })), /history|이력/);
+  assert.throws(() => installRelease(f.bundle('6', { history: ['6'.repeat(40), 'invalid'] })), /history/);
+  assert.equal(fs.readlinkSync(path.join(f.install, 'current')), `releases/${latest.revision}`);
+});
+
+test('default update fetches main instead of redistributing the initiating PC; archives are reproducible', async t => {
+  const f = fixture(t), repository = path.join(f.root, 'origin');
+  execFileSync('git', ['init', '-q', '-b', 'main', repository]);
+  const commit = text => {
+    fs.writeFileSync(path.join(repository, 'file'), text);
+    execFileSync('git', ['-C', repository, 'add', 'file']);
+    execFileSync('git', ['-C', repository, '-c', 'user.name=waga-proof', '-c', 'user.email=proof@invalid', 'commit', '-qm', text]);
+    return execFileSync('git', ['-C', repository, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  };
+  const first = commit('old'), latest = commit('latest');
+  const gitConfig = path.join(f.root, 'gitconfig');
+  fs.writeFileSync(gitConfig, `[url "file://${repository}"]\n insteadOf = https://github.com/dkwlsdl3/wattari-gattari.git\n`);
+  const saved = process.env.GIT_CONFIG_GLOBAL; process.env.GIT_CONFIG_GLOBAL = gitConfig;
+  t.after(() => { if (saved === undefined) delete process.env.GIT_CONFIG_GLOBAL; else process.env.GIT_CONFIG_GLOBAL = saved; });
+  const release = await prepareRelease();
+  assert.equal(release.revision, latest);
+  assert.deepEqual(JSON.parse(execFileSync('tar', ['-xzOf', '-', 'release-history.json'], { input: release.archive, encoding: 'utf8' })), { revision: latest, history: [latest, first] });
+  assert.equal((await prepareRelease()).sha256, release.sha256, 'the same commit has the same archive even from a different clone');
+  const shallow = path.join(f.root, 'shallow');
+  execFileSync('git', ['clone', '--quiet', '--depth=1', `file://${repository}`, shallow]);
+  await assert.rejects(prepareRelease(shallow), /shallow/, 'incomplete commit history cannot authorize upgrades');
+  fs.renameSync(repository, `${repository}-offline`);
+  await assert.rejects(prepareRelease(), /git|repository|clone/i, 'failure to fetch never falls back to an old installed archive');
+});
+
+test('local update prepares once and distributes the candidate; local failure prevents remote deployment', async () => {
   const release = { revision: 'a'.repeat(40) }, host = { id: 'home', command: '/old', ssh: 'home' };
   let preparations = 0, installed = false, deployments = 0;
   const options = { local: true,

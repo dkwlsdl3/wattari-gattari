@@ -281,6 +281,14 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   assert.equal(deployed.state, 'updated');
   assert.equal(JSON.parse((await exec(deployed.command, ['--version', '--json'])).stdout).runningRevision, release.revision);
   assert.equal((await deployHost({ ...host, node }, release, { env })).state, 'current');
+  // An old sender's archive must not replace the already installed guard.
+  const bypassMarker = path.join(root, 'old-installer-ran');
+  fs.writeFileSync(path.join(packageDir, 'src/release-install.mjs'), `import fs from 'node:fs'; fs.writeFileSync(${JSON.stringify(bypassMarker)},'unexpected');`);
+  const olderArchive = path.join(root, 'older.tar.gz');
+  await exec('tar', ['-czf', olderArchive, '-C', packageDir, '.']);
+  const olderBytes = fs.readFileSync(olderArchive);
+  await assert.rejects(deployHost({ ...host, node }, { revision: 'b'.repeat(40), archive: olderBytes, sha256: crypto.createHash('sha256').update(olderBytes).digest('hex') }, { env }), /history|이력/);
+  assert.equal(fs.existsSync(bypassMarker), false, 'SSH bootstrap keeps the receiving PC installer in charge');
   await assert.rejects(deployHost({ ...host, node }, { ...release, sha256: '0'.repeat(64) }, { env }), /checksum mismatch/);
   assert.equal(JSON.parse((await exec(deployed.command, ['--version', '--json'])).stdout).installedRevision, release.revision, 'a rejected SSH transfer does not change the active release');
   assert.equal(await call(remoteSocket, 'display-message', '-p', '-t', nativeTarget, '#{pane_pid}'), nativePid, 'SSH deployment also leaves native sessions alive');

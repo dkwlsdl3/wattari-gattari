@@ -5,18 +5,17 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { fileURLToPath } from 'node:url';
 import { remoteCommand } from './global-hosts.mjs';
 import { shellCommand } from './shell-command.mjs';
-import { releaseInfo, installRelease } from './release-install.mjs';
+import { installRelease } from './release-install.mjs';
 import { withFileLock } from './file-lock.mjs';
 
 const exec = promisify(execFile);
-const sourceDirectory = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+const repository = 'https://github.com/dkwlsdl3/wattari-gattari.git';
 // The shell handles its own grammar; tar and sha256sum handle the archive.
 const bootstrap = `set -eu
 umask 077
-base="$HOME/.local/share/wattari-gattari"
+base=$("$3" -e 'process.stdout.write(require("node:path").join(require("node:os").homedir(),".local/share/wattari-gattari"))')
 mkdir -p "$base"
 stage=$(mktemp -d "$base/.incoming-XXXXXXXX")
 trap 'rm -rf "$stage"' EXIT
@@ -24,25 +23,36 @@ cat > "$stage/release.tar.gz"
 printf '%s  %s\\n' "$1" "$stage/release.tar.gz" | sha256sum --status -c - || { echo 'Release checksum mismatch' >&2; exit 1; }
 mkdir "$stage/package"
 tar -xzf "$stage/release.tar.gz" -C "$stage/package"
-"$3" "$stage/package/src/release-install.mjs" "$stage/release.tar.gz" "$1" "$2"
+installer="$stage/package/src/release-install.mjs"
+if [ -f "$base/current/release.json" ]; then
+  guarded=$("$3" -e 'const fs=require("node:fs"); process.stdout.write(JSON.parse(fs.readFileSync(process.argv[1])).installerVersion===1?"yes":"no")' "$base/current/release.json")
+  if [ "$guarded" = yes ]; then installer="$base/current/src/release-install.mjs"; fi
+fi
+"$3" "$installer" "$stage/release.tar.gz" "$1" "$2" "$stage/package"
 `;
 
-export async function prepareRelease(directory = sourceDirectory) {
-  const installed = releaseInfo(directory);
-  if (installed.root) {
-    const activeDirectory = installed.installedDirectory ?? directory;
-    const archive = await fs.readFile(path.join(activeDirectory, 'release.tar.gz'));
-    const sha256 = crypto.createHash('sha256').update(archive).digest('hex');
-    const manifest = JSON.parse(await fs.readFile(path.join(activeDirectory, 'release.json'), 'utf8'));
-    if (sha256 !== manifest.sha256) throw Error('Installed source archive checksum mismatch');
-    return { revision: manifest.revision, sha256, archive };
+export async function prepareRelease(directory) {
+  if (directory === undefined) {
+    const stage = await fs.mkdtemp(path.join(os.tmpdir(), 'waga-release-fetch-'));
+    try {
+      const checkout = path.join(stage, 'checkout');
+      await exec('git', ['clone', '--quiet', '--single-branch', '--branch', 'main', repository, checkout], { timeout: 60_000, maxBuffer: 1024 * 1024, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+      return await prepareRelease(checkout);
+    } finally { await fs.rm(stage, { recursive: true, force: true }); }
   }
   const root = (await exec('git', ['-C', directory, 'rev-parse', '--show-toplevel'])).stdout.trim();
   if (path.resolve(root) !== path.resolve(directory)) throw Error('Updates require the Waga checkout root');
   if ((await exec('git', ['-C', root, 'status', '--porcelain'])).stdout.trim()) throw Error('먼저 Waga 변경을 커밋해 주세요. 원격에는 확정된 버전만 배포합니다.');
   const revision = (await exec('git', ['-C', root, 'rev-parse', 'HEAD'])).stdout.trim();
-  const { stdout: archive } = await exec('git', ['-C', root, 'archive', '--format=tar.gz', revision], { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024 });
-  return { revision, sha256: crypto.createHash('sha256').update(archive).digest('hex'), archive };
+  if ((await exec('git', ['-C', root, 'rev-parse', '--is-shallow-repository'])).stdout.trim() === 'true') throw Error('업데이트에는 전체 Git 이력이 필요합니다. shallow clone을 해제해 주세요.');
+  const history = (await exec('git', ['-C', root, 'rev-list', revision], { maxBuffer: 4 * 1024 * 1024 })).stdout.trim().split('\n');
+  const stage = await fs.mkdtemp(path.join(os.tmpdir(), 'waga-release-history-'));
+  try {
+    const file = path.join(stage, 'release-history.json');
+    await fs.writeFile(file, JSON.stringify({ revision, history }));
+    const { stdout: archive } = await exec('git', ['-C', root, 'archive', '--format=tar.gz', `--add-file=${file}`, revision], { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024 });
+    return { revision, sha256: crypto.createHash('sha256').update(archive).digest('hex'), archive };
+  } finally { await fs.rm(stage, { recursive: true, force: true }); }
 }
 
 export function deployHost(host, release, { env = process.env } = {}) {

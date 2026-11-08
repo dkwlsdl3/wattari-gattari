@@ -63,9 +63,11 @@ waga update --host home-wsl
 ```
 
 `--source` installs a clean checkout's current commit locally, then deploys the same archive to registered PCs.
-Without it, updates reuse the active installed release's archive (`--all` is also accepted).
+Without it, updates fetch the latest `main` from the project GitHub repository (`--all` is also accepted).
+Git and network access are required on the initiating PC; a fetch failure leaves every installation unchanged.
+Installers reject older or divergent commits and archives without the history needed to prove an upgrade.
 Remote failures are reported individually and do not undo the local update or stop other PCs.
-Updates do not fetch Git changes or run on a background schedule; retry a failed/offline PC with the same command.
+Updates run only when requested; retry a failed/offline PC with the same command.
 Set the optional host `node` executable path if Node is absent from the noninteractive SSH PATH.
 Successful updates save a fixed launcher path in the registry. Versioned installs preserve native agents
 and message workers; managed Docks apply the new version when visible and not editing input/settings.

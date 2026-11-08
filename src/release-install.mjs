@@ -54,12 +54,23 @@ export function installRelease({ archive, sha256, revision, root = path.join(os.
     const existingPublic = fs.lstatSync(publicLauncher, { throwIfNoEntry: false });
     if (existingPublic && (!existingPublic.isSymbolicLink() || path.resolve(binDirectory, fs.readlinkSync(publicLauncher)) !== launcher)) throw Error('Public waga launcher is not managed by Waga');
     const target = path.join(releases, revision), link = `releases/${revision}`;
+    const historyFile = path.join(fs.existsSync(source) ? source : target, 'release-history.json');
+    let lineage = null;
+    try { lineage = JSON.parse(fs.readFileSync(historyFile, 'utf8')); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (lineage && (lineage.revision !== revision || !Array.isArray(lineage.history)
+        || lineage.history[0] !== revision || lineage.history.some(id => typeof id !== 'string' || !/^[a-f0-9]{40}$/.test(id)))) throw Error('Invalid release history');
+    if (previous && previous !== link) {
+      const active = readManifest(current);
+      if (!lineage) throw Error('업데이트 이력(history)이 없는 버전은 설치할 수 없습니다.');
+      if (!active?.revision || !lineage.history.includes(active.revision)) throw Error('현재 설치본의 후속 커밋이 아닙니다. downgrade 및 다른 Git 이력의 설치를 거부합니다.');
+    }
     const env = { ...process.env, PATH: `${path.dirname(process.execPath)}:${path.join(os.homedir(), '.local/bin')}:${process.env.PATH}` };
     if (!fs.existsSync(target)) {
       checked('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: source, env });
       checked(process.execPath, ['--input-type=module', '-e', "import fs from 'node:fs'; const p=JSON.parse(fs.readFileSync('package.json')); for(const name of ['node-pty','@xterm/headless']) if(p.dependencies?.[name]) await import(name);"], { cwd: source, env });
       checked('tmux', ['-V'], { env });
-      fs.writeFileSync(path.join(source, 'release.json'), JSON.stringify({ revision, sha256, root, node: process.execPath }), { mode: 0o600 });
+      fs.writeFileSync(path.join(source, 'release.json'), JSON.stringify({ revision, sha256, root, node: process.execPath, installerVersion: 1 }), { mode: 0o600 });
       const npmBin = path.join(checked('npm', ['prefix', '--global'], { env }).trim(), 'bin');
       const prefix = `${path.dirname(process.execPath)}:${path.join(os.homedir(), '.local/bin')}:${npmBin}`;
       fs.writeFileSync(path.join(source, 'waga'), `#!/bin/sh\nPATH=${quote(prefix)}:"$PATH"\nexport PATH\n${shellCommand(process.execPath, [path.join(target, 'src/cli.mjs')])} "$@"\n`, { mode: 0o700 });
@@ -95,9 +106,9 @@ export function installRelease({ archive, sha256, revision, root = path.join(os.
   });
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && fs.existsSync(process.argv[1]) && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const [archive, sha256, revision] = process.argv.slice(2);
-    process.stdout.write(`${JSON.stringify(installRelease({ archive, sha256, revision }))}\n`);
+    const [archive, sha256, revision, source = sourceDirectory] = process.argv.slice(2);
+    process.stdout.write(`${JSON.stringify(installRelease({ archive, sha256, revision, source }))}\n`);
   } catch (error) { process.stderr.write(`${error.message}\n`); process.exitCode = 1; }
 }
