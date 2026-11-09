@@ -37,7 +37,7 @@
     "@xterm/xterm": "6.0.0",
     "node-pty": "1.1.0",
     "sortablejs": "1.15.7",
-    "ws": "^8.18.3"
+    "ws": "^8.22.1"
   },
   "allowScripts": {
     "node-pty@1.1.0": true
