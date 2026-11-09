@@ -43,6 +43,19 @@ test("shellCommand safely quotes command arguments", () => {
   assert.equal(shellCommand("node", ["/tmp/a b.mjs", "it's", "$HOME"]), "exec 'node' '/tmp/a b.mjs' 'it'\\''s' '$HOME'");
 });
 
+test('remote management cannot open another SSH window or change existing tmux views', async () => {
+  const calls = [];
+  const workspace = new TmuxWorkspace({
+    env: { WAGA_TMUX_SESSION: 'waga-proof-remote', WAGA_REMOTE_HOST: 'Oracle' },
+    run: async args => { calls.push(args); return { code: 0, stdout: args[0] === 'new-window' ? '@7\n' : '', stderr: '' }; },
+  });
+  const host = { id: 'Ubuntu', name: 'Ubuntu' };
+  for (const sessionId of [undefined, 'codex:proof']) {
+    await assert.rejects(workspace.openRemoteHost(host, { command: 'ssh', args: ['proof-host'], sessionId }), { code: 'NESTED_REMOTE_CONNECTION' });
+  }
+  assert.deepEqual(calls, []);
+});
+
 test("enter uses switch-client instead of nesting when already inside tmux", async () => {
   const calls = [];
   const run = async (args) => {

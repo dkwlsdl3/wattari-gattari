@@ -848,7 +848,7 @@ export async function runOverview({
   let globalSearching = false;
   let updating = false, reloading = false;
   const runningRelease = readRelease();
-  const hostRow = globalDock || remoteHost ? [{ type: "hosts", key: "global:hosts", name: remoteHost ? "← 전체 PC 통합 Dock · Tab / Alt+G" : integrated ? "PC 연결 설정" : "↑ PC 목록으로" }] : [];
+  const hostRow = globalDock || remoteHost ? [{ type: "hosts", key: "global:hosts", name: remoteHost ? "← 전체 PC 통합 Dock · Tab / Alt+P / Alt+G" : integrated ? "PC 연결 설정" : "↑ PC 목록으로" }] : [];
   const sessionKey = session => session.hostId ? `remote:${session.hostId}:${session.id}` : session.id;
   const tree = sessions => {
     if (!integrated) {
@@ -1848,6 +1848,7 @@ export async function runOverview({
       notice = '순서 변경은 폴더 트리 보기에서 실행해 주세요.'; render(); return;
     }
     if (key.meta && key.name === 'p' && globalDock) {
+      if (remoteHost) { leave(); return; }
       globalVisible = true; notice = ''; render(); void refreshHosts(); return;
     }
     if (owner && !owner.local && key.meta && ['n', 'd'].includes(key.name)) {

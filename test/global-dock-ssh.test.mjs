@@ -240,8 +240,10 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   assert.notEqual(await call(remoteSocket, 'display-message', '-p', '-t', `${renameView}:overview`, '#{pane_pid}'), renameOverviewPid);
   await until(() => JSON.parse(fs.readFileSync(path.join(root, 'remote-view.json'), 'utf8')).renameSessionId, '', 'reload clears the consumed rename request');
   assert.equal(await call(remoteSocket, 'display-message', '-p', '-t', nativeTarget, '#{pane_pid}'), nativePid);
-  client.write('\x1bg');
-  await until(() => call(localSocket, 'display-message', '-p', '-t', view('local'), '#{window_name}'), 'overview', 'return to the original status view after renaming');
+  client.write('\x1bp');
+  await until(() => call(localSocket, 'display-message', '-p', '-t', view('local'), '#{window_name}'), 'overview', 'Alt+P returns from remote management to the originating status view');
+  assert.equal(await call(remoteSocket, 'has-session', '-t', renameView).then(() => true, () => false), false, 'the remote management view closes instead of opening another SSH connection');
+  assert.equal(await call(remoteSocket, 'display-message', '-p', '-t', nativeTarget, '#{pane_pid}'), nativePid, 'Alt+P leaves the native process alive');
   client.write('\x1bv'); // Restore the tree for the following project-header creation check.
   client.write('\x1b[A\x1b[A'); // Selected session -> its project -> the remote PC header.
   const beforeCreateView = view('remote');

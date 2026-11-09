@@ -375,6 +375,58 @@ test("PC switching preserves local session selection and global search never bec
   assert.deepEqual(native, [f.session.id, f.session.id]);
 });
 
+test('remote PC shortcut leaves the management Dock without querying or opening another PC', async t => {
+  let leaves = 0, queries = 0, opened = 0;
+  const globalDock = new GlobalDock(config, { query: async () => { queries++; return { sessions: [], warnings: [] }; } });
+  const f = dockFixture(t, { remoteHost: 'Home', globalDock, workspace: {
+    leave: async () => { leaves++; return { closeOverview: true }; },
+    openRemoteHost: async () => { opened++; },
+  } });
+  await setImmediate();
+  await f.press('p', '', { meta: true });
+  assert.equal(leaves, 1);
+  assert.equal(queries, 0);
+  assert.equal(opened, 0);
+  assert.equal(await f.running, 0);
+});
+
+test('independently started Docks keep outbound session access in both directions', async t => {
+  const session = { id: 'codex:proof', provider: 'codex', name: 'Proof', cwd: '/tmp/waga-proof-global', status: 'idle' };
+  for (const [current, target] of [['Ubuntu', 'Oracle'], ['Oracle', 'Ubuntu']]) {
+    const topology = { version: 1, local: { id: current, name: current }, hosts: [{ id: target, name: target, ssh: 'proof-host', command: 'waga' }] };
+    const opened = [];
+    const globalDock = new GlobalDock(topology, { query: async () => ({ sessions: [session], warnings: [], openSession: true }) });
+    const f = dockFixture(t, { hosts: topology, globalDock, remoteHost: null,
+      workspace: { openRemoteHost: async (host, spec) => { opened.push({ host: host.id, sessionId: spec.sessionId, force: spec.force }); } } });
+    await setImmediate();
+    await f.press('tab'); await f.press('tab');
+    await f.press('return'); await f.press('f4');
+    assert.deepEqual(opened, [
+      { host: target, sessionId: session.id, force: false },
+      { host: target, sessionId: session.id, force: true },
+    ]);
+  }
+});
+
+test('remote creation keeps Alt+P folder selection and Tab provider selection', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'waga-proof-remote-create-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  let leaves = 0;
+  const f = dockFixture(t, { remoteHost: 'Home', initialCreate: { provider: 'codex', cwd: root, skipRouting: true },
+    workspace: { leave: async () => { leaves++; return { closeOverview: true }; } } });
+  await setImmediate();
+  await f.press('p', '', { meta: true });
+  assert.match(f.frame(), /현재 폴더 선택/);
+  assert.equal(leaves, 0);
+  await f.press('escape');
+  await f.press('tab');
+  assert.match(f.frame(), /새 세션 생성\s+◆\s+CLAUDE/);
+  assert.equal(leaves, 0);
+  await f.press('escape');
+  assert.equal(leaves, 1);
+  assert.equal(await f.running, 0);
+});
+
 test("remote PC back exits only that Dock view without dispatching a native session locally", async t => {
   let leaves = 0;
   const f = dockFixture(t, { remoteHost: "Home", workspace: { leave: async () => { leaves++; return { closeOverview: true }; } }, commandFor: () => { throw Error("must not launch"); } });

@@ -186,6 +186,9 @@ export class TmuxWorkspace {
   }
 
   async openRemoteHost(host, commandSpec) {
+    if (this.#env.WAGA_REMOTE_HOST) {
+      throw Object.assign(new Error('원격 관리 화면에서는 다른 PC로 다시 접속할 수 없습니다. Alt+G로 시작 PC의 Dock에 돌아가 전환해 주세요.'), { code: 'NESTED_REMOTE_CONNECTION' });
+    }
     const sessionName = await this.#currentSessionName();
     const key = commandSpec.sessionId ? JSON.stringify([host.id, commandSpec.sessionId]) : host.id;
     const windows = await this.#call(["list-windows", "-t", sessionName, "-F", "#{window_id}\t#{?@waga_remote_key,#{@waga_remote_key},#{@waga_remote_host}}\t#{pane_dead}"]);
