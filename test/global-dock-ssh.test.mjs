@@ -144,7 +144,8 @@ test("real SSH and nested tmux open a remote Dock, route Alt+G and preserve its 
   client.onData(data => terminal.write(data));
   await until(() => Boolean(view("local")), true, "local Dock starts");
   await until(() => fs.existsSync(path.join(root, 'remote-summary.json')), true, 'integrated Dock discovers remote sessions');
-  client.write("\t\t\r"); // All PCs -> local PC -> remote PC -> exact session.
+  // PC settings Enter selects the remote tab; Tab still cycles All -> local -> remote.
+  client.write("\x1bp\x1b[B\r\t\t\t\r");
   await until(() => Boolean(view("remote")), true, "remote Dock starts through SSH");
   const firstView = view("remote");
   const nativeTarget = retainedSessionName(session.id);

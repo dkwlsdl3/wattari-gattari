@@ -577,7 +577,7 @@ export function buildGlobalDockFrame({ rows, selectedId, currentHost, query = ""
     line(`${connection.name} · SSH 계정 (처음 한 번만 저장)`, THEME.primary);
     lines.push(`  ${editorLine(connection.value, connection.cursor, usableWidth)}`);
   }
-  line(connection ? 'Enter 연결 · Esc 취소 · Ctrl+U 지우기' : "↑↓ 선택   Enter PC 열기   u 업데이트 · U 전체   / 검색   Esc 복귀   Alt+R 갱신", THEME.primary);
+  line(connection ? 'Enter 연결 · Esc 취소 · Ctrl+U 지우기' : "↑↓ 선택   Enter PC 선택   u 업데이트 · U 전체   / 검색   Esc 복귀   Alt+R 갱신", THEME.primary);
   line(searching || query ? `PC 검색: ${query}` : notice);
   return lines.slice(0, height).join("\n");
 }
@@ -1007,6 +1007,17 @@ export async function runOverview({
     const sessionIndex = nodes.findIndex((node) => node.type === "session");
     selected = sessionIndex >= 0 ? sessionIndex : Math.max(0, nodes.findIndex(node => node.type === 'host'));
     selectedKey = nodes[selected]?.key ?? null;
+  };
+  const selectPcTab = id => {
+    const fromPcRow = globalVisible && selectedKey === 'global:hosts';
+    pcSelections.set(pcFilter, { key: fromPcRow ? lastContentKey : selectedKey, offset: fromPcRow ? lastContentOffset : previewOutputOffset });
+    pcFilter = id;
+    globalVisible = false;
+    const saved = pcSelections.get(pcFilter);
+    selectedKey = saved?.key ?? null;
+    restoredOffset = saved?.offset ?? 0;
+    if (!selectedKey) selectFirstSession();
+    else reconcileSelection(visibleNodes());
   };
   const render = (animationFrame = false) => {
     if (closed || nativeOpen) return;
@@ -1595,7 +1606,7 @@ export async function runOverview({
           void globalDock.connect(edit.id, edit.value)
             .then(async host => {
               hostConnection = null; notice = 'PC를 등록했습니다.';
-              if (integrated) { pcFilter = host.id; globalVisible = false; selectedKey = null; selectFirstSession(); }
+              if (integrated) selectPcTab(host.id);
               else await openHost(host);
             })
             .catch(error => { notice = error.stderr?.trim() || error.message; })
@@ -1647,8 +1658,12 @@ export async function runOverview({
       } else if (key.name === "return") {
         const host = rows[index];
         if (!host) return;
-        if (host.local) returnToLocal();
-        else if (host.discovered) { hostConnection = { id: host.id, name: host.name, value: '', cursor: 0 }; notice = '접속할 PC의 계정명을 입력해 주세요.'; }
+        if (host.discovered) { hostConnection = { id: host.id, name: host.name, value: '', cursor: 0 }; notice = '접속할 PC의 계정명을 입력해 주세요.'; }
+        else if (integrated) {
+          if (connectedHosts().some(row => row.id === host.id)) { notice = ''; selectPcTab(host.id); }
+          else notice = '이 PC의 목록을 조회할 수 없습니다. 연결 상태를 확인하고 Alt+R로 갱신해 주세요.';
+        }
+        else if (host.local) returnToLocal();
         else void openHost(host);
       }
       render();
@@ -1896,12 +1911,8 @@ export async function runOverview({
         provider = provider === null ? 'codex' : provider === 'codex' ? 'claude' : null;
         selectFirstSession();
       } else if (integrated) {
-        pcSelections.set(pcFilter, { key: selectedKey, offset: previewOutputOffset });
         const ids = [null, ...connectedHosts().map(host => host.id)];
-        pcFilter = ids[(ids.indexOf(pcFilter) + 1) % ids.length];
-        const saved = pcSelections.get(pcFilter);
-        selectedKey = saved?.key ?? null; restoredOffset = saved?.offset ?? 0;
-        if (!selectedKey) selectFirstSession();
+        selectPcTab(ids[(ids.indexOf(pcFilter) + 1) % ids.length]);
       } else if (remoteHost) {
         leave(); return;
       }

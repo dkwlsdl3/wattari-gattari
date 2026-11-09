@@ -127,6 +127,41 @@ test('startup combines PCs and Tab and Shift+Tab independently wrap PC and provi
   for (const session of [...local, ...remote]) assert.match(f.frame(), new RegExp(session.name));
 });
 
+test('PC settings Enter after an update selects a unified PC tab and preserves Tab navigation and selections', async t => {
+  const local = ['one', 'two'].map(id => ({ id: `codex:${id}`, provider: 'codex', cwd: '/work/project', name: `local-${id}`, status: 'idle' }));
+  const remote = local.map(session => ({ ...session, name: `remote-${session.id}` }));
+  const native = [], opened = [], updated = [];
+  const dock = new GlobalDock(config, { query: async () => ({ sessions: remote, warnings: [], openSession: true }) });
+  const f = dockFixture(t, { globalDock: dock,
+    bridge: { discover: async () => ({ sessions: local, warnings: [] }) },
+    commandFor: target => { native.push(target.id); return {}; },
+    workspace: { focusOrOpen: async () => {}, openRemoteHost: async (host, spec) => { opened.push({ host: host.id, sessionId: spec.sessionId }); } },
+    hostUpdater: async targets => { updated.push(targets.map(host => host.id)); return []; },
+  });
+  await setImmediate();
+  await f.press('v', '', { meta: true });
+  await f.press('tab'); await f.press('down'); // Keep the second local session selected.
+  await f.press('tab', '', { shift: true }); await f.press('down'); // Codex filter, second session again.
+  await f.press('p', '', { meta: true }); await f.press('down');
+  await f.press('u', 'u'); await f.press('return');
+  assert.deepEqual(updated, [['home']]);
+  assert.deepEqual(opened, [], 'choosing a PC must not start an SSH management Dock');
+  assert.match(f.frame(), /\[Home\]/); assert.match(f.frame(), /제공자: CODEX/);
+  assert.doesNotMatch(f.frame(), /WAGA GLOBAL · PC 선택|local-one/);
+  await f.press('down'); // Second remote session.
+  await f.press('tab');
+  assert.match(f.frame(), /\[전체 PC\]/);
+  await f.press('tab'); await f.press('return');
+  assert.deepEqual(native, ['codex:two'], 'Tab restores the previous local selection');
+  await f.press('tab'); await f.press('return');
+  assert.deepEqual(opened, [{ host: 'home', sessionId: 'codex:two' }], 'only a session Enter starts SSH with its exact target');
+  await f.press('p', '', { meta: true }); await f.press('up'); await f.press('return');
+  assert.match(f.frame(), /\[Work\]/);
+  assert.doesNotMatch(f.frame(), /remote-codex/);
+  await f.press('return');
+  assert.deepEqual(native, ['codex:two', 'codex:two'], 'choosing this PC restores its tab and session');
+});
+
 test('status mode retains host identity, filters and native Enter/F4 ownership', async t => {
   const session = { id: 'codex:same-canonical-id', provider: 'codex', cwd: '/same/project', name: 'Shared', status: 'idle' };
   const local = [], remote = [];
@@ -302,6 +337,9 @@ test('automatic discovery failure preserves known PCs, and offline candidates ne
   await f.press('escape'); unavailable = true; await dock.refresh(); await f.press('tab');
   assert.doesNotMatch(f.frame(), /Home|\bOff\b/);
   await f.press('p', '', { meta: true }); assert.match(f.frame(), /Home/); assert.match(f.frame(), /\bOff\b/);
+  await f.press('down'); await f.press('return');
+  assert.match(f.frame(), /WAGA GLOBAL · PC 선택/);
+  assert.match(f.frame(), /이 PC의 목록을 조회할 수 없습니다/);
 });
 
 test('discovered PCs require an explicit account and repeated Enter cannot submit a second connection', async t => {
@@ -329,9 +367,10 @@ test("PC switching preserves local session selection and global search never bec
   assert.deepEqual(native, [f.session.id]);
   await f.press("up"); await f.press("up"); await f.press("up"); await f.press("return");
   await f.press("/", "/"); await f.press("h", "home"); await f.press("return"); await f.press("return");
-  assert.deepEqual(opened, ["home"]);
+  assert.deepEqual(opened, []);
+  assert.match(f.frame(), /\[Home\]/);
   assert.deepEqual(native, [f.session.id]);
-  await f.press("escape"); await f.press("escape"); // Clear host filter, then return to local selection.
+  await f.press('tab'); // Home -> All, restoring the previous local session.
   await f.press("return");
   assert.deepEqual(native, [f.session.id, f.session.id]);
 });
@@ -348,13 +387,16 @@ test("remote PC back exits only that Dock view without dispatching a native sess
 });
 
 test("late host queries and resize never paint over a direct SSH terminal", async t => {
-  let finishQuery, finishConnection, writes = 0;
-  const globalDock = new GlobalDock(config, { query: () => new Promise(resolve => { finishQuery = resolve; }) });
+  let finishQuery, finishConnection, writes = 0, queries = 0;
+  const summary = { sessions: [{ id: 'codex:remote', provider: 'codex', name: 'Remote', cwd: '/remote' }], warnings: [], openSession: true };
+  const globalDock = new GlobalDock(config, { query: () => queries++ === 0 ? Promise.resolve(summary) : new Promise(resolve => { finishQuery = resolve; }) });
   const output = Object.assign(new EventEmitter(), { isTTY: true, columns: 120, rows: 30, write() { writes++; } });
   const f = dockFixture(t, { globalDock, outputStream: output, workspace: { openRemoteHost: () => new Promise(resolve => { finishConnection = resolve; }) } });
-  await setImmediate(); await f.press("return"); await f.press("down"); await f.press("return");
+  await setImmediate(); await f.press('tab'); await f.press('tab');
+  const refreshing = globalDock.refresh();
+  await f.press('return'); // Enter the remote native session, not a second PC list.
   const before = writes;
-  output.emit("resize"); finishQuery({ sessions: [], warnings: [] }); await setImmediate();
+  output.emit("resize"); finishQuery(summary); await refreshing; await setImmediate();
   assert.equal(writes, before, "the remote terminal owns the output while SSH is active");
   finishConnection({ code: 0 }); await setImmediate();
   assert.ok(writes > before, "Global Dock renders again after SSH returns the terminal");

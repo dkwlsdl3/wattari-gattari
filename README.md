@@ -26,6 +26,7 @@ from one local dock or browser workspace. Native providers own session execution
 Enter opens the selected native session on its owning PC; `Alt+G` returns to the originating Dock.
 PC registration order stays fixed. Normal tabs show connected PCs and hide folders with no sessions.
 **Alt+P** opens connection settings, including disconnected PCs, errors and their last successful summary.
+Enter on a connected PC selects its tab in the unified Dock; Tab continues cycling PC tabs.
 On a remote PC header or project, **Alt+D** directly opens its new-session composer with provider defaults;
 **Alt+N** opens it with routing. A PC header uses the remote default directory; a project/session uses its
 remote working directory. Escape cancels the remote composer and returns to the unified Dock.
