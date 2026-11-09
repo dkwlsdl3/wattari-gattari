@@ -1231,7 +1231,7 @@ test("overview navigation stops at tree boundaries instead of wrapping", async (
   assert.equal(await running, 0);
 });
 
-test("provider tabs clear stale rows and select the first matching session", async () => {
+test("provider tabs select the first matching session", async () => {
   const input = ttyInput();
   const output = capturedOutput();
   const bridge = {
@@ -1246,13 +1246,11 @@ test("provider tabs clear stale rows and select the first matching session", asy
 
   input.emit("keypress", "", { name: "tab", shift: true });
   const codexFrame = output.writes.at(-1);
-  assert.match(codexFrame, /^\x1b\[H\x1b\[J/);
   assert.doesNotMatch(plain(codexFrame), /CLAUDE/);
   assert.equal(selectedSessionName(output), "API");
 
   input.emit("keypress", "", { name: "tab", shift: true });
   const claudeFrame = output.writes.at(-1);
-  assert.match(claudeFrame, /^\x1b\[H\x1b\[J/);
   assert.doesNotMatch(plain(claudeFrame), /CODEX/);
   assert.equal(selectedSessionName(output), "UI");
 

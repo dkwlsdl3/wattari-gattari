@@ -1019,6 +1019,21 @@ export async function runOverview({
     if (!selectedKey) selectFirstSession();
     else reconcileSelection(visibleNodes());
   };
+  let paintedLines = [];
+  const paintFrame = (frame, incremental = false) => {
+    // These rows come from our frame builders, not from parsing terminal output.
+    const lines = frame.split('\n');
+    let update;
+    if (incremental && lines.length === paintedLines.length) {
+      update = lines.map((line, row) => line === paintedLines[row] ? ''
+        : `${ESC}${row + 1};1H${RESET}${line}${RESET}${ESC}K`).join('');
+    } else {
+      // Overwrite before clearing leftovers; full redraws also restore a native return.
+      update = `${ESC}H${RESET}${frame.replaceAll('\n', `${RESET}${ESC}K\n`)}${RESET}${ESC}J`;
+    }
+    paintedLines = lines;
+    if (update) outputStream.write(`${ESC}?2026h${update}${ESC}?2026l`);
+  };
   const render = (animationFrame = false) => {
     if (closed || nativeOpen) return;
     if (!animationFrame) {
@@ -1040,8 +1055,8 @@ export async function runOverview({
       previewReader.select(null);
       const rows = visibleHosts();
       if (!rows.some(row => row.id === globalDock.selectedId) && rows.length) globalDock.selectedId = rows[0].id;
-      outputStream.write(`${ESC}H${ESC}J${buildGlobalDockFrame({ rows, selectedId: globalDock.selectedId, currentHost: globalDock.config.local.name,
-        query: globalQuery, searching: globalSearching, width: outputStream.columns || 100, height: outputStream.rows || 30, notice: notice || globalDock.discoveryError, connection: hostConnection })}`);
+      paintFrame(buildGlobalDockFrame({ rows, selectedId: globalDock.selectedId, currentHost: globalDock.config.local.name,
+        query: globalQuery, searching: globalSearching, width: outputStream.columns || 100, height: outputStream.rows || 30, notice: notice || globalDock.discoveryError, connection: hostConnection }));
       return;
     }
     const sessions = visibleSessions();
@@ -1058,7 +1073,7 @@ export async function runOverview({
       if (nextPreviewSessionKey) lastContentOffset = previewOutputOffset;
     }
     if (!animationFrame) previewReader.select(typeof bridge.preview === "function" && !previewSession?.hostId ? previewSession : null);
-    outputStream.write(`${ESC}H${ESC}J${buildOverviewFrame({
+    paintFrame(buildOverviewFrame({
       sessions,
       viewMode,
       now: now(), statusChanges, recentChange,
@@ -1088,7 +1103,7 @@ export async function runOverview({
       settingsPanel,
       preview: previewReader.snapshot(previewSession),
       previewOutputOffset,
-    })}`);
+    }), animationFrame);
   };
 
   const scrollPreview = (direction) => {

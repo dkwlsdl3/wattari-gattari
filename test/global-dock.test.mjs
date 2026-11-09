@@ -9,6 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from 'node:timers/promises';
 import { stripVTControlCharacters } from 'node:util';
+import headless from '@xterm/headless';
 
 test("independent failures preserve registration order, ID selection and last good summary", async () => {
   const config = { local: { id: "here", name: "Same name" }, hosts: [{ id: "b", name: "Same name" }, { id: "a", name: "Same name" }] };
@@ -81,6 +82,81 @@ function dockFixture(t, options = {}) {
   t.after(async () => { input.emit("end"); await running; });
   return { input, session, running, frame: () => frame, press: async (name, text = "", extra = {}) => { input.emit("keypress", text, { name, sequence: text, ...extra }); await setImmediate(); } };
 }
+
+function terminalOutput() {
+  const terminal = new headless.Terminal({ cols: 190, rows: 48, allowProposedApi: true, convertEol: true });
+  const writes = [];
+  const output = Object.assign(new EventEmitter(), { isTTY: true, columns: 190, rows: 48,
+    write(data) { writes.push(data); terminal.write(data); } });
+  return { terminal, output, writes,
+    flush: () => new Promise(resolve => terminal.write('\x1b[0m', resolve)),
+    frame: () => Array.from({ length: terminal.rows }, (_, row) => terminal.buffer.active.getLine(row).translateToString(true)).join('\n'),
+  };
+}
+
+test('working status animation updates changed rows without blanking or resending the whole Dock', async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const screen = terminalOutput();
+  let now = 0, queries = 0, clears = 0, starts = 0, ends = 0;
+  screen.terminal.parser.registerCsiHandler({ final: 'J' }, params => {
+    if (params[0] === 2 || (params[0] ?? 0) === 0 && screen.terminal.buffer.active.cursorY === 0 && screen.terminal.buffer.active.cursorX === 0) clears++;
+    return false;
+  });
+  screen.terminal.parser.registerCsiHandler({ prefix: '?', final: 'h' }, params => { if (params.includes(2026)) starts++; return false; });
+  screen.terminal.parser.registerCsiHandler({ prefix: '?', final: 'l' }, params => { if (params.includes(2026)) ends++; return false; });
+  const session = { id: 'codex:working', provider: 'codex', cwd: '/tmp/waga-proof-render', name: 'Local animation', status: 'working' };
+  const globalDock = new GlobalDock(config, { query: async () => { queries++; return { sessions: [{ ...session, name: 'Remote animation' }], warnings: [] }; } });
+  const f = dockFixture(t, { globalDock, now: () => now, outputStream: screen.output, workspace: {},
+    bridge: { discover: async () => { queries++; return { sessions: [session], warnings: [] }; } } });
+  t.after(async () => { await screen.flush(); screen.terminal.dispose(); });
+  await setImmediate(); await f.press('v', '', { meta: true }); await screen.flush();
+  const before = screen.frame();
+  const baseline = { clears, starts, ends, queries, writes: screen.writes.length, fullBytes: Buffer.byteLength(screen.writes.at(-1)) };
+  now = 120; t.mock.timers.tick(120); await setImmediate(); await screen.flush();
+  const after = screen.frame();
+  const bytes = screen.writes.slice(baseline.writes).reduce((total, data) => total + Buffer.byteLength(data), 0);
+  assert.notEqual(after, before, 'the working indicators still animate');
+  assert.equal(clears, baseline.clears, 'animation must not expose a blank screen');
+  assert.equal(starts - baseline.starts, 1);
+  assert.equal(ends - baseline.ends, 1);
+  assert.ok(bytes < baseline.fullBytes / 2, 'an indicator update must not resend unrelated rows');
+  assert.equal(queries, baseline.queries, 'animation must not poll providers or PCs');
+  t.diagnostic(JSON.stringify({ initialFrameBytes: baseline.fullBytes, animationBytes: bytes, screenClears: clears - baseline.clears }));
+});
+
+test('Dock redraws clear old rows across provider filters, PC settings, input, resizing and native return', async t => {
+  const screen = terminalOutput();
+  const session = { id: 'codex:render', provider: 'codex', cwd: '/tmp/waga-proof-render', name: 'Local preserved row', status: 'idle' };
+  const remote = { ...session, id: 'claude:render', provider: 'claude', name: 'Remote preserved row' };
+  const globalDock = new GlobalDock(config, { query: async () => ({ sessions: [remote], warnings: [], openSession: true }) });
+  const f = dockFixture(t, { globalDock, outputStream: screen.output, commandFor: () => ({}),
+    workspace: { focusOrOpen: async () => { screen.terminal.reset(); } },
+    bridge: { discover: async () => ({ sessions: [session], warnings: [] }) } });
+  t.after(async () => { await screen.flush(); screen.terminal.dispose(); });
+  await setImmediate(); await f.press('v', '', { meta: true }); await screen.flush();
+  assert.match(screen.frame(), /Local preserved row/); assert.match(screen.frame(), /Remote preserved row/);
+  await f.press('tab', '', { shift: true }); await screen.flush();
+  assert.match(screen.frame(), /Local preserved row/); assert.doesNotMatch(screen.frame(), /Remote preserved row/);
+  await f.press('tab', '', { shift: true }); await screen.flush();
+  assert.match(screen.frame(), /Remote preserved row/); assert.doesNotMatch(screen.frame(), /Local preserved row/);
+  await f.press('tab', '', { shift: true });
+  await f.press('p', '', { meta: true }); await screen.flush();
+  assert.match(screen.frame(), /WAGA GLOBAL/);
+  assert.doesNotMatch(screen.frame(), /Local preserved row|Remote preserved row/);
+  await f.press('escape'); await f.press('n', '', { meta: true }); await screen.flush();
+  assert.match(screen.frame(), /새 세션 생성/);
+  await f.press(undefined, 'waga-proof-prompt'); await f.press('escape'); await screen.flush();
+  assert.doesNotMatch(screen.frame(), /새 세션 생성|waga-proof-prompt/);
+  for (const [columns, rows] of [[80, 20], [190, 48]]) {
+    screen.terminal.resize(columns, rows); screen.output.columns = columns; screen.output.rows = rows;
+    screen.output.emit('resize'); await screen.flush();
+    assert.match(screen.frame(), /상태별/);
+    assert.match(screen.frame(), /Local preserved row/);
+  }
+  await f.press('tab'); await f.press('return'); await screen.flush();
+  assert.match(screen.frame(), /Local preserved row/);
+  assert.doesNotMatch(screen.frame(), /Remote preserved row/);
+});
 
 test('recent status changes include hidden PCs without confusing matching native IDs or filters', async t => {
   let now = 0, localStatus = 'working', remoteStatus = 'working';
