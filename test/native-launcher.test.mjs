@@ -10,7 +10,8 @@ test("native launcher delegates to provider-owned Agents TUIs", async () => {
   await openNativeAgents("claude", { cwd: "/tmp", launch });
   await openNativeAgents("codex", { cwd: "/tmp", launch });
   assert.deepEqual(calls[0].slice(0, 2), ["claude", ["agents", "--cwd", path.resolve("/tmp")]]);
-  assert.deepEqual(calls[1].slice(0, 2), ["codex", ["agents", "-C", path.resolve("/tmp")]]);
+  assert.deepEqual(calls[1].slice(0, 2), ["codex", ["agents"]]);
+  assert.deepEqual(calls[1][2], { cwd: path.resolve('/tmp') });
 });
 
 test("native Agents commands are reusable by retained tmux views", () => {
@@ -18,7 +19,7 @@ test("native Agents commands are reusable by retained tmux views", () => {
     command: "claude", args: ["agents", "--cwd", path.resolve("/tmp")], cwd: path.resolve("/tmp"),
   });
   assert.deepEqual(nativeAgentsCommand("codex", { cwd: "/work" }), {
-    command: "codex", args: ["agents", "-C", path.resolve("/work")], cwd: path.resolve("/work"),
+    command: "codex", args: ["agents"], cwd: path.resolve("/work"),
   });
 });
 
@@ -37,7 +38,7 @@ test("native session commands attach exact provider sessions", async () => {
   const codex = await nativeSessionCommand({ provider: "codex", nativeId: "thread-1", cwd: "/work" }, { codexProvider });
   assert.deepEqual({ ...codex, afterAttach: undefined }, {
     command: "codex",
-    args: ["resume", "thread-1", "--remote", "unix:///tmp/codex.sock", "-C", path.resolve("/work"),
+    args: ["resume", "thread-1", "--remote", "unix:///tmp/codex.sock",
       "-c", 'tui.terminal_title=["thread-id"]'],
     cwd: path.resolve("/work"),
     afterAttach: undefined,

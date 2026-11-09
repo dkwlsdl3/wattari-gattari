@@ -291,7 +291,9 @@ test("Alt+A source metadata opens one retained provider Agents view", async () =
   assert.deepEqual(await workspace.focusAgentsViewFromWindow("@2"), { reused: false, windowId: "@5" });
   assert.deepEqual(await workspace.focusAgentsViewFromWindow("@2"), { reused: true, windowId: "@5" });
   assert.equal(calls.filter((args) => args[0] === "new-window").length, 1);
-  assert.ok(calls.some((args) => args[0] === "new-window" && args.at(-1).includes("'codex' 'agents' '-C' '/work/project'")));
+  const opened = calls.find(args => args[0] === 'new-window');
+  assert.equal(opened[opened.indexOf('-c') + 1], '/work/project');
+  assert.ok(opened.at(-1).endsWith("'codex' 'agents'"));
 });
 
 test("closeSessionView removes only the window mapped to the archived session", async () => {

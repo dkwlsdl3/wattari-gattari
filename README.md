@@ -279,6 +279,7 @@ responsible for the screen. Desktop sessions appear only if exposed by
 After internal navigation with Claude's `←` or Codex's `/agents`, selecting a
 session in the dock returns to that session. See the [ADR](docs/adr/README.md)
 for view-reuse rules.
+Opening an existing session in Codex's native Agents view uses that session's saved working directory.
 
 - **Rename:** immediate for Codex; applied once on the next prompt for hook-enabled
   Claude sessions created by Waga. Without the hook, Claude uses a local alias;

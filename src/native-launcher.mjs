@@ -21,7 +21,8 @@ export function nativeAgentsCommand(provider, { cwd = process.cwd() } = {}) {
   const workspace = path.resolve(cwd);
   const command = provider === "claude" ? "claude" : provider === "codex" ? "codex" : null;
   if (!command) throw Object.assign(new Error(`Unknown provider: ${provider}`), { code: "PROVIDER_NOT_FOUND" });
-  const args = provider === "claude" ? ["agents", "--cwd", workspace] : ["agents", "-C", workspace];
+  // Codex -C also overrides historical sessions opened later from Agents.
+  const args = provider === "claude" ? ["agents", "--cwd", workspace] : ["agents"];
   return { command, args, cwd: workspace };
 }
 
@@ -53,7 +54,7 @@ export async function nativeSessionCommand(session, { codexProvider = new CodexP
   }
   return {
     command: "codex",
-    args: ["resume", session.nativeId, "--remote", `unix://${daemon.socketPath}`, "-C", cwd,
+    args: ["resume", session.nativeId, "--remote", `unix://${daemon.socketPath}`,
       ...(process.env.WAGA_REMOTE_HOST ? ['--no-alt-screen', '-c', 'check_for_update_on_startup=false'] : []),
       "-c", 'tui.terminal_title=["thread-id"]'],
     cwd,
